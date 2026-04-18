@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<Document uuid="fde993d2-dca1-4750-a569-d1cdb85ba05e">
+		<InternalInfo>
+			<xr:GeneratedType name="DocumentObject.Автоплатежи" category="Object">
+				<xr:TypeId>7a500b68-94e4-42fb-961c-ad0632518b4d</xr:TypeId>
+				<xr:ValueId>40243b8e-6221-4ea0-a81f-9fc23951124b</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentRef.Автоплатежи" category="Ref">
+				<xr:TypeId>d0fd865e-0f35-4337-8d75-e6e7170601e5</xr:TypeId>
+				<xr:ValueId>06d965c0-3883-4df4-87dc-888bcd8bfe88</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentSelection.Автоплатежи" category="Selection">
+				<xr:TypeId>b045dded-56cc-48ea-a743-1557acc7abaf</xr:TypeId>
+				<xr:ValueId>5ce90b9a-550a-4d3c-bf57-b812833a477c</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentList.Автоплатежи" category="List">
+				<xr:TypeId>77a6a399-0e71-4b01-bdc6-ed954251b314</xr:TypeId>
+				<xr:ValueId>1876b71d-6ac1-418c-a6a5-5d396867b95a</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentManager.Автоплатежи" category="Manager">
+				<xr:TypeId>86c7b1ef-f9eb-49ba-a6d1-029d00a36841</xr:TypeId>
+				<xr:ValueId>672830a1-b052-4d99-b3ca-ba2bc003df3a</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>Автоплатежи</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>dc767948-9f31-4b7c-93ee-ca2a2df9b93a</ExtendedConfigurationObject>
+			<RegisterRecords/>
+		</Properties>
+		<ChildObjects/>
+	</Document>
+</MetaDataObject>

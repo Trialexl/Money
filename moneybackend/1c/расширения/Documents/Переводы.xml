@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<Document uuid="2184aaab-4cad-4899-9973-e0e1696f7304">
+		<InternalInfo>
+			<xr:GeneratedType name="DocumentObject.Переводы" category="Object">
+				<xr:TypeId>cefc34c2-fe05-4c47-b619-9dff2ac5115a</xr:TypeId>
+				<xr:ValueId>9732e99f-47cf-4b51-b021-81955767db13</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentRef.Переводы" category="Ref">
+				<xr:TypeId>e8b2ce25-5972-47c5-8642-5b0132d20db9</xr:TypeId>
+				<xr:ValueId>5232a711-77e9-4d3d-8c2f-d1a460d8de8c</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentSelection.Переводы" category="Selection">
+				<xr:TypeId>0a4b2cdf-49b1-4922-8351-0dfc2b18d952</xr:TypeId>
+				<xr:ValueId>79d66ee9-4f96-4593-9ba7-a679dfe86c20</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentList.Переводы" category="List">
+				<xr:TypeId>02e4d16b-e817-453f-9c8d-11ee4a963b85</xr:TypeId>
+				<xr:ValueId>b8e42569-67c4-4983-8bd0-700246942087</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentManager.Переводы" category="Manager">
+				<xr:TypeId>5c80af89-d3ab-498c-9bb0-31e38b670611</xr:TypeId>
+				<xr:ValueId>951ddb76-2e4c-4e2e-830b-09e9a627c300</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>Переводы</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>411addfb-b56f-4277-82c6-55037c7edc8d</ExtendedConfigurationObject>
+			<RegisterRecords/>
+		</Properties>
+		<ChildObjects/>
+	</Document>
+</MetaDataObject>

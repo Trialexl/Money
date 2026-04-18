@@ -1,0 +1,120 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<InformationRegister uuid="2bc2f575-9102-4e51-9d50-db6471e29512">
+		<InternalInfo>
+			<xr:GeneratedType name="InformationRegisterRecord.DjСписокОбменаССайтом" category="Record">
+				<xr:TypeId>c1275837-a545-4731-9a97-2980feeaa1ed</xr:TypeId>
+				<xr:ValueId>f1901b30-acfa-40ec-9e10-e1f1455b0357</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterManager.DjСписокОбменаССайтом" category="Manager">
+				<xr:TypeId>f7ec9d55-9f60-4d19-afea-a173f4c2479e</xr:TypeId>
+				<xr:ValueId>fbe37b50-d68f-40c0-b51c-160844389996</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterSelection.DjСписокОбменаССайтом" category="Selection">
+				<xr:TypeId>1806eb2d-d16f-4eeb-b2fc-ab76b8c030f4</xr:TypeId>
+				<xr:ValueId>a3d5f1d7-3064-421d-b932-8a7b7d93bc6f</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterList.DjСписокОбменаССайтом" category="List">
+				<xr:TypeId>bb2cea39-e323-41e8-9ccb-8103e6299e79</xr:TypeId>
+				<xr:ValueId>dd5e2520-4228-4b67-ad7b-44cc94983ac1</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordSet.DjСписокОбменаССайтом" category="RecordSet">
+				<xr:TypeId>eacafe6c-b78f-42f9-9baf-5a2f5fd32dd2</xr:TypeId>
+				<xr:ValueId>5616076c-16f7-454a-b025-7805ab7a3ba1</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordKey.DjСписокОбменаССайтом" category="RecordKey">
+				<xr:TypeId>84d48f5f-cede-4e5f-bce9-f33c1004cb66</xr:TypeId>
+				<xr:ValueId>6d290ef4-ec6b-4a2a-ba12-15a9fa161f9a</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordManager.DjСписокОбменаССайтом" category="RecordManager">
+				<xr:TypeId>f316869a-f807-42dd-8fa4-c75554596c10</xr:TypeId>
+				<xr:ValueId>315446b7-7e7a-4b7b-af26-2f43d21d0b91</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>DjСписокОбменаССайтом</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Dj список обмена с сайтом</v8:content>
+				</v8:item>
+			</Synonym>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<EditType>InDialog</EditType>
+			<DefaultRecordForm/>
+			<DefaultListForm/>
+			<AuxiliaryRecordForm/>
+			<AuxiliaryListForm/>
+			<InformationRegisterPeriodicity>Nonperiodical</InformationRegisterPeriodicity>
+			<WriteMode>Independent</WriteMode>
+			<MainFilterOnPeriod>false</MainFilterOnPeriod>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>DontUse</FullTextSearch>
+			<EnableTotalsSliceFirst>false</EnableTotalsSliceFirst>
+			<EnableTotalsSliceLast>false</EnableTotalsSliceLast>
+			<RecordPresentation/>
+			<ExtendedRecordPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects>
+			<Dimension uuid="d498a8ba-421b-43ae-b30e-f13d81ba3096">
+				<Properties>
+					<Name>СсылкаОбъект</Name>
+					<Synonym>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Ссылка объект</v8:content>
+						</v8:item>
+					</Synonym>
+					<Comment/>
+					<Type>
+						<v8:Type>cfg:CatalogRef.Контрагенты</v8:Type>
+						<v8:Type>cfg:CatalogRef.Кошельки</v8:Type>
+						<v8:Type>cfg:DocumentRef.Расходы</v8:Type>
+						<v8:Type>cfg:CatalogRef.Проекты</v8:Type>
+						<v8:Type>cfg:DocumentRef.Приходы</v8:Type>
+						<v8:Type>cfg:CatalogRef.Статьи</v8:Type>
+						<v8:Type>cfg:DocumentRef.Автоплатежи</v8:Type>
+						<v8:Type>cfg:DocumentRef.Бюджет</v8:Type>
+						<v8:Type>cfg:DocumentRef.Переводы</v8:Type>
+					</Type>
+					<PasswordMode>false</PasswordMode>
+					<Format/>
+					<EditFormat/>
+					<ToolTip/>
+					<MarkNegatives>false</MarkNegatives>
+					<Mask/>
+					<MultiLine>false</MultiLine>
+					<ExtendedEdit>false</ExtendedEdit>
+					<MinValue xsi:nil="true"/>
+					<MaxValue xsi:nil="true"/>
+					<FillFromFillingValue>true</FillFromFillingValue>
+					<FillValue xsi:nil="true"/>
+					<FillChecking>DontCheck</FillChecking>
+					<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+					<ChoiceParameterLinks/>
+					<ChoiceParameters/>
+					<QuickChoice>Auto</QuickChoice>
+					<CreateOnInput>Auto</CreateOnInput>
+					<ChoiceForm/>
+					<LinkByType/>
+					<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+					<Master>true</Master>
+					<MainFilter>true</MainFilter>
+					<DenyIncompleteValues>false</DenyIncompleteValues>
+					<Indexing>DontIndex</Indexing>
+					<FullTextSearch>Use</FullTextSearch>
+					<DataHistory>Use</DataHistory>
+					<TypeReductionMode>TransformValues</TypeReductionMode>
+				</Properties>
+			</Dimension>
+		</ChildObjects>
+	</InformationRegister>
+</MetaDataObject>

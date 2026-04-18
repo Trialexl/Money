@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+ 
+@layer base {
+  :root {
+    --font-sans: "Avenir Next", "Segoe UI", sans-serif;
+    --font-mono: "SFMono-Regular", "Menlo", "Monaco", monospace;
+    --background: 36 45% 96%;
+    --foreground: 216 28% 13%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 216 28% 13%;
+ 
+    --popover: 0 0% 100%;
+    --popover-foreground: 216 28% 13%;
+ 
+    --primary: 187 74% 32%;
+    --primary-foreground: 0 0% 100%;
+ 
+    --secondary: 34 44% 90%;
+    --secondary-foreground: 216 28% 18%;
+ 
+    --muted: 33 34% 91%;
+    --muted-foreground: 214 12% 41%;
+ 
+    --accent: 22 85% 91%;
+    --accent-foreground: 216 28% 18%;
+ 
+    --destructive: 2 72% 54%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 32 30% 82%;
+    --input: 32 32% 84%;
+    --ring: 187 74% 32%;
+ 
+    --radius: 1.5rem;
+  }
+ 
+  .dark {
+    --background: 219 31% 10%;
+    --foreground: 36 43% 96%;
+ 
+    --card: 220 28% 14%;
+    --card-foreground: 36 43% 96%;
+ 
+    --popover: 220 28% 14%;
+    --popover-foreground: 36 43% 96%;
+ 
+    --primary: 180 63% 59%;
+    --primary-foreground: 216 28% 12%;
+ 
+    --secondary: 217 22% 20%;
+    --secondary-foreground: 36 43% 96%;
+ 
+    --muted: 218 22% 18%;
+    --muted-foreground: 216 12% 70%;
+ 
+    --accent: 220 24% 19%;
+    --accent-foreground: 36 43% 96%;
+ 
+    --destructive: 2 66% 58%;
+    --destructive-foreground: 0 0% 100%;
+ 
+    --border: 219 18% 24%;
+    --input: 219 18% 27%;
+    --ring: 180 63% 59%;
+  }
+}
+ 
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply h-full;
+  }
+  body {
+    @apply min-h-full bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at top left, rgba(245, 158, 11, 0.13), transparent 28%),
+      radial-gradient(circle at top right, rgba(20, 184, 166, 0.13), transparent 24%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0));
+    font-family: var(--font-sans), sans-serif;
+  }
+  .dark body {
+    background-image:
+      radial-gradient(circle at top left, rgba(45, 212, 191, 0.12), transparent 24%),
+      radial-gradient(circle at top right, rgba(251, 146, 60, 0.1), transparent 20%),
+      linear-gradient(180deg, rgba(15, 23, 42, 0.35), rgba(15, 23, 42, 0));
+  }
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-mono), monospace;
+  }
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea {
+    @apply border-input bg-background/80;
+  }
+  a {
+    @apply transition-colors;
+  }
+}

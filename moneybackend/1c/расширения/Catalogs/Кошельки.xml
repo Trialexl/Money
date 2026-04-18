@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<Catalog uuid="20edaa2c-9808-4e8d-987c-0ed24dd210fc">
+		<InternalInfo>
+			<xr:GeneratedType name="CatalogObject.Кошельки" category="Object">
+				<xr:TypeId>131a5140-1261-43d6-bcb2-60b9d7b0ba0e</xr:TypeId>
+				<xr:ValueId>74d2bb9c-83b9-499d-9720-85ba81217c97</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogRef.Кошельки" category="Ref">
+				<xr:TypeId>00fb99ec-3101-4d92-a2ab-24d21b72e3ca</xr:TypeId>
+				<xr:ValueId>88e689c8-846c-4c88-9797-68bb6bb26c23</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogSelection.Кошельки" category="Selection">
+				<xr:TypeId>ec09a90e-9793-412b-baa4-7f5801cc2b55</xr:TypeId>
+				<xr:ValueId>198ffd8e-3ba4-474e-9b5e-40bb640ea7ba</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogList.Кошельки" category="List">
+				<xr:TypeId>c076759d-c62e-4d5b-a9aa-89bd9c573b27</xr:TypeId>
+				<xr:ValueId>11d35b8d-f580-446c-af74-2c173c791721</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogManager.Кошельки" category="Manager">
+				<xr:TypeId>d4f5d882-c5ba-49f5-bcf3-2bd86c84d3d7</xr:TypeId>
+				<xr:ValueId>472fc459-2af8-436b-81db-f5ac64ddf00c</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>Кошельки</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>dd1d9877-eaf0-4a20-9161-27c2c73d7c67</ExtendedConfigurationObject>
+		</Properties>
+		<ChildObjects/>
+	</Catalog>
+</MetaDataObject>

@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.18">
+	<ConfigVersions>
+		<Metadata name="Catalog.Контрагенты" id="26fd9c11-aff1-4237-805e-746aabc40c66" configVersion="d650d74431b9adc55242e024bc9da29a2814810e"/>
+		<Metadata name="Catalog.Кошельки" id="20edaa2c-9808-4e8d-987c-0ed24dd210fc" configVersion="f32701ce8aa095868968b7ee9f40ec94f4c3ef46"/>
+		<Metadata name="Catalog.Проекты" id="b755f579-814c-4925-9690-7cb923434c30" configVersion="cbe65719ffa9a1e8e0d26e89c4c854924e63755b"/>
+		<Metadata name="Catalog.Статьи" id="d8fb2102-ecdb-4360-b4eb-26a83b9eb66e" configVersion="d09e840a7b44a710a24d298202607ec20551f4c5"/>
+		<Metadata name="CommonModule.Dj_Users" id="8c5cce73-ab61-40f3-8100-45c2e1f934a8" configVersion="d710cb24c766f360527e87f8d681fdf4878e3fcb"/>
+		<Metadata name="CommonModule.Dj_Users.Module" id="8c5cce73-ab61-40f3-8100-45c2e1f934a8.0" configVersion="31c2fe2607065553500ab7bbe19fdb5e1b0d44c4"/>
+		<Metadata name="CommonModule.DjОбмен" id="fb136cd7-aec9-4c61-ada2-a024f949d9ee" configVersion="9ab159d788b3ea9d5bd542061334f46ca1eac689"/>
+		<Metadata name="CommonModule.DjОбмен.Module" id="fb136cd7-aec9-4c61-ada2-a024f949d9ee.0" configVersion="b5b8b827775a8b4c96eb949651124348b3c43c26"/>
+		<Metadata name="Configuration.SyncDjango" id="8e9f7faf-72dc-447e-b7c9-c7bbd3046a69" configVersion="35a6948ecb9971bb7b9e76242765f72d8cf0d35c"/>
+		<Metadata name="DataProcessor.DjАдминистрирование" id="72134f6b-3682-4841-b54b-d62b5b5f98d0" configVersion="f050ceb3045e39ac1af7b5162333505925388d89">
+			<Metadata name="DataProcessor.DjАдминистрирование.Attribute.Контрагент" id="629bd29a-e1e4-4036-aaca-a7c874ee9fba"/>
+			<Metadata name="DataProcessor.DjАдминистрирование.Attribute.Пароль" id="fac24d5c-39a1-46c4-80e4-4d8c42106fcb"/>
+		</Metadata>
+		<Metadata name="DataProcessor.DjАдминистрирование.Form.Форма" id="fe98f581-f2b3-4c3b-80c2-dc5668d43635" configVersion="d70117e4fc9ff5a9556b4ab78c21087d23796678"/>
+		<Metadata name="DataProcessor.DjАдминистрирование.Form.Форма.Form" id="fe98f581-f2b3-4c3b-80c2-dc5668d43635.0" configVersion="146b28ecda5382079080842a829885664a3b4b87"/>
+		<Metadata name="Document.Автоплатежи" id="fde993d2-dca1-4750-a569-d1cdb85ba05e" configVersion="ffaabc65db92092257b63589753cd60e3fd0fcb8"/>
+		<Metadata name="Document.Бюджет" id="8a87b2ea-a298-42ff-8ca1-2b2a7a552026" configVersion="b2036eddacc7535efcce913d4a05263d2632efd4"/>
+		<Metadata name="Document.Переводы" id="2184aaab-4cad-4899-9973-e0e1696f7304" configVersion="0533e0ec0c8ac6b6a61fede1b65100da8bdfc11d"/>
+		<Metadata name="Document.Приходы" id="19c18797-175b-46cb-82e9-42bfbf66d0cc" configVersion="317b3263584882b36b10fb2cc92b551f2e43a4dc"/>
+		<Metadata name="Document.Расходы" id="6afd6440-4f39-47c1-9162-ee1197dec9e3" configVersion="ad59461e84eeb52498cafdb2060f2dd744bc7c69"/>
+		<Metadata name="Enum.ВидБюджета" id="db65d869-1c97-4272-b90b-9634484f3186" configVersion="a08fb81439a7c3df03ac979cb58a31926f228d62">
+			<Metadata name="Enum.ВидБюджета.EnumValue.Приход" id="01c92053-b7b0-4138-8c37-f009b6619915"/>
+			<Metadata name="Enum.ВидБюджета.EnumValue.Расход" id="d4104737-1c13-4238-9fc9-f1b8c82290e7"/>
+		</Metadata>
+		<Metadata name="Enum.ЮрЛицо" id="591a6e32-9df4-4a25-a60c-8032390359dd" configVersion="792c97ac340785712b4f2cab3774e54fd6e55778"/>
+		<Metadata name="EventSubscription.Dj_РегистрацияИзмененийПриЗаписи" id="5aec3f65-496f-40a2-a627-339e4a95ecd2" configVersion="4db94b0c9d8952e1d43a6b915a0e50c09e94f510"/>
+		<Metadata name="InformationRegister.DjНастройкиСоединения" id="bffd0f45-f844-4431-8b9e-5240c8525a65" configVersion="7369464739a56c74f27e70f79ac4f36ae0c830fa">
+			<Metadata name="InformationRegister.DjНастройкиСоединения.Dimension.Адрес" id="06ff7ca6-58d1-4d35-8f26-d2d4ba5c3e7f"/>
+			<Metadata name="InformationRegister.DjНастройкиСоединения.Dimension.Порт" id="48a429a0-b54a-478d-8393-ed0b6638ba2a"/>
+			<Metadata name="InformationRegister.DjНастройкиСоединения.Resource.Токен" id="48f9726f-d862-4f60-99bf-1520caf3b8b0"/>
+			<Metadata name="InformationRegister.DjНастройкиСоединения.Resource.ЛимитОчередиСинхронизации" id="a1d9a11d-5d5c-4e2d-9d3c-b91b7a1d02c1"/>
+			<Metadata name="InformationRegister.DjНастройкиСоединения.Dimension.Активно" id="5d397232-5de2-4226-9d53-af11ee50b8ac"/>
+		</Metadata>
+		<Metadata name="InformationRegister.DjСписокОбменаССайтом" id="2bc2f575-9102-4e51-9d50-db6471e29512" configVersion="bf35e80cc2f029b6c6ea711c5693511309f6bdad">
+			<Metadata name="InformationRegister.DjСписокОбменаССайтом.Dimension.СсылкаОбъект" id="d498a8ba-421b-43ae-b30e-f13d81ba3096"/>
+		</Metadata>
+		<Metadata name="InformationRegister.DjСписокОбменаССайтом.ManagerModule" id="2bc2f575-9102-4e51-9d50-db6471e29512.2" configVersion="385bef4900e482dadf74a2ce297a249ad3002e54"/>
+		<Metadata name="Language.Русский" id="652f2209-369a-47a0-8e0a-4498bd68c84c" configVersion="2cd1c60afcdc729f426f676b71891b67884daad6"/>
+		<Metadata name="Role.DjОсновнаяРоль" id="2f6a7a13-dba4-461b-89e5-fb381a3d0f25" configVersion="a7cbd6b093b3f6af66ac4c92c0cc979c08e2da5a"/>
+		<Metadata name="Subsystem.DjПодсистема" id="a42aad5a-4deb-43ab-9301-062ac722601c" configVersion="29d4f6129c7739369f4b6093efdeb1ca93e6e521"/>
+		<Metadata name="Subsystem.DjПодсистема.CommandInterface" id="a42aad5a-4deb-43ab-9301-062ac722601c.1" configVersion="275391cfa86f1d289ee29f98878a3858c72a2bf9"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

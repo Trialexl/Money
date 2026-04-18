@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<Enum uuid="db65d869-1c97-4272-b90b-9634484f3186">
+		<InternalInfo>
+			<xr:GeneratedType name="EnumRef.ВидБюджета" category="Ref">
+				<xr:TypeId>263a423d-06a9-4614-a0e7-29a804a1350f</xr:TypeId>
+				<xr:ValueId>b88f7a27-8774-49a1-b660-2e3b30702395</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumManager.ВидБюджета" category="Manager">
+				<xr:TypeId>40ba57e4-f5a4-4c60-a1de-1c6214acc845</xr:TypeId>
+				<xr:ValueId>969df0c6-f98f-4ec6-86b5-efb0c2ea7056</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumList.ВидБюджета" category="List">
+				<xr:TypeId>2c099cba-6c11-4234-9f66-c399abb97599</xr:TypeId>
+				<xr:ValueId>c7071cc9-d93e-46dc-b4e6-5d7e5f53f223</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>ВидБюджета</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>b4fcb53f-dd65-4ebc-ae2d-ed0178f845b6</ExtendedConfigurationObject>
+		</Properties>
+		<ChildObjects>
+			<EnumValue uuid="01c92053-b7b0-4138-8c37-f009b6619915">
+				<InternalInfo/>
+				<Properties>
+					<ObjectBelonging>Adopted</ObjectBelonging>
+					<Name>Приход</Name>
+					<Comment/>
+					<ExtendedConfigurationObject>4fde5a6e-2c46-4b68-b834-979a2da551cd</ExtendedConfigurationObject>
+				</Properties>
+			</EnumValue>
+			<EnumValue uuid="d4104737-1c13-4238-9fc9-f1b8c82290e7">
+				<InternalInfo/>
+				<Properties>
+					<ObjectBelonging>Adopted</ObjectBelonging>
+					<Name>Расход</Name>
+					<Comment/>
+					<ExtendedConfigurationObject>a66af853-0309-4747-805d-5b3b870ff0e0</ExtendedConfigurationObject>
+				</Properties>
+			</EnumValue>
+		</ChildObjects>
+	</Enum>
+</MetaDataObject>

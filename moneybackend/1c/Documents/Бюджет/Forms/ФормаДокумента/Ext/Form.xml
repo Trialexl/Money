@@ -1,0 +1,317 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<AutoTime>CurrentOrLast</AutoTime>
+	<UsePostingMode>Auto</UsePostingMode>
+	<RepostOnWrite>true</RepostOnWrite>
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+	<Events>
+		<Event name="OnCreateAtServer">ПриСозданииНаСервере</Event>
+	</Events>
+	<ChildItems>
+		<UsualGroup name="Шапка" id="52">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Шапка</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Шапка</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Representation>None</Representation>
+			<ShowTitle>false</ShowTitle>
+			<ExtendedTooltip name="ШапкаРасширеннаяПодсказка" id="53"/>
+			<ChildItems>
+				<UsualGroup name="ГруппаЛево" id="48">
+					<Title>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Группа лево</v8:content>
+						</v8:item>
+					</Title>
+					<ToolTip>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Группа лево</v8:content>
+						</v8:item>
+					</ToolTip>
+					<Group>Vertical</Group>
+					<Representation>None</Representation>
+					<ShowTitle>false</ShowTitle>
+					<ExtendedTooltip name="ГруппаЛевоРасширеннаяПодсказка" id="49"/>
+					<ChildItems>
+						<InputField name="ВидБюджета" id="69">
+							<DataPath>Объект.ВидБюджета</DataPath>
+							<ContextMenu name="ВидБюджетаКонтекстноеМеню" id="70"/>
+							<ExtendedTooltip name="ВидБюджетаРасширеннаяПодсказка" id="71"/>
+						</InputField>
+						<InputField name="Номер" id="1">
+							<DataPath>Объект.Number</DataPath>
+							<EditMode>EnterOnInput</EditMode>
+							<HorizontalStretch>true</HorizontalStretch>
+							<ContextMenu name="НомерКонтекстноеМеню" id="2"/>
+							<ExtendedTooltip name="НомерРасширеннаяПодсказка" id="3"/>
+						</InputField>
+						<InputField name="ДатаНачала" id="45">
+							<DataPath>Объект.ДатаНачала</DataPath>
+							<HorizontalStretch>true</HorizontalStretch>
+							<ContextMenu name="ДатаНачалаКонтекстноеМеню" id="46"/>
+							<ExtendedTooltip name="ДатаНачалаРасширеннаяПодсказка" id="47"/>
+						</InputField>
+						<InputField name="КолВоМесяцев1" id="40">
+							<DataPath>Объект.КолвоМесяцев</DataPath>
+							<HorizontalStretch>true</HorizontalStretch>
+							<ContextMenu name="КолВоМесяцев1КонтекстноеМеню" id="41"/>
+							<ExtendedTooltip name="КолВоМесяцев1РасширеннаяПодсказка" id="42"/>
+							<Events>
+								<Event name="OnChange">КолвоМесяцевПриИзменении</Event>
+							</Events>
+						</InputField>
+						<CheckBoxField name="БезОкругления" id="60">
+							<DataPath>БезОкругления</DataPath>
+							<CheckBoxType>Switcher</CheckBoxType>
+							<ContextMenu name="БезОкругленияКонтекстноеМеню" id="61"/>
+							<ExtendedTooltip name="БезОкругленияРасширеннаяПодсказка" id="62"/>
+						</CheckBoxField>
+						<InputField name="Сумма" id="13">
+							<DataPath>Объект.Сумма</DataPath>
+							<EditMode>EnterOnInput</EditMode>
+							<HorizontalStretch>true</HorizontalStretch>
+							<ContextMenu name="СуммаКонтекстноеМеню" id="14"/>
+							<ExtendedTooltip name="СуммаРасширеннаяПодсказка" id="15"/>
+							<Events>
+								<Event name="OnChange">СуммаПриИзменении</Event>
+							</Events>
+						</InputField>
+					</ChildItems>
+				</UsualGroup>
+				<UsualGroup name="ГруппаПраво" id="50">
+					<Title>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Группа право</v8:content>
+						</v8:item>
+					</Title>
+					<ToolTip>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Группа право</v8:content>
+						</v8:item>
+					</ToolTip>
+					<Group>Vertical</Group>
+					<Representation>None</Representation>
+					<ShowTitle>false</ShowTitle>
+					<ExtendedTooltip name="ГруппаПравоРасширеннаяПодсказка" id="51"/>
+					<ChildItems>
+						<InputField name="Дата" id="4">
+							<DataPath>Объект.Date</DataPath>
+							<EditMode>EnterOnInput</EditMode>
+							<ContextMenu name="ДатаКонтекстноеМеню" id="5"/>
+							<ExtendedTooltip name="ДатаРасширеннаяПодсказка" id="6"/>
+						</InputField>
+						<InputField name="Статья" id="7">
+							<DataPath>Объект.Статья</DataPath>
+							<EditMode>EnterOnInput</EditMode>
+							<ContextMenu name="СтатьяКонтекстноеМеню" id="8"/>
+							<ExtendedTooltip name="СтатьяРасширеннаяПодсказка" id="9"/>
+						</InputField>
+						<InputField name="Проект" id="66">
+							<DataPath>Объект.Проект</DataPath>
+							<ContextMenu name="ПроектКонтекстноеМеню" id="67"/>
+							<ExtendedTooltip name="ПроектРасширеннаяПодсказка" id="68"/>
+						</InputField>
+						<TrackBarField name="КолвоМесяцев" id="10">
+							<DataPath>Объект.КолвоМесяцев</DataPath>
+							<TitleLocation>None</TitleLocation>
+							<EditMode>EnterOnInput</EditMode>
+							<Height>1</Height>
+							<MinValue>1</MinValue>
+							<MaxValue>60</MaxValue>
+							<LargeStep>6</LargeStep>
+							<MarkingStep>1</MarkingStep>
+							<ContextMenu name="КолвоМесяцевКонтекстноеМеню" id="11"/>
+							<ExtendedTooltip name="КолвоМесяцевРасширеннаяПодсказка" id="12"/>
+							<Events>
+								<Event name="OnChange">КолвоМесяцевПриИзменении</Event>
+							</Events>
+						</TrackBarField>
+						<LabelField name="МесяцОкончания" id="57">
+							<DataPath>МесяцОкончания</DataPath>
+							<Title>
+								<v8:item>
+									<v8:lang>ru</v8:lang>
+									<v8:content>1</v8:content>
+								</v8:item>
+							</Title>
+							<TitleLocation>None</TitleLocation>
+							<Format>
+								<v8:item>
+									<v8:lang>ru</v8:lang>
+									<v8:content>ДФ=MMMM.yy</v8:content>
+								</v8:item>
+							</Format>
+							<ContextMenu name="МесяцОкончанияКонтекстноеМеню" id="58"/>
+							<ExtendedTooltip name="МесяцОкончанияРасширеннаяПодсказка" id="59"/>
+						</LabelField>
+						<InputField name="СуммаЕжемесячногоПлатежа" id="63">
+							<DataPath>СуммаЕжемесячногоПлатежа</DataPath>
+							<ContextMenu name="СуммаЕжемесячногоПлатежаКонтекстноеМеню" id="64"/>
+							<ExtendedTooltip name="СуммаЕжемесячногоПлатежаРасширеннаяПодсказка" id="65"/>
+						</InputField>
+					</ChildItems>
+				</UsualGroup>
+			</ChildItems>
+		</UsualGroup>
+		<UsualGroup name="Группа1" id="43">
+			<Representation>None</Representation>
+			<ShowTitle>false</ShowTitle>
+			<ExtendedTooltip name="Группа1РасширеннаяПодсказка" id="44"/>
+		</UsualGroup>
+		<Table name="График" id="16">
+			<Representation>List</Representation>
+			<Footer>true</Footer>
+			<AutoInsertNewRow>true</AutoInsertNewRow>
+			<EnableStartDrag>true</EnableStartDrag>
+			<EnableDrag>true</EnableDrag>
+			<DataPath>Объект.График</DataPath>
+			<RowFilter xsi:nil="true"/>
+			<ContextMenu name="ГрафикКонтекстноеМеню" id="17"/>
+			<AutoCommandBar name="ГрафикКоманднаяПанель" id="18">
+				<Autofill>false</Autofill>
+				<ChildItems>
+					<Button name="Заполнить" id="38">
+						<Type>CommandBarButton</Type>
+						<CommandName>Form.Command.Заполнить</CommandName>
+						<BackColor>web:HoneyDew</BackColor>
+						<ExtendedTooltip name="ЗаполнитьРасширеннаяПодсказка" id="39"/>
+					</Button>
+				</ChildItems>
+			</AutoCommandBar>
+			<ExtendedTooltip name="ГрафикРасширеннаяПодсказка" id="19"/>
+			<SearchStringAddition name="ГрафикСтрокаПоиска" id="20">
+				<AdditionSource>
+					<Item>График</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ГрафикСтрокаПоискаКонтекстноеМеню" id="21"/>
+				<ExtendedTooltip name="ГрафикСтрокаПоискаРасширеннаяПодсказка" id="22"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="ГрафикСостояниеПросмотра" id="23">
+				<AdditionSource>
+					<Item>График</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ГрафикСостояниеПросмотраКонтекстноеМеню" id="24"/>
+				<ExtendedTooltip name="ГрафикСостояниеПросмотраРасширеннаяПодсказка" id="25"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="ГрафикУправлениеПоиском" id="26">
+				<AdditionSource>
+					<Item>График</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="ГрафикУправлениеПоискомКонтекстноеМеню" id="27"/>
+				<ExtendedTooltip name="ГрафикУправлениеПоискомРасширеннаяПодсказка" id="28"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<LabelField name="ГрафикНомерСтроки" id="29">
+					<DataPath>Объект.График.LineNumber</DataPath>
+					<EditMode>EnterOnInput</EditMode>
+					<ContextMenu name="ГрафикНомерСтрокиКонтекстноеМеню" id="30"/>
+					<ExtendedTooltip name="ГрафикНомерСтрокиРасширеннаяПодсказка" id="31"/>
+				</LabelField>
+				<InputField name="ГрафикПериод" id="32">
+					<DataPath>Объект.График.Период</DataPath>
+					<EditMode>EnterOnInput</EditMode>
+					<FooterDataPath>Объект.График.RowsCount</FooterDataPath>
+					<ContextMenu name="ГрафикПериодКонтекстноеМеню" id="33"/>
+					<ExtendedTooltip name="ГрафикПериодРасширеннаяПодсказка" id="34"/>
+				</InputField>
+				<InputField name="ГрафикСумма" id="35">
+					<DataPath>Объект.График.Сумма</DataPath>
+					<EditMode>EnterOnInput</EditMode>
+					<FooterDataPath>Объект.График.TotalСумма</FooterDataPath>
+					<ContextMenu name="ГрафикСуммаКонтекстноеМеню" id="36"/>
+					<ExtendedTooltip name="ГрафикСуммаРасширеннаяПодсказка" id="37"/>
+				</InputField>
+			</ChildItems>
+		</Table>
+		<InputField name="Комментарий" id="54">
+			<DataPath>Объект.Комментарий</DataPath>
+			<ContextMenu name="КомментарийКонтекстноеМеню" id="55"/>
+			<ExtendedTooltip name="КомментарийРасширеннаяПодсказка" id="56"/>
+		</InputField>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Объект" id="1">
+			<Type>
+				<v8:Type>cfg:DocumentObject.Бюджет</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<SavedData>true</SavedData>
+			<UseAlways>
+				<Field>Объект.RegisterRecords</Field>
+			</UseAlways>
+		</Attribute>
+		<Attribute name="МесяцОкончания" id="3">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Месяц окончания</v8:content>
+				</v8:item>
+			</Title>
+			<Type>
+				<v8:Type>xs:dateTime</v8:Type>
+				<v8:DateQualifiers>
+					<v8:DateFractions>Date</v8:DateFractions>
+				</v8:DateQualifiers>
+			</Type>
+		</Attribute>
+		<Attribute name="БезОкругления" id="4">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Без округления</v8:content>
+				</v8:item>
+			</Title>
+			<Type>
+				<v8:Type>xs:boolean</v8:Type>
+			</Type>
+		</Attribute>
+		<Attribute name="СуммаЕжемесячногоПлатежа" id="5">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Сумма ежемесячного платежа</v8:content>
+				</v8:item>
+			</Title>
+			<Type>
+				<v8:Type>xs:decimal</v8:Type>
+				<v8:NumberQualifiers>
+					<v8:Digits>10</v8:Digits>
+					<v8:FractionDigits>2</v8:FractionDigits>
+					<v8:AllowedSign>Any</v8:AllowedSign>
+				</v8:NumberQualifiers>
+			</Type>
+		</Attribute>
+	</Attributes>
+	<Commands>
+		<Command name="Заполнить" id="1">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Заполнить</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Заполнить</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>Заполнить</Action>
+		</Command>
+	</Commands>
+</Form>

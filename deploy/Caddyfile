@@ -1,0 +1,36 @@
+{$APP_DOMAIN:localhost} {
+    encode gzip zstd
+
+    handle_path /static/* {
+        root * /srv/django-static
+        file_server
+    }
+
+    handle /api* {
+        reverse_proxy backend:8000 {
+            header_up Host {host}
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle /admin* {
+        reverse_proxy backend:8000 {
+            header_up Host {host}
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle /web* {
+        reverse_proxy backend:8000 {
+            header_up Host {host}
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

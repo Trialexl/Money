@@ -1,0 +1,293 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1">
+		<Autofill>false</Autofill>
+	</AutoCommandBar>
+	<ChildItems>
+		<Button name="Обновить" id="18">
+			<Type>UsualButton</Type>
+			<DefaultButton>true</DefaultButton>
+			<CommandName>Form.Command.Обновить</CommandName>
+			<ExtendedTooltip name="ОбновитьРасширеннаяПодсказка" id="19"/>
+		</Button>
+		<UsualGroup name="Группа2" id="47">
+			<Representation>None</Representation>
+			<ShowTitle>false</ShowTitle>
+			<ExtendedTooltip name="Группа2РасширеннаяПодсказка" id="48"/>
+			<ChildItems>
+				<InputField name="СКакойДаты" id="44">
+					<DataPath>СКакойДаты</DataPath>
+					<ContextMenu name="СКакойДатыКонтекстноеМеню" id="45"/>
+					<ExtendedTooltip name="СКакойДатыРасширеннаяПодсказка" id="46"/>
+				</InputField>
+				<Button name="ПолнаяВыгрузка" id="38">
+					<Type>UsualButton</Type>
+					<CommandName>Form.Command.ПолнаяВыгрузка</CommandName>
+					<ExtendedTooltip name="ПолнаяВыгрузкаРасширеннаяПодсказка" id="39"/>
+				</Button>
+				<Button name="ВыгрузкаСправочников" id="42">
+					<Type>UsualButton</Type>
+					<CommandName>Form.Command.ВыгрузкаСправочников</CommandName>
+					<ExtendedTooltip name="ВыгрузкаСправочниковРасширеннаяПодсказка" id="43"/>
+				</Button>
+			</ChildItems>
+		</UsualGroup>
+		<InputField name="Результат" id="7">
+			<DataPath>Результат</DataPath>
+			<AutoMaxWidth>false</AutoMaxWidth>
+			<MultiLine>true</MultiLine>
+			<ContextMenu name="РезультатКонтекстноеМеню" id="8"/>
+			<ExtendedTooltip name="РезультатРасширеннаяПодсказка" id="9"/>
+		</InputField>
+		<UsualGroup name="Группа1" id="40">
+			<Representation>None</Representation>
+			<ShowTitle>false</ShowTitle>
+			<ExtendedTooltip name="Группа1РасширеннаяПодсказка" id="41"/>
+			<ChildItems>
+				<Table name="СписокВыгрузки" id="20">
+					<UseAlternationRowColor>true</UseAlternationRowColor>
+					<EnableStartDrag>true</EnableStartDrag>
+					<DataPath>СписокВыгрузки</DataPath>
+					<RowPictureDataPath>СписокВыгрузки.DefaultPicture</RowPictureDataPath>
+					<AutoRefresh>false</AutoRefresh>
+					<AutoRefreshPeriod>60</AutoRefreshPeriod>
+					<Period>
+						<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>
+						<v8:startDate>0001-01-01T00:00:00</v8:startDate>
+						<v8:endDate>0001-01-01T00:00:00</v8:endDate>
+					</Period>
+					<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+					<RestoreCurrentRow>false</RestoreCurrentRow>
+					<TopLevelParent xsi:nil="true"/>
+					<ShowRoot>true</ShowRoot>
+					<AllowRootChoice>false</AllowRootChoice>
+					<UpdateOnDataChange>Auto</UpdateOnDataChange>
+					<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>
+					<ContextMenu name="СписокВыгрузкиКонтекстноеМеню" id="21"/>
+					<AutoCommandBar name="СписокВыгрузкиКоманднаяПанель" id="22">
+						<Autofill>false</Autofill>
+						<ChildItems>
+							<Button name="ОбновитьСписок" id="36">
+								<Type>CommandBarButton</Type>
+								<Representation>PictureAndText</Representation>
+								<DefaultItem>true</DefaultItem>
+								<Check>true</Check>
+								<CommandName>Form.Item.СписокВыгрузки.StandardCommand.Refresh</CommandName>
+								<LocationInCommandBar>InCommandBar</LocationInCommandBar>
+								<ExtendedTooltip name="ОбновитьСписокРасширеннаяПодсказка" id="37"/>
+							</Button>
+						</ChildItems>
+					</AutoCommandBar>
+					<ExtendedTooltip name="СписокВыгрузкиРасширеннаяПодсказка" id="23"/>
+					<SearchStringAddition name="СписокВыгрузкиСтрокаПоиска" id="24">
+						<AdditionSource>
+							<Item>СписокВыгрузки</Item>
+							<Type>SearchStringRepresentation</Type>
+						</AdditionSource>
+						<ContextMenu name="СписокВыгрузкиСтрокаПоискаКонтекстноеМеню" id="25"/>
+						<ExtendedTooltip name="СписокВыгрузкиСтрокаПоискаРасширеннаяПодсказка" id="26"/>
+					</SearchStringAddition>
+					<ViewStatusAddition name="СписокВыгрузкиСостояниеПросмотра" id="27">
+						<AdditionSource>
+							<Item>СписокВыгрузки</Item>
+							<Type>ViewStatusRepresentation</Type>
+						</AdditionSource>
+						<ContextMenu name="СписокВыгрузкиСостояниеПросмотраКонтекстноеМеню" id="28"/>
+						<ExtendedTooltip name="СписокВыгрузкиСостояниеПросмотраРасширеннаяПодсказка" id="29"/>
+					</ViewStatusAddition>
+					<SearchControlAddition name="СписокВыгрузкиУправлениеПоиском" id="30">
+						<AdditionSource>
+							<Item>СписокВыгрузки</Item>
+							<Type>SearchControl</Type>
+						</AdditionSource>
+						<ContextMenu name="СписокВыгрузкиУправлениеПоискомКонтекстноеМеню" id="31"/>
+						<ExtendedTooltip name="СписокВыгрузкиУправлениеПоискомРасширеннаяПодсказка" id="32"/>
+					</SearchControlAddition>
+					<ChildItems>
+						<LabelField name="СписокВыгрузкиСсылкаОбъект" id="33">
+							<DataPath>СписокВыгрузки.СсылкаОбъект</DataPath>
+							<ContextMenu name="СписокВыгрузкиСсылкаОбъектКонтекстноеМеню" id="34"/>
+							<ExtendedTooltip name="СписокВыгрузкиСсылкаОбъектРасширеннаяПодсказка" id="35"/>
+						</LabelField>
+					</ChildItems>
+				</Table>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Объект" id="1">
+			<Type>
+				<v8:Type>cfg:DataProcessorObject.DjАдминистрирование</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+		</Attribute>
+		<Attribute name="Результат" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Результат</v8:content>
+				</v8:item>
+			</Title>
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+				<v8:StringQualifiers>
+					<v8:Length>0</v8:Length>
+					<v8:AllowedLength>Variable</v8:AllowedLength>
+				</v8:StringQualifiers>
+			</Type>
+		</Attribute>
+		<Attribute name="СписокВыгрузки" id="3">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Список выгрузки</v8:content>
+				</v8:item>
+			</Title>
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>false</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<MainTable>InformationRegister.DjСписокОбменаССайтом</MainTable>
+				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
+					</dcsset:filter>
+					<dcsset:order>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
+					</dcsset:order>
+					<dcsset:conditionalAppearance>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>
+					</dcsset:conditionalAppearance>
+					<dcsset:itemsViewMode>Normal</dcsset:itemsViewMode>
+					<dcsset:itemsUserSettingID>911b6018-f537-43e8-a417-da56b22f9aec</dcsset:itemsUserSettingID>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+		<Attribute name="СКакойДаты" id="4">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>С какой даты</v8:content>
+				</v8:item>
+			</Title>
+			<Type>
+				<v8:Type>xs:dateTime</v8:Type>
+				<v8:DateQualifiers>
+					<v8:DateFractions>Date</v8:DateFractions>
+				</v8:DateQualifiers>
+			</Type>
+		</Attribute>
+	</Attributes>
+	<Commands>
+		<Command name="ПолучитьСписокКонтрагентов" id="1">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Получить список контрагентов</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Получить список контрагентов</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>ПолучитьСписокКонтрагентов</Action>
+		</Command>
+		<Command name="ОтправитьКонтрагента" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Отправить контрагента</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Отправить контрагента</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>ОтправитьКонтрагента</Action>
+		</Command>
+		<Command name="УдалитьКонтрагента" id="3">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Удалить контрагента</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Удалить контрагента</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>УдалитьКонтрагента</Action>
+		</Command>
+		<Command name="ОбновитьКонтрагента" id="4">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Обновить контрагента</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Обновить контрагента</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>ОбновитьКонтрагента</Action>
+		</Command>
+		<Command name="Обновить" id="5">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Обновить</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Обновить</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>Обновить</Action>
+		</Command>
+		<Command name="ПолнаяВыгрузка" id="6">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Полная выгрузка</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Полная выгрузка</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>ПолнаяВыгрузка</Action>
+		</Command>
+		<Command name="ВыгрузкаСправочников" id="7">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Выгрузка справочников</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Выгрузка справочников</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>ВыгрузкаСправочников</Action>
+		</Command>
+	</Commands>
+</Form>

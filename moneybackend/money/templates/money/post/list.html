@@ -1,0 +1,44 @@
+{% extends "money/base.html" %}
+
+{% block title %}My Blog{% endblock %}
+
+
+{% block content %}
+{% include "tabs.html" with page=page_obj %}
+  {% comment %} <h1>My Blog</h1> {% endcomment %}
+  <table class="table table-striped table-hover">
+    <thead>
+      <tr>
+        <th scope="col">Номер</th>
+        <th scope="col">Дата</th>
+        <th scope="col">Кошелек</th>
+        <th scope="col">Статья ДС</th>
+        <th scope="col">Сумма</th>
+      </tr>
+    </thead>
+    <tbody>
+     
+   
+  {% for Expenditure in Expenditures %}
+  <tr>
+    <th scope="row"> {{ Expenditure.number }}</th>
+    <td>{{ Expenditure.date }}</td>
+    <td> {{ Expenditure.wallet }}</td>
+    <td> {{ Expenditure.cashFlowItem }}</td>
+    <td> {{ Expenditure.amount }}</td>
+    
+  </tr>
+
+  
+      
+  {% comment %} <a href="{{  Expenditure.get_absolute_url }}"> {% endcomment %}
+  {% comment %} </a> {% endcomment %}
+      
+ 
+    
+    
+  {% endfor %}
+</tbody>
+</table>
+  {% include "pagination.html" with page=page_obj %}
+{% endblock %}

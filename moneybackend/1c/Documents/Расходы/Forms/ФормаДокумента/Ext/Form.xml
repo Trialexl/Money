@@ -1,0 +1,147 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.18">
+	<AutoTime>CurrentOrLast</AutoTime>
+	<UsePostingMode>Auto</UsePostingMode>
+	<RepostOnWrite>true</RepostOnWrite>
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+	<Events>
+		<Event name="OnCreateAtServer">ПриСозданииНаСервере</Event>
+	</Events>
+	<ChildItems>
+		<InputField name="Номер" id="1">
+			<DataPath>Объект.Number</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="НомерКонтекстноеМеню" id="2"/>
+			<ExtendedTooltip name="НомерРасширеннаяПодсказка" id="3"/>
+		</InputField>
+		<InputField name="Кошелек" id="7">
+			<DataPath>Объект.Кошелек</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="КошелекКонтекстноеМеню" id="8"/>
+			<ExtendedTooltip name="КошелекРасширеннаяПодсказка" id="9"/>
+		</InputField>
+		<InputField name="Статья" id="10">
+			<DataPath>Объект.Статья</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="СтатьяКонтекстноеМеню" id="11"/>
+			<ExtendedTooltip name="СтатьяРасширеннаяПодсказка" id="12"/>
+			<Events>
+				<Event name="OnChange">СтатьяПриИзменении</Event>
+			</Events>
+		</InputField>
+		<InputField name="Дата" id="4">
+			<DataPath>Объект.Date</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="ДатаКонтекстноеМеню" id="5"/>
+			<ExtendedTooltip name="ДатаРасширеннаяПодсказка" id="6"/>
+		</InputField>
+		<InputField name="Сумма" id="13">
+			<DataPath>Объект.Сумма</DataPath>
+			<DefaultItem>true</DefaultItem>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="СуммаКонтекстноеМеню" id="14"/>
+			<ExtendedTooltip name="СуммаРасширеннаяПодсказка" id="15"/>
+		</InputField>
+		<InputField name="Комментарий" id="16">
+			<DataPath>Объект.Комментарий</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="КомментарийКонтекстноеМеню" id="17"/>
+			<ExtendedTooltip name="КомментарийРасширеннаяПодсказка" id="18"/>
+		</InputField>
+		<CheckBoxField name="УчитыватьВБюджете" id="19">
+			<DataPath>Объект.УчитыватьВБюджете</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<CheckBoxType>Auto</CheckBoxType>
+			<ContextMenu name="УчитыватьВБюджетеКонтекстноеМеню" id="20"/>
+			<ExtendedTooltip name="УчитыватьВБюджетеРасширеннаяПодсказка" id="21"/>
+		</CheckBoxField>
+		<UsualGroup name="ГруппаБюджет" id="44">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Бюджет распределение</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Группа бюджет</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Behavior>Collapsible</Behavior>
+			<Collapsed>true</Collapsed>
+			<Representation>None</Representation>
+			<ExtendedTooltip name="ГруппаБюджетРасширеннаяПодсказка" id="45"/>
+			<ChildItems>
+				<Table name="БюджетныйПериод" id="22">
+					<Footer>true</Footer>
+					<AutoInsertNewRow>true</AutoInsertNewRow>
+					<EnableStartDrag>true</EnableStartDrag>
+					<EnableDrag>true</EnableDrag>
+					<DataPath>Объект.БюджетныйПериод</DataPath>
+					<RowFilter xsi:nil="true"/>
+					<ContextMenu name="БюджетныйПериодКонтекстноеМеню" id="23"/>
+					<AutoCommandBar name="БюджетныйПериодКоманднаяПанель" id="24"/>
+					<ExtendedTooltip name="БюджетныйПериодРасширеннаяПодсказка" id="25"/>
+					<SearchStringAddition name="БюджетныйПериодСтрокаПоиска" id="26">
+						<AdditionSource>
+							<Item>БюджетныйПериод</Item>
+							<Type>SearchStringRepresentation</Type>
+						</AdditionSource>
+						<ContextMenu name="БюджетныйПериодСтрокаПоискаКонтекстноеМеню" id="27"/>
+						<ExtendedTooltip name="БюджетныйПериодСтрокаПоискаРасширеннаяПодсказка" id="28"/>
+					</SearchStringAddition>
+					<ViewStatusAddition name="БюджетныйПериодСостояниеПросмотра" id="29">
+						<AdditionSource>
+							<Item>БюджетныйПериод</Item>
+							<Type>ViewStatusRepresentation</Type>
+						</AdditionSource>
+						<ContextMenu name="БюджетныйПериодСостояниеПросмотраКонтекстноеМеню" id="30"/>
+						<ExtendedTooltip name="БюджетныйПериодСостояниеПросмотраРасширеннаяПодсказка" id="31"/>
+					</ViewStatusAddition>
+					<SearchControlAddition name="БюджетныйПериодУправлениеПоиском" id="32">
+						<AdditionSource>
+							<Item>БюджетныйПериод</Item>
+							<Type>SearchControl</Type>
+						</AdditionSource>
+						<ContextMenu name="БюджетныйПериодУправлениеПоискомКонтекстноеМеню" id="33"/>
+						<ExtendedTooltip name="БюджетныйПериодУправлениеПоискомРасширеннаяПодсказка" id="34"/>
+					</SearchControlAddition>
+					<ChildItems>
+						<LabelField name="БюджетныйПериодНомерСтроки" id="35">
+							<DataPath>Объект.БюджетныйПериод.LineNumber</DataPath>
+							<EditMode>EnterOnInput</EditMode>
+							<ContextMenu name="БюджетныйПериодНомерСтрокиКонтекстноеМеню" id="36"/>
+							<ExtendedTooltip name="БюджетныйПериодНомерСтрокиРасширеннаяПодсказка" id="37"/>
+						</LabelField>
+						<InputField name="БюджетныйПериодПериодБюджетирования" id="38">
+							<DataPath>Объект.БюджетныйПериод.ПериодБюджетирования</DataPath>
+							<EditMode>EnterOnInput</EditMode>
+							<ContextMenu name="БюджетныйПериодПериодБюджетированияКонтекстноеМеню" id="39"/>
+							<ExtendedTooltip name="БюджетныйПериодПериодБюджетированияРасширеннаяПодсказка" id="40"/>
+						</InputField>
+						<InputField name="БюджетныйПериодСумма" id="41">
+							<DataPath>Объект.БюджетныйПериод.Сумма</DataPath>
+							<EditMode>EnterOnInput</EditMode>
+							<FooterDataPath>Объект.БюджетныйПериод.TotalСумма</FooterDataPath>
+							<ContextMenu name="БюджетныйПериодСуммаКонтекстноеМеню" id="42"/>
+							<ExtendedTooltip name="БюджетныйПериодСуммаРасширеннаяПодсказка" id="43"/>
+						</InputField>
+					</ChildItems>
+				</Table>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Объект" id="1">
+			<Type>
+				<v8:Type>cfg:DocumentObject.Расходы</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<SavedData>true</SavedData>
+			<UseAlways>
+				<Field>Объект.RegisterRecords</Field>
+			</UseAlways>
+		</Attribute>
+	</Attributes>
+</Form>
