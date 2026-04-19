@@ -1,8 +1,14 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit --no-fund
 
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
