@@ -15,8 +15,7 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./moneybackend
+    image: trialexl/money-backend:30c214f
     restart: unless-stopped
     env_file:
       - ./.env
@@ -32,10 +31,7 @@ services:
       - django_static:/app/staticfiles
 
   frontend:
-    build:
-      context: ./frontmoney
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
+    image: trialexl/money-frontend:30c214f
     restart: unless-stopped
     depends_on:
       - backend
