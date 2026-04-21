@@ -1,6 +1,15 @@
 {$APP_DOMAIN:localhost} {
     encode gzip zstd
 
+    @blocked_paths {
+        path /server-status /v2/* /graphql /graphql/* /api/gql /api/graphql /api-docs* /api/swagger.json /webjars/* /telescope/* /trace.axd /exec* /php-cgi* /wp-admin* /wp-login.php /xmlrpc.php
+    }
+
+    @hidden_files path_regexp hidden_files ^/(?:\.|.*/\.)[^/]*$
+
+    respond @blocked_paths 404
+    respond @hidden_files 404
+
     handle_path /static/* {
         root * /srv/django-static
         file_server
