@@ -31,7 +31,7 @@ services:
       - django_static:/app/staticfiles
 
   frontend:
-    image: trialexl/money-frontend:30c214f
+    image: trialexl/money-frontend:20260421-rootfix
     restart: unless-stopped
     depends_on:
       - backend
