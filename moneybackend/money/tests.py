@@ -2121,6 +2121,47 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('Скриншот банка', expenditure.comment)
         self.assertIn('Еда', expenditure.comment)
 
+    def test_ai_execute_falls_back_to_text_when_provider_misses_amount_and_wallet(self):
+        wallet_vtb = Wallet.objects.create(name='ВТБ')
+        WalletAlias.objects.create(wallet=wallet_vtb, alias='втб')
+        car_item = CashFlowItem.objects.create(name='Шины', include_in_budget=False)
+        CashFlowItemAlias.objects.create(cash_flow_item=car_item, alias='машины')
+
+        mock_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 1.0,
+            'amount': None,
+            'wallet_hint': None,
+            'bank_name': None,
+            'cash_flow_item_hint': None,
+            'merchant': None,
+            'description': None,
+            'comment': None,
+            'occurred_at': None,
+            'operation_sign': 'outgoing',
+            'include_in_budget': False,
+        }
+
+        with patch(
+            'money.ai_service._get_intent_provider',
+            return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
+        ):
+            response = self.client.post(
+                '/api/v1/ai/execute/',
+                {
+                    'text': '1719000 покупка машины с втб',
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        self.assertEqual(response.data['provider'], 'openrouter')
+        expenditure = Expenditure.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(expenditure.amount, Decimal('1719000.00'))
+        self.assertEqual(expenditure.wallet, wallet_vtb)
+        self.assertEqual(expenditure.cash_flow_item, car_item)
+
     @override_settings(
         AI_DEFAULT_PROVIDER='openrouter',
         AI_OPENROUTER_API_KEY='openrouter-test-key',

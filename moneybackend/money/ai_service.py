@@ -67,6 +67,23 @@ def _parse_amount(value):
         return None
 
 
+def _extract_amount_from_text(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    candidates = []
+    for match in re.finditer(r'\d[\d\s]*(?:[.,]\d{1,2})?', normalized):
+        amount = _parse_amount(match.group(0))
+        if amount is not None:
+            candidates.append(amount)
+
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda value: abs(value))
+
+
 def _serialize_decimal(value):
     if value is None:
         return None
@@ -368,8 +385,7 @@ class RuleBasedIntentProvider:
                 'comment': 'Rule-based provider не распознает изображения.',
             }
 
-        amount_match = re.search(r'(\d[\d\s.,]*)$', normalized_text)
-        amount = _parse_amount(amount_match.group(1)) if amount_match else None
+        amount = _extract_amount_from_text(text)
         wallet_mentions = _wallet_mentions(normalized_text, wallets)
 
         if 'остатки' in normalized_text or 'балансы' in normalized_text:
@@ -470,13 +486,19 @@ class AiOperationService:
 
     def process(self, *, text=None, image_bytes=None, image_mime_type=None, wallet_id=None, dry_run=False, source='web'):
         provider, provider_name = _get_intent_provider()
+        context = self.build_context()
         parsed = provider.parse(
             text=text,
             image_bytes=image_bytes,
             image_mime_type=image_mime_type,
-            context=self.build_context(),
+            context=context,
         )
-        normalized = self._normalize_parsed(parsed, explicit_wallet_id=wallet_id)
+        normalized = self._normalize_parsed(
+            parsed,
+            explicit_wallet_id=wallet_id,
+            source_text=text,
+            context=context,
+        )
         normalized['provider'] = provider_name
         normalized['source'] = source
 
@@ -549,7 +571,9 @@ class AiOperationService:
         )
         return self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
 
-    def _normalize_parsed(self, parsed, explicit_wallet_id=None):
+    def _normalize_parsed(self, parsed, explicit_wallet_id=None, source_text=None, context=None):
+        context = context or self.build_context()
+        wallets = context.get('wallets', [])
         intent = parsed.get('intent') or INTENT_UNKNOWN
         if intent not in SUPPORTED_INTENTS:
             intent = INTENT_UNKNOWN
@@ -567,11 +591,17 @@ class AiOperationService:
                 cash_flow_item = _match_cash_flow_item_by_hint(fallback_hint)
                 if cash_flow_item is not None:
                     break
+        if cash_flow_item is None and source_text:
+            extracted_hint = _extract_cash_flow_item_hint(source_text, wallets)
+            if extracted_hint:
+                cash_flow_item = _match_cash_flow_item_by_hint(extracted_hint)
 
         wallet_hint = parsed.get('wallet_hint') or parsed.get('bank_name')
         wallet = Wallet.objects.filter(pk=explicit_wallet_id).first() if explicit_wallet_id else None
         if wallet is None:
             wallet = _match_wallet_by_hint(wallet_hint)
+        if wallet is None and source_text:
+            wallet = _match_wallet_by_hint(source_text)
 
         comment_parts = [
             parsed.get('comment'),
@@ -579,11 +609,13 @@ class AiOperationService:
             parsed.get('description'),
         ]
         comment = ' | '.join(part.strip() for part in comment_parts if part and str(part).strip())
+        if not comment and source_text:
+            comment = source_text.strip()
 
         return {
             'intent': intent,
             'confidence': float(parsed.get('confidence') or 0.0),
-            'amount': _parse_amount(parsed.get('amount')),
+            'amount': _parse_amount(parsed.get('amount')) or _extract_amount_from_text(source_text),
             'wallet': wallet,
             'wallet_from': _match_wallet_by_hint(parsed.get('wallet_from_hint') or parsed.get('bank_name')),
             'wallet_to': _match_wallet_by_hint(parsed.get('wallet_to_hint')),
@@ -641,8 +673,7 @@ class AiOperationService:
         answer_text = answer_text or ''
         wallets = self.build_context()['wallets']
         wallet_mentions = _wallet_mentions(answer_text, wallets)
-        amount_match = re.search(r'(\d[\d\s.,]*)$', _normalize_text(answer_text))
-        parsed_amount = _parse_amount(amount_match.group(1)) if amount_match else None
+        parsed_amount = _extract_amount_from_text(answer_text)
         selected_option = None
         option_index_match = re.fullmatch(r'\s*(\d+)\s*', answer_text or '')
         if option_index_match and options_payload:
