@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from users.models import CustomUser
 
@@ -1297,6 +1298,49 @@ class DocumentRequiredFieldValidationTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn('wallet_out', form.errors)
         self.assertIn('cash_flow_item', form.errors)
+
+
+class JwtWriteAuthenticationRegressionTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = CustomUser.objects.create_superuser(
+            username='jwt-admin',
+            email='jwt-admin@example.com',
+            password='adminpass123',
+        )
+        cls.wallet = Wallet.objects.create(name='JWT кошелек')
+        cls.item = CashFlowItem.objects.create(name='JWT статья', include_in_budget=True)
+
+    def make_dt(self, day):
+        return timezone.make_aware(datetime(2024, 4, day, 9, 0, 0))
+
+    def test_expenditure_create_prefers_bearer_auth_over_session_and_skips_csrf_requirement(self):
+        client = APIClient(enforce_csrf_checks=True)
+        login_ok = client.login(username='jwt-admin', password='adminpass123')
+        access_token = str(RefreshToken.for_user(self.admin_user).access_token)
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+
+        response = client.post(
+            '/api/v1/expenditures/',
+            {
+                'amount': '852.00',
+                'date': self.make_dt(24).isoformat(),
+                'wallet': str(self.wallet.id),
+                'cash_flow_item': str(self.item.id),
+                'include_in_budget': True,
+            },
+            format='json',
+        )
+
+        self.assertTrue(login_ok)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(
+            Expenditure.objects.filter(
+                amount=Decimal('852.00'),
+                wallet=self.wallet,
+                cash_flow_item=self.item,
+            ).exists()
+        )
 
 
 class PlanningDefaultsAndGenerationTests(TestCase):
