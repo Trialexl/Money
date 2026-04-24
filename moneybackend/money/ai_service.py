@@ -596,10 +596,17 @@ class AiOperationService:
         }
 
     def serialize_normalized(self, normalized):
+        fallback_raw = {}
+        if (
+            isinstance(normalized, dict)
+            and 'raw' not in normalized
+            and not any(key in normalized for key in ('wallet', 'wallet_from', 'wallet_to', 'cash_flow_item'))
+        ):
+            fallback_raw = normalized
         return {
-            'intent': normalized['intent'],
-            'confidence': normalized['confidence'],
-            'amount': _serialize_decimal(normalized['amount']),
+            'intent': normalized.get('intent', INTENT_UNKNOWN),
+            'confidence': float(normalized.get('confidence') or 0.0),
+            'amount': _serialize_decimal(normalized.get('amount')),
             'wallet_id': str(normalized['wallet'].id) if normalized.get('wallet') else None,
             'wallet_from_id': str(normalized['wallet_from'].id) if normalized.get('wallet_from') else None,
             'wallet_to_id': str(normalized['wallet_to'].id) if normalized.get('wallet_to') else None,
@@ -608,9 +615,9 @@ class AiOperationService:
             ),
             'comment': normalized.get('comment', ''),
             'include_in_budget': bool(normalized.get('include_in_budget', False)),
-            'occurred_at': normalized['occurred_at'].isoformat() if normalized.get('occurred_at') else None,
+            'occurred_at': normalized.get('occurred_at').isoformat() if normalized.get('occurred_at') else None,
             'operation_sign': normalized.get('operation_sign'),
-            'raw': normalized.get('raw', {}),
+            'raw': normalized.get('raw', fallback_raw),
         }
 
     def deserialize_normalized(self, payload):

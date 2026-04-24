@@ -1914,6 +1914,7 @@ class ReportEndpointsTests(TestCase):
     AI_DEFAULT_PROVIDER='rule_based',
     AI_ALLOW_RULE_BASED_FALLBACK=True,
     AI_TELEGRAM_BOT_SECRET='telegram-secret',
+    AI_TELEGRAM_BOT_TOKEN='',
 )
 class AiAssistantApiTests(TestCase):
     @classmethod
@@ -2382,6 +2383,39 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(binding.user, self.regular_user)
         token = TelegramLinkToken.objects.get(code=code)
         self.assertTrue(token.is_used)
+
+    def test_ai_telegram_webhook_unlink_command_keeps_non_normalized_parsed_payload(self):
+        TelegramUserBinding.objects.create(
+            telegram_user_id=402,
+            telegram_chat_id=302,
+            telegram_username='linked-telegram',
+            user=self.regular_user,
+            linked_at=timezone.now(),
+        )
+
+        client = APIClient()
+        response = client.post(
+            '/api/v1/ai/telegram-webhook/',
+            {
+                'update_id': 22,
+                'message': {
+                    'message_id': 32,
+                    'text': '/unlink',
+                    'chat': {'id': 302},
+                    'from': {'id': 402, 'username': 'linked-telegram'},
+                },
+            },
+            format='json',
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        binding = TelegramUserBinding.objects.get(telegram_user_id=402)
+        self.assertIsNone(binding.user)
+        audit_log = AiAuditLog.objects.filter(telegram_binding=binding).order_by('-created_at').first()
+        self.assertIsNotNone(audit_log)
+        self.assertEqual(audit_log.normalized_payload, {'source': 'telegram'})
+        self.assertEqual(response.data['parsed'], {'source': 'telegram'})
 
     def test_ai_telegram_webhook_uses_pending_confirmation_for_missing_item(self):
         client = APIClient()

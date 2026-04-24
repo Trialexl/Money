@@ -1356,11 +1356,33 @@ class AiAssistantViewSet(viewsets.ViewSet):
         payload = dict(result)
         parsed = payload.get('parsed')
         if isinstance(parsed, dict):
-            if 'wallet_id' in parsed:
-                payload['parsed'] = parsed
-            else:
-                payload['parsed'] = self.get_operation_service().serialize_normalized(parsed)
+            payload['parsed'] = self._serialize_result_parsed_payload(parsed)
         return payload
+
+    def _serialize_result_parsed_payload(self, parsed):
+        if not isinstance(parsed, dict):
+            return {}
+        if 'wallet_id' in parsed:
+            return parsed
+
+        normalized_keys = {
+            'intent',
+            'confidence',
+            'amount',
+            'wallet',
+            'wallet_from',
+            'wallet_to',
+            'cash_flow_item',
+            'comment',
+            'include_in_budget',
+            'occurred_at',
+            'operation_sign',
+            'raw',
+        }
+        if any(key in parsed for key in normalized_keys):
+            return self.get_operation_service().serialize_normalized(parsed)
+
+        return parsed
 
     def _build_response_payload(self, result):
         return self._serialize_ai_result_for_storage(result)
@@ -1481,12 +1503,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
         confirmed_fields=None,
     ):
         parsed = result.get('parsed') or {}
-        if isinstance(parsed, dict) and 'wallet_id' in parsed:
-            normalized_payload = parsed
-        elif isinstance(parsed, dict):
-            normalized_payload = self.get_operation_service().serialize_normalized(parsed)
-        else:
-            normalized_payload = {}
+        normalized_payload = self._serialize_result_parsed_payload(parsed)
         AiAuditLog.objects.create(
             source=source,
             user=user,
@@ -1792,7 +1809,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             telegram_binding=binding,
             intent=result.get('intent') or 'unknown',
             provider=result.get('provider', ''),
-            normalized_payload=self.get_operation_service().serialize_normalized(result['parsed']),
+            normalized_payload=self._serialize_result_parsed_payload(result['parsed']),
             missing_fields=missing_fields,
             options_payload=result.get('options') or {},
             prompt_text=result.get('reply_text', ''),
@@ -2054,7 +2071,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             )
             pending.confirmation_history = list(pending.confirmation_history) + [{'answer_text': text}]
             if result.get('status') == 'needs_confirmation':
-                pending.normalized_payload = self.get_operation_service().serialize_normalized(result['parsed'])
+                pending.normalized_payload = self._serialize_result_parsed_payload(result['parsed'])
                 pending.missing_fields = result.get('missing_fields') or []
                 pending.options_payload = result.get('options') or {}
                 pending.prompt_text = result.get('reply_text', '')
