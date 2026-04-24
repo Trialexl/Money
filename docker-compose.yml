@@ -15,7 +15,7 @@ services:
       retries: 5
 
   backend:
-    image: trialexl/money-backend@sha256:67ab54ab76a1db91c3c4f148e7bc5b20595617b9fa160ccc3cf953057f10e2e7
+    image: trialexl/money-backend@sha256:03971a5308037293465a3d6e2cefaff5f0efe803885b4c3becbfbda87ed85d45
     restart: unless-stopped
     env_file:
       - ./.env
