@@ -15,7 +15,7 @@ services:
       retries: 5
 
   backend:
-    image: trialexl/money-backend:30c214f
+    image: trialexl/money-backend:a95ebb9
     restart: unless-stopped
     env_file:
       - ./.env
@@ -31,7 +31,7 @@ services:
       - django_static:/app/staticfiles
 
   frontend:
-    image: trialexl/money-frontend:20260421-rootfix
+    image: trialexl/money-frontend:a95ebb9
     restart: unless-stopped
     depends_on:
       - backend
