@@ -2214,6 +2214,27 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(request_headers['http-referer'], 'https://lk.example.com')
         self.assertEqual(request_headers['x-title'], 'LK Test')
 
+    def test_openrouter_prompt_includes_wallet_and_cash_flow_context(self):
+        provider = ai_service.OpenRouterIntentProvider(
+            api_key='openrouter-test-key',
+            model_name='google/gemini-2.5-flash',
+        )
+
+        prompt = provider._build_prompt(
+            text='1719000 покупка машины с втб',
+            context={
+                'wallets': [{'name': 'ВТБ', 'aliases': ['втб'], 'code': 'VTB'}],
+                'cash_flow_items': [{'name': 'Шины', 'aliases': ['машины'], 'code': 'TYRES'}],
+            },
+        )
+
+        self.assertIn('Доступные кошельки', prompt)
+        self.assertIn('Доступные статьи', prompt)
+        self.assertIn('ВТБ', prompt)
+        self.assertIn('Шины', prompt)
+        self.assertIn('wallet_hint', prompt)
+        self.assertIn('cash_flow_item_hint', prompt)
+
     def test_ai_execute_returns_preview_when_required_fields_missing(self):
         response = self.client.post(
             '/api/v1/ai/execute/',
