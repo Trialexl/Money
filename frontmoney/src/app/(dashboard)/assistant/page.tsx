@@ -70,6 +70,7 @@ function getStatusTone(status: AiAssistantResponse["status"]) {
   if (status === "created") return "success"
   if (status === "duplicate") return "secondary"
   if (status === "needs_confirmation") return "outline"
+  if (status === "info") return "secondary"
   return "secondary"
 }
 
@@ -79,6 +80,7 @@ function getStatusLabel(status: AiAssistantResponse["status"]) {
   if (status === "needs_confirmation") return "Нужно уточнение"
   if (status === "balance") return "Остатки"
   if (status === "duplicate") return "Дубликат"
+  if (status === "info") return "Справка"
   return status
 }
 

@@ -2001,6 +2001,21 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'balance')
 
+    def test_ai_execute_returns_help_for_capabilities_question(self):
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'что ты умеешь?',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'info')
+        self.assertEqual(response.data['intent'], 'help_capabilities')
+        self.assertIn('Я умею', response.data['reply_text'])
+        self.assertIn('остатки по кошелькам', response.data['reply_text'])
+
     def test_ai_execute_returns_wallet_balance(self):
         response = self.client.post(
             '/api/v1/ai/execute/',
@@ -2332,6 +2347,29 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.data['intent'], 'get_all_wallet_balances')
         self.assertEqual(len(response.data['balances']), 1)
         self.assertEqual(response.data['balances'][0]['wallet_name'], 'Сбербанк')
+
+    def test_ai_telegram_webhook_returns_help_before_binding(self):
+        client = APIClient()
+        response = client.post(
+            '/api/v1/ai/telegram-webhook/',
+            {
+                'update_id': 991,
+                'message': {
+                    'message_id': 992,
+                    'text': 'что ты умеешь?',
+                    'chat': {'id': 993},
+                    'from': {'id': 994, 'username': 'unknown-telegram'},
+                },
+            },
+            format='json',
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'info')
+        self.assertEqual(response.data['intent'], 'help_capabilities')
+        self.assertIn('Я умею', response.data['reply_text'])
+        self.assertIn('/link CODE', response.data['reply_text'])
 
     @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
     def test_ai_telegram_webhook_downloads_photo_and_creates_expenditure(self):

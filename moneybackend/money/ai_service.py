@@ -19,6 +19,7 @@ INTENT_CREATE_EXPENDITURE = 'create_expenditure'
 INTENT_CREATE_TRANSFER = 'create_transfer'
 INTENT_GET_WALLET_BALANCE = 'get_wallet_balance'
 INTENT_GET_ALL_WALLET_BALANCES = 'get_all_wallet_balances'
+INTENT_HELP_CAPABILITIES = 'help_capabilities'
 INTENT_UNKNOWN = 'unknown'
 
 SUPPORTED_INTENTS = {
@@ -27,6 +28,7 @@ SUPPORTED_INTENTS = {
     INTENT_CREATE_TRANSFER,
     INTENT_GET_WALLET_BALANCE,
     INTENT_GET_ALL_WALLET_BALANCES,
+    INTENT_HELP_CAPABILITIES,
     INTENT_UNKNOWN,
 }
 
@@ -82,6 +84,56 @@ def _extract_amount_from_text(text):
         return None
 
     return max(candidates, key=lambda value: abs(value))
+
+
+def _detect_assistant_meta_intent(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    help_prefixes = ('/start', '/help')
+    help_phrases = (
+        'что ты умеешь',
+        'что умеешь',
+        'что ты можешь',
+        'что можешь',
+        'какие команды',
+        'помощь',
+        'help',
+        'как пользоваться',
+        'как работать',
+        'что можно сделать',
+    )
+    greeting_phrases = {
+        'привет',
+        'здравствуйте',
+        'добрый день',
+        'добрый вечер',
+        'доброе утро',
+    }
+
+    if normalized.startswith(help_prefixes):
+        return {
+            'intent': INTENT_HELP_CAPABILITIES,
+            'confidence': 1.0,
+            'comment': text,
+        }
+
+    if any(phrase in normalized for phrase in help_phrases):
+        return {
+            'intent': INTENT_HELP_CAPABILITIES,
+            'confidence': 0.99,
+            'comment': text,
+        }
+
+    if normalized in greeting_phrases:
+        return {
+            'intent': INTENT_HELP_CAPABILITIES,
+            'confidence': 0.8,
+            'comment': text,
+        }
+
+    return None
 
 
 def _serialize_decimal(value):
@@ -329,7 +381,7 @@ class OpenRouterIntentProvider:
             'Верни только JSON без пояснений. '
             'Определи intent из списка: '
             'create_receipt, create_expenditure, create_transfer, '
-            'get_wallet_balance, get_all_wallet_balances, unknown. '
+            'get_wallet_balance, get_all_wallet_balances, help_capabilities, unknown. '
             'Если передано изображение, считай, что это банковский скриншот операции или истории операций, '
             'и извлеки наиболее вероятную одну операцию из скриншота. '
             'Используй только доступные кошельки и статьи. '
@@ -341,6 +393,8 @@ class OpenRouterIntentProvider:
             'Если в тексте есть кошелек и сумма, но формулировка свободная, всё равно определи наиболее вероятный intent операции. '
             'Для расходов ищи статью по словам покупки, описанию, merchant и комментарию. '
             'Для кошелька используй wallet_hint, для банка можешь дополнительно заполнить bank_name, но wallet_hint важнее. '
+            'Если пользователь спрашивает о возможностях помощника, просит помощь, примеры команд или здоровается, '
+            'верни intent=help_capabilities. '
             'Если уверенности нет, ставь intent=unknown или оставляй поля null. '
             'Схема JSON: '
             '{"intent": "...", "confidence": 0.0, "amount": "0.00" | null, '
@@ -395,6 +449,10 @@ class RuleBasedIntentProvider:
                 'confidence': 0.0,
                 'comment': 'Rule-based provider не распознает изображения.',
             }
+
+        meta_intent = _detect_assistant_meta_intent(text)
+        if meta_intent is not None:
+            return meta_intent
 
         amount = _extract_amount_from_text(text)
         wallet_mentions = _wallet_mentions(normalized_text, wallets)
@@ -497,6 +555,38 @@ def _all_wallet_balances(*, at_time=None):
 
 
 class AiOperationService:
+    def detect_meta_intent(self, text):
+        return _detect_assistant_meta_intent(text)
+
+    def build_help_result(self, *, provider_name, source='web', include_telegram_link_hint=False):
+        lines = [
+            'Я умею:',
+            '- создавать приход, расход и перевод по тексту;',
+            '- показывать остаток по одному кошельку или по всем кошелькам;',
+            '- разбирать банковские скриншоты и предлагать документ;',
+            '- задавать уточняющие вопросы, если не хватает суммы, кошелька или статьи.',
+            'Примеры:',
+            'приход сбер зарплата 15000',
+            'расход втб еда 2500',
+            'перевод сбер альфа 12000',
+            'остатки по кошелькам',
+        ]
+        if include_telegram_link_hint:
+            lines.append('Если Telegram еще не привязан, сгенерируйте код в web API и отправьте команду /link CODE.')
+        return {
+            'status': 'info',
+            'intent': INTENT_HELP_CAPABILITIES,
+            'provider': provider_name,
+            'confidence': 1.0,
+            'reply_text': '\n'.join(lines),
+            'parsed': {
+                'intent': INTENT_HELP_CAPABILITIES,
+                'confidence': 1.0,
+                'comment': 'help',
+                'raw': {'source': source},
+            },
+        }
+
     def build_context(self):
         return {
             'wallets': _wallet_context(),
@@ -504,14 +594,19 @@ class AiOperationService:
         }
 
     def process(self, *, text=None, image_bytes=None, image_mime_type=None, wallet_id=None, dry_run=False, source='web'):
-        provider, provider_name = _get_intent_provider()
         context = self.build_context()
-        parsed = provider.parse(
-            text=text,
-            image_bytes=image_bytes,
-            image_mime_type=image_mime_type,
-            context=context,
-        )
+        parsed = None
+        provider_name = 'rule_based'
+        if not image_bytes:
+            parsed = self.detect_meta_intent(text)
+        if parsed is None:
+            provider, provider_name = _get_intent_provider()
+            parsed = provider.parse(
+                text=text,
+                image_bytes=image_bytes,
+                image_mime_type=image_mime_type,
+                context=context,
+            )
         normalized = self._normalize_parsed(
             parsed,
             explicit_wallet_id=wallet_id,
@@ -557,6 +652,9 @@ class AiOperationService:
                 }],
                 'parsed': normalized,
             }
+
+        if intent == INTENT_HELP_CAPABILITIES:
+            return self.build_help_result(provider_name=provider_name, source=source)
 
         if intent == INTENT_UNKNOWN:
             return self._needs_confirmation(

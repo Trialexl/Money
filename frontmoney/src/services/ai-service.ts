@@ -1,7 +1,7 @@
 import api from "@/lib/api"
 import { fromApiAmount, fromApiDateTime } from "@/types"
 
-export type AiAssistantStatus = "created" | "preview" | "needs_confirmation" | "balance" | "duplicate"
+export type AiAssistantStatus = "created" | "preview" | "needs_confirmation" | "balance" | "duplicate" | "info"
 
 export interface AiAssistantCreatedObject {
   model: string

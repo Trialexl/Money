@@ -555,7 +555,7 @@ class TelegramLinkTokenResponseSerializer(serializers.Serializer):
 
 
 class AiAssistantResponseSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(choices=['created', 'preview', 'needs_confirmation', 'balance', 'duplicate'])
+    status = serializers.ChoiceField(choices=['created', 'preview', 'needs_confirmation', 'balance', 'duplicate', 'info'])
     intent = serializers.CharField()
     provider = serializers.CharField()
     confidence = serializers.FloatField()

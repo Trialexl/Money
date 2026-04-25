@@ -1701,6 +1701,14 @@ class AiAssistantViewSet(viewsets.ViewSet):
             'parsed': {'source': 'telegram'},
         }
 
+    def _build_telegram_help_response(self, *, binding):
+        include_link_hint = binding is None or binding.user_id is None
+        return self.get_operation_service().build_help_result(
+            provider_name='telegram',
+            source='telegram',
+            include_telegram_link_hint=include_link_hint,
+        )
+
     def _handle_telegram_link_command(self, *, binding, text):
         parts = (text or '').strip().split(maxsplit=1)
         if len(parts) != 2:
@@ -1954,6 +1962,17 @@ class AiAssistantViewSet(viewsets.ViewSet):
         binding = self._resolve_telegram_binding(message)
         text = message.get('text') or message.get('caption')
         has_photo = bool(message.get('photo'))
+
+        if text and self.get_operation_service().detect_meta_intent(text):
+            result = self._build_telegram_help_response(binding=binding)
+            self._create_audit_log(
+                source='telegram',
+                result=result,
+                input_text=text,
+                user=binding.user if binding and binding.user_id else None,
+                telegram_binding=binding,
+            )
+            return self._telegram_response(binding=binding, message=message, result=result, http_status=status.HTTP_200_OK)
 
         if binding and text and text.strip().lower().startswith('/link'):
             result = self._handle_telegram_link_command(binding=binding, text=text)
