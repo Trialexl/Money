@@ -249,11 +249,13 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
         balances = []
         
         for wallet in wallets:
-            balance = FlowOfFunds.objects.filter(
-                wallet=wallet
-            ).aggregate(
-                total=Sum('amount')
-            )['total'] or 0
+            balance = (
+                FlowOfFunds.objects.filter(wallet=wallet).aggregate(total=Sum('amount'))['total']
+                or ZERO_AMOUNT
+            )
+            balance = _dashboard_money(balance)
+            if balance == ZERO_AMOUNT:
+                continue
             
             balances.append({
                 'wallet_id': str(wallet.id),
@@ -514,6 +516,8 @@ class DashboardViewSet(viewsets.ViewSet):
         wallet_total = ZERO_AMOUNT
         for wallet in wallets_queryset:
             balance = wallet_totals.get(wallet.id, ZERO_AMOUNT)
+            if balance == ZERO_AMOUNT:
+                continue
             wallet_total += balance
             wallet_rows.append({
                 'wallet_id': str(wallet.id),

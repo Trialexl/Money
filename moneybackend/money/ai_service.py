@@ -11,7 +11,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import CashFlowItem, Expenditure, FlowOfFunds, Receipt, Transfer, Wallet
+from .models import CashFlowItem, Expenditure, FlowOfFunds, Receipt, Transfer, Wallet, ZERO_AMOUNT
 
 
 INTENT_CREATE_RECEIPT = 'create_receipt'
@@ -485,10 +485,13 @@ def _all_wallet_balances(*, at_time=None):
     at_time = at_time or timezone.now()
     rows = []
     for wallet in Wallet.objects.filter(deleted=False).order_by('name'):
+        balance = _wallet_balance(wallet, at_time=at_time)
+        if balance == ZERO_AMOUNT:
+            continue
         rows.append({
             'wallet_id': str(wallet.id),
             'wallet_name': wallet.name,
-            'balance': _serialize_decimal(_wallet_balance(wallet, at_time=at_time)),
+            'balance': _serialize_decimal(balance),
         })
     return rows
 
@@ -898,7 +901,7 @@ class AiOperationService:
 
     def _build_all_balances_reply(self, balances):
         if not balances:
-            return 'Кошельки не найдены.'
+            return 'Кошельки с ненулевым остатком не найдены.'
         lines = ['Остатки по кошелькам:']
         for row in balances:
             lines.append(f'- {row["wallet_name"]}: {row["balance"]}')

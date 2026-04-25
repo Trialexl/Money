@@ -1671,6 +1671,20 @@ class DashboardOverviewTests(TestCase):
         )
         self.assertEqual(response.data['cash_with_budget'], '500.00')
 
+    def test_dashboard_omits_zero_balance_wallets(self):
+        zero_wallet = Wallet.objects.create(name='Пустой кошелек')
+
+        response = self.client.get(
+            '/api/v1/dashboard/overview/',
+            {'date': self.selected_at.isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            str(zero_wallet.id),
+            [wallet['wallet_id'] for wallet in response.data['wallets']],
+        )
+
     def test_dashboard_uses_requested_timezone_for_end_of_day_balance(self):
         moscow_tz = dt_timezone(timedelta(hours=3))
         boundary_item = CashFlowItem.objects.create(name='Граница дня', include_in_budget=False)
@@ -2044,7 +2058,7 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         balances = {row['wallet_name']: row['balance'] for row in response.data['balances']}
         self.assertEqual(balances['Сбербанк'], '10000.00')
-        self.assertEqual(balances['Альфа'], '0.00')
+        self.assertNotIn('Альфа', balances)
 
     def test_ai_execute_creates_expenditure_from_wallet_and_item_aliases(self):
         response = self.client.post(
@@ -2316,7 +2330,8 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'balance')
         self.assertEqual(response.data['intent'], 'get_all_wallet_balances')
-        self.assertEqual(len(response.data['balances']), 2)
+        self.assertEqual(len(response.data['balances']), 1)
+        self.assertEqual(response.data['balances'][0]['wallet_name'], 'Сбербанк')
 
     @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
     def test_ai_telegram_webhook_downloads_photo_and_creates_expenditure(self):
