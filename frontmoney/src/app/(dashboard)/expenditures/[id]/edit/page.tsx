@@ -22,7 +22,7 @@ export default function EditExpenditurePage() {
     queryFn: ExpenditureService.getExpenditure,
   })
 
-  if (expenditureQuery.isLoading || expenditureQuery.isFetching) {
+  if (expenditureQuery.isLoading) {
     return <FullPageLoader label="Загружаем расход..." />
   }
 

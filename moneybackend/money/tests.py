@@ -2471,6 +2471,99 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('Скриншот банка', expenditure.comment)
         self.assertIn('Еда', expenditure.comment)
 
+    def test_ai_execute_creates_expenditure_from_bank_history_screenshot_with_raw_text_fallback(self):
+        mock_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.94,
+            'amount': '-465,75 ₽',
+            'wallet_hint': None,
+            'bank_name': None,
+            'merchant': 'Магнит',
+            'description': 'Продукты',
+            'comment': 'Альфа история операций Магнит -465,75 ₽',
+            'occurred_at': None,
+            'operation_sign': 'outgoing',
+            'include_in_budget': False,
+        }
+
+        screenshot = SimpleUploadedFile(
+            'history.png',
+            b'fake-history-image-bytes',
+            content_type='image/png',
+        )
+
+        with patch(
+            'money.ai_service._get_intent_provider',
+            return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
+        ):
+            response = self.client.post(
+                '/api/v1/ai/execute/',
+                {
+                    'image': screenshot,
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        expenditure = Expenditure.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(expenditure.wallet, self.wallet_alpha)
+        self.assertEqual(expenditure.cash_flow_item, self.expense_item)
+        self.assertEqual(expenditure.amount, Decimal('465.75'))
+        self.assertIn('Альфа история операций', expenditure.comment)
+
+    def test_ai_execute_creates_multiple_expenditures_from_bank_history_screenshot(self):
+        mock_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.96,
+            'bank_name': 'Альфа',
+            'operations': [
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-465,75 ₽',
+                    'merchant': 'Магнит',
+                    'description': 'Продукты',
+                    'comment': 'Магнит -465,75 ₽',
+                    'operation_sign': 'outgoing',
+                },
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-342 ₽',
+                    'merchant': 'Дикий океан',
+                    'description': 'Продукты',
+                    'comment': 'Дикий океан -342 ₽',
+                    'operation_sign': 'outgoing',
+                },
+            ],
+        }
+
+        screenshot = SimpleUploadedFile(
+            'history-multi.png',
+            b'fake-history-multi-image-bytes',
+            content_type='image/png',
+        )
+
+        with patch(
+            'money.ai_service._get_intent_provider',
+            return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
+        ):
+            response = self.client.post(
+                '/api/v1/ai/execute/',
+                {
+                    'image': screenshot,
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        self.assertEqual(len(response.data['created_objects']), 2)
+        expenditures = list(Expenditure.objects.filter(comment__icontains='₽').order_by('amount'))
+        self.assertEqual(len(expenditures), 2)
+        self.assertEqual(expenditures[0].wallet, self.wallet_alpha)
+        self.assertEqual(expenditures[1].wallet, self.wallet_alpha)
+        self.assertEqual(expenditures[0].cash_flow_item, self.expense_item)
+        self.assertEqual(expenditures[1].cash_flow_item, self.expense_item)
+        self.assertEqual([expense.amount for expense in expenditures], [Decimal('342.00'), Decimal('465.75')])
+
     def test_ai_execute_falls_back_to_text_when_provider_misses_amount_and_wallet(self):
         wallet_vtb = Wallet.objects.create(name='ВТБ')
         WalletAlias.objects.create(wallet=wallet_vtb, alias='втб')
@@ -2767,6 +2860,223 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('file_id=large-photo', first_request.full_url)
         self.assertIn('/file/bottelegram-bot-token/photos/expense.jpg', second_request.full_url)
         self.assertIn('/bottelegram-bot-token/sendMessage', third_request.full_url)
+
+    @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
+    def test_ai_telegram_webhook_photo_preserves_amount_and_accepts_wallet_answer(self):
+        client = APIClient()
+
+        class _FakeHeaders:
+            def get_content_type(self):
+                return 'image/jpeg'
+
+        class _FakeResponse:
+            def __init__(self, body, headers=None):
+                self._body = body
+                self.headers = headers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return self._body
+
+        get_file_response = _FakeResponse(
+            json.dumps({'ok': True, 'result': {'file_path': 'photos/history.jpg'}}).encode('utf-8')
+        )
+        image_response = _FakeResponse(b'fake-telegram-history-image', headers=_FakeHeaders())
+        send_message_response = _FakeResponse(json.dumps({'ok': True, 'result': {'message_id': 1001}}).encode('utf-8'))
+        mock_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.97,
+            'amount': '-342 ₽',
+            'wallet_hint': None,
+            'bank_name': None,
+            'merchant': 'Дикий океан',
+            'description': 'Продукты',
+            'comment': 'Дикий океан -342 ₽',
+            'occurred_at': None,
+            'operation_sign': 'outgoing',
+            'include_in_budget': False,
+        }
+
+        with patch(
+            'money.views.urlrequest.urlopen',
+            side_effect=[
+                get_file_response,
+                image_response,
+                send_message_response,
+                send_message_response,
+            ],
+        ):
+            with patch(
+                'money.ai_service._get_intent_provider',
+                return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
+            ):
+                first_response = client.post(
+                    '/api/v1/ai/telegram-webhook/',
+                    {
+                        'update_id': 333,
+                        'message': {
+                            'message_id': 433,
+                            'photo': [
+                                {'file_id': 'history-photo', 'file_size': 9000, 'width': 900, 'height': 1600},
+                            ],
+                            'chat': {'id': 909},
+                            'from': {'id': 910, 'username': 'trialex'},
+                        },
+                    },
+                    format='json',
+                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                )
+
+                pending = AiPendingConfirmation.objects.get(telegram_binding__telegram_user_id=910, is_active=True)
+
+                second_response = client.post(
+                    '/api/v1/ai/telegram-webhook/',
+                    {
+                        'update_id': 334,
+                        'message': {
+                            'message_id': 434,
+                            'text': 'это альфа',
+                            'chat': {'id': 909},
+                            'from': {'id': 910, 'username': 'trialex'},
+                        },
+                    },
+                    format='json',
+                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.data['status'], 'needs_confirmation')
+        self.assertEqual(first_response.data['missing_fields'], ['wallet'])
+        self.assertIn('Не хватает: кошелек.', first_response.data['reply_text'])
+        self.assertEqual(pending.missing_fields, ['wallet'])
+        self.assertEqual(pending.normalized_payload['amount'], '342.00')
+
+        self.assertEqual(second_response.status_code, 201)
+        self.assertEqual(second_response.data['status'], 'created')
+        expenditure = Expenditure.objects.get(id=second_response.data['created_object']['id'])
+        self.assertEqual(expenditure.wallet, self.wallet_alpha)
+        self.assertEqual(expenditure.cash_flow_item, self.expense_item)
+        self.assertEqual(expenditure.amount, Decimal('342.00'))
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
+
+    @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
+    def test_ai_telegram_webhook_photo_can_create_multiple_operations_after_wallet_answer(self):
+        client = APIClient()
+
+        class _FakeHeaders:
+            def get_content_type(self):
+                return 'image/jpeg'
+
+        class _FakeResponse:
+            def __init__(self, body, headers=None):
+                self._body = body
+                self.headers = headers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return self._body
+
+        get_file_response = _FakeResponse(
+            json.dumps({'ok': True, 'result': {'file_path': 'photos/history-multi.jpg'}}).encode('utf-8')
+        )
+        image_response = _FakeResponse(b'fake-telegram-history-multi-image', headers=_FakeHeaders())
+        send_message_response = _FakeResponse(json.dumps({'ok': True, 'result': {'message_id': 1002}}).encode('utf-8'))
+        mock_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.98,
+            'operations': [
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-465,75 ₽',
+                    'merchant': 'Магнит',
+                    'description': 'Продукты',
+                    'comment': 'Магнит -465,75 ₽',
+                    'operation_sign': 'outgoing',
+                },
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-342 ₽',
+                    'merchant': 'Дикий океан',
+                    'description': 'Продукты',
+                    'comment': 'Дикий океан -342 ₽',
+                    'operation_sign': 'outgoing',
+                },
+            ],
+        }
+
+        with patch(
+            'money.views.urlrequest.urlopen',
+            side_effect=[
+                get_file_response,
+                image_response,
+                send_message_response,
+                send_message_response,
+            ],
+        ):
+            with patch(
+                'money.ai_service._get_intent_provider',
+                return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
+            ):
+                first_response = client.post(
+                    '/api/v1/ai/telegram-webhook/',
+                    {
+                        'update_id': 335,
+                        'message': {
+                            'message_id': 435,
+                            'photo': [
+                                {'file_id': 'history-multi-photo', 'file_size': 9000, 'width': 900, 'height': 1600},
+                            ],
+                            'chat': {'id': 911},
+                            'from': {'id': 912, 'username': 'trialex'},
+                        },
+                    },
+                    format='json',
+                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                )
+
+                pending = AiPendingConfirmation.objects.get(telegram_binding__telegram_user_id=912, is_active=True)
+
+                second_response = client.post(
+                    '/api/v1/ai/telegram-webhook/',
+                    {
+                        'update_id': 336,
+                        'message': {
+                            'message_id': 436,
+                            'text': 'это альфа',
+                            'chat': {'id': 911},
+                            'from': {'id': 912, 'username': 'trialex'},
+                        },
+                    },
+                    format='json',
+                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.data['status'], 'needs_confirmation')
+        self.assertEqual(first_response.data['missing_fields'], ['wallet'])
+        self.assertEqual(len(pending.normalized_payload['items']), 2)
+        self.assertEqual([item['amount'] for item in pending.normalized_payload['items']], ['465.75', '342.00'])
+
+        self.assertEqual(second_response.status_code, 201)
+        self.assertEqual(second_response.data['status'], 'created')
+        self.assertEqual(len(second_response.data['created_objects']), 2)
+        expenditures = list(
+            Expenditure.objects.filter(wallet=self.wallet_alpha, comment__icontains='₽').order_by('amount')
+        )
+        self.assertEqual([expense.amount for expense in expenditures], [Decimal('342.00'), Decimal('465.75')])
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
 
     def test_ai_telegram_webhook_transcribes_voice_and_creates_expenditure(self):
         client = APIClient()

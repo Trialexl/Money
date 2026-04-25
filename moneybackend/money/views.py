@@ -1716,6 +1716,8 @@ class AiAssistantViewSet(viewsets.ViewSet):
     def _serialize_result_parsed_payload(self, parsed):
         if not isinstance(parsed, dict):
             return {}
+        if parsed.get('batch') and isinstance(parsed.get('items'), list):
+            return self.get_operation_service().serialize_normalized_batch(parsed)
         if 'wallet_id' in parsed:
             return parsed
 
@@ -1756,6 +1758,37 @@ class AiAssistantViewSet(viewsets.ViewSet):
 
     def _semantic_fingerprint_from_result(self, result):
         parsed = result.get('parsed') or {}
+        if isinstance(parsed, dict) and parsed.get('batch') and isinstance(parsed.get('items'), list):
+            items_payload = []
+            for item in parsed.get('items', []):
+                if not isinstance(item, dict):
+                    continue
+                wallet = item.get('wallet')
+                wallet_from = item.get('wallet_from')
+                wallet_to = item.get('wallet_to')
+                cash_flow_item = item.get('cash_flow_item')
+                items_payload.append({
+                    'intent': item.get('intent'),
+                    'amount': str(item.get('amount') or ''),
+                    'wallet_id': str(getattr(wallet, 'id', '')) if wallet else '',
+                    'wallet_from_id': str(getattr(wallet_from, 'id', '')) if wallet_from else '',
+                    'wallet_to_id': str(getattr(wallet_to, 'id', '')) if wallet_to else '',
+                    'cash_flow_item_id': str(getattr(cash_flow_item, 'id', '')) if cash_flow_item else '',
+                    'occurred_at_minute': (
+                        item['occurred_at'].replace(second=0, microsecond=0).isoformat()
+                        if item.get('occurred_at') else ''
+                    ),
+                    'comment': self._normalize_duplicate_text(item.get('comment', ''))[:120],
+                })
+            if not items_payload:
+                return ''
+            return hashlib.sha256(
+                json.dumps({
+                    'intent': result.get('intent'),
+                    'items': items_payload,
+                }, sort_keys=True, ensure_ascii=False).encode('utf-8')
+            ).hexdigest()
+
         wallet = parsed.get('wallet')
         wallet_from = parsed.get('wallet_from')
         wallet_to = parsed.get('wallet_to')

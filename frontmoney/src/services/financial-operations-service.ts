@@ -264,19 +264,7 @@ export const ReceiptService = {
 
   getReceipt: async (id: string) => {
     const { data: r } = await api.get<any>(`/receipts/${id}/`)
-    const mapped = mapReceipt(r)
-
-    if (!mapped.wallet || !mapped.cash_flow_item) {
-      const source = (await ReceiptService.getReceipts()).find((item) => item.id === id)
-
-      return {
-        ...mapped,
-        wallet: mapped.wallet || source?.wallet || "",
-        cash_flow_item: mapped.cash_flow_item || source?.cash_flow_item || "",
-      }
-    }
-
-    return mapped
+    return mapReceipt(r)
   },
 
   createReceipt: async (data: Partial<Receipt>) => {
@@ -332,19 +320,7 @@ export const ExpenditureService = {
 
   getExpenditure: async (id: string) => {
     const { data: e } = await api.get<any>(`/expenditures/${id}/`)
-    const mapped = mapExpenditure(e)
-
-    if (!mapped.wallet || !mapped.cash_flow_item) {
-      const source = (await ExpenditureService.getExpenditures()).find((item) => item.id === id)
-
-      return {
-        ...mapped,
-        wallet: mapped.wallet || source?.wallet || "",
-        cash_flow_item: mapped.cash_flow_item || source?.cash_flow_item || "",
-      }
-    }
-
-    return mapped
+    return mapExpenditure(e)
   },
 
   createExpenditure: async (data: Partial<Expenditure>) => {

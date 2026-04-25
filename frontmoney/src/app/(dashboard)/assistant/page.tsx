@@ -166,7 +166,11 @@ export default function AssistantPage() {
   const createdCount = history.filter((entry) => entry.response.status === "created").length
   const clarificationCount = history.filter((entry) => entry.response.status === "needs_confirmation").length
   const previewCount = history.filter((entry) => entry.response.status === "preview").length
-  const latestRoute = latestResponse?.created_object ? modelToRoute(latestResponse.created_object.model) : null
+  const latestCreatedObjects = latestResponse?.created_objects?.length
+    ? latestResponse.created_objects
+    : latestResponse?.created_object
+      ? [latestResponse.created_object]
+      : []
   const hasPreviewData = Boolean(latestResponse?.preview && Object.keys(latestResponse.preview).length > 0)
   const hasParsedData = Boolean(latestResponse?.parsed && Object.keys(latestResponse.parsed).length > 0)
   const canConfirmPreview = latestResponse?.status === "preview" && Boolean(latestEntry)
@@ -573,19 +577,31 @@ export default function AssistantPage() {
                   </div>
                 ) : null}
 
-                {latestResponse.created_object ? (
+                {latestCreatedObjects.length ? (
                   <div className="rounded-[18px] border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm">
                     <div className="font-medium text-foreground">
-                      Документ создан: #{latestResponse.created_object.number}
+                      {latestCreatedObjects.length === 1
+                        ? `Документ создан: #${latestCreatedObjects[0].number}`
+                        : `Создано документов: ${latestCreatedObjects.length}`}
                     </div>
                     <div className="mt-2 text-muted-foreground">
                       Ассистент завершил сценарий и уже положил документ в рабочий раздел.
                     </div>
-                    {latestRoute ? (
-                      <Button asChild variant="outline" size="sm" className="mt-4">
-                        <Link href={`/${latestRoute}/${latestResponse.created_object.id}/edit`}>Открыть документ</Link>
-                      </Button>
-                    ) : null}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {latestCreatedObjects.slice(0, 5).map((item) => {
+                        const route = modelToRoute(item.model)
+                        if (!route) {
+                          return null
+                        }
+                        return (
+                          <Button key={item.id} asChild variant="outline" size="sm">
+                            <Link href={`/${route}/${item.id}/edit`}>
+                              {latestCreatedObjects.length === 1 ? "Открыть документ" : `#${item.number}`}
+                            </Link>
+                          </Button>
+                        )
+                      })}
+                    </div>
                   </div>
                 ) : null}
 

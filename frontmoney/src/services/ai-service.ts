@@ -23,6 +23,7 @@ export interface AiAssistantResponse {
   reply_text: string
   missing_fields?: string[]
   created_object?: AiAssistantCreatedObject | null
+  created_objects?: AiAssistantCreatedObject[]
   preview?: Record<string, unknown> | null
   balances?: AiAssistantBalanceRow[]
   options?: Record<string, unknown> | unknown[] | null
@@ -49,6 +50,19 @@ function normalizeAiResponse(raw: any): AiAssistantResponse {
           number: raw.created_object.number,
         }
       : null,
+    created_objects: Array.isArray(raw?.created_objects)
+      ? raw.created_objects
+          .map((item: any) =>
+            item
+              ? {
+                  model: item.model,
+                  id: item.id,
+                  number: item.number,
+                }
+              : null
+          )
+          .filter((item: AiAssistantCreatedObject | null): item is AiAssistantCreatedObject => Boolean(item))
+      : [],
     preview: raw?.preview ?? null,
     balances: Array.isArray(raw?.balances)
       ? raw.balances.map((row: any) => ({

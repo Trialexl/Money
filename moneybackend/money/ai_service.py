@@ -23,6 +23,7 @@ INTENT_GET_WALLET_BALANCE = 'get_wallet_balance'
 INTENT_GET_ALL_WALLET_BALANCES = 'get_all_wallet_balances'
 INTENT_HELP_CAPABILITIES = 'help_capabilities'
 INTENT_UNKNOWN = 'unknown'
+INTENT_CREATE_MULTIPLE_OPERATIONS = 'create_multiple_operations'
 
 SUPPORTED_INTENTS = {
     INTENT_CREATE_RECEIPT,
@@ -66,7 +67,18 @@ def _parse_amount(value):
         return None
     if isinstance(value, Decimal):
         return value.quantize(Decimal('0.01'))
-    normalized = str(value).replace(' ', '').replace(',', '.')
+    raw_value = (
+        str(value)
+        .strip()
+        .replace('\xa0', ' ')
+        .replace('−', '-')
+        .replace('–', '-')
+        .replace('—', '-')
+    )
+    number_match = re.search(r'[-+]?\d[\d\s]*(?:[.,]\d{1,2})?', raw_value)
+    if not number_match:
+        return None
+    normalized = number_match.group(0).replace(' ', '').replace(',', '.')
     try:
         return Decimal(normalized).quantize(Decimal('0.01'))
     except (InvalidOperation, ValueError):
@@ -74,12 +86,11 @@ def _parse_amount(value):
 
 
 def _extract_amount_from_text(text):
-    normalized = _normalize_text(text)
-    if not normalized:
+    if not text:
         return None
 
     candidates = []
-    for match in re.finditer(r'\d[\d\s]*(?:[.,]\d{1,2})?', normalized):
+    for match in re.finditer(r'[-+−–—]?\s*\d[\d\s]*(?:[.,]\d{1,2})?', str(text)):
         amount = _parse_amount(match.group(0))
         if amount is not None:
             candidates.append(amount)
@@ -88,6 +99,30 @@ def _extract_amount_from_text(text):
         return None
 
     return max(candidates, key=lambda value: abs(value))
+
+
+def _collect_fallback_text(*parts):
+    chunks = []
+    for part in parts:
+        if part is None:
+            continue
+        if isinstance(part, (list, tuple, set)):
+            chunks.extend(str(item).strip() for item in part if str(item).strip())
+            continue
+        text = str(part).strip()
+        if text:
+            chunks.append(text)
+    return ' '.join(chunks)
+
+
+def _normalize_operation_amount(amount, *, intent, operation_sign):
+    if amount is None:
+        return None
+    if intent in {INTENT_CREATE_RECEIPT, INTENT_CREATE_EXPENDITURE, INTENT_CREATE_TRANSFER}:
+        return abs(amount)
+    if operation_sign in {'incoming', 'outgoing', 'transfer'}:
+        return abs(amount)
+    return amount
 
 
 def _detect_assistant_meta_intent(text):
@@ -426,6 +461,13 @@ class OpenRouterIntentProvider:
             'get_wallet_balance, get_all_wallet_balances, help_capabilities, unknown. '
             'Если передано изображение, считай, что это банковский скриншот операции или истории операций, '
             'и извлеки наиболее вероятную одну операцию из скриншота. '
+            'Если на изображении список или история операций, выбери одну самую вероятную строку операции: '
+            'обычно верхнюю или последнюю видимую покупку с суммой, торговой точкой и датой. '
+            'Игнорируй кнопки интерфейса, баннеры, баланс, поисковую строку и декоративные элементы. '
+            'Категорию операции вроде "Продукты", "Транспорт", "Фастфуд" используй как description или cash_flow_item_hint. '
+            'Если на изображении видно несколько денежных операций, верни их все в массиве operations. '
+            'Каждый элемент operations должен описывать одну денежную операцию. '
+            'Игнорируй бонусные баллы, кешбэк в баллах, награды, счетчики и нефинансовые элементы. '
             'Используй только доступные кошельки и статьи. '
             'Кошельки и статьи ниже являются справочниками системы: '
             'если в тексте есть совпадение по имени, коду или алиасу, обязательно верни это совпадение в соответствующем hint-поле. '
@@ -443,8 +485,10 @@ class OpenRouterIntentProvider:
             '"wallet_hint": null, "wallet_from_hint": null, "wallet_to_hint": null, '
             '"cash_flow_item_hint": null, "merchant": null, "bank_name": null, '
             '"description": null, "occurred_at": null, "operation_sign": null, '
-            '"comment": null, "include_in_budget": false}. '
+            '"comment": null, "include_in_budget": false, '
+            '"operations": [{"intent": "...", "amount": "0.00", "merchant": "..."}] | null}. '
             'operation_sign может быть incoming, outgoing, transfer или null. '
+            'amount возвращай числом без знака валюты и без символа ₽, а направление отражай в operation_sign. '
             'occurred_at возвращай в ISO 8601. '
             'Пример: если пользователь пишет "1719000 покупка машины с втб", '
             'а в доступных кошельках есть алиас "втб", то верни wallet_hint="ВТБ" или соответствующий алиас/имя кошелька, '
@@ -719,6 +763,236 @@ class AiOperationService:
             'cash_flow_items': _cash_flow_item_context(),
         }
 
+    def _is_batch_provider_payload(self, parsed):
+        return isinstance(parsed, dict) and isinstance(parsed.get('operations'), list) and len(parsed.get('operations') or []) > 1
+
+    def _is_batch_normalized(self, normalized):
+        return isinstance(normalized, dict) and bool(normalized.get('batch')) and isinstance(normalized.get('items'), list)
+
+    def _batch_intent(self, items):
+        intents = [item.get('intent') for item in items if isinstance(item, dict) and item.get('intent')]
+        unique_intents = list(dict.fromkeys(intents))
+        if len(unique_intents) == 1:
+            return unique_intents[0]
+        return INTENT_CREATE_MULTIPLE_OPERATIONS
+
+    def _merge_batch_options(self, options_list):
+        merged = {}
+        index_by_key = {}
+        next_index = 1
+
+        for options in options_list:
+            if not isinstance(options, dict):
+                continue
+            for field_name, option_list in options.items():
+                if not isinstance(option_list, list):
+                    continue
+                target = merged.setdefault(field_name, [])
+                for option in option_list:
+                    if not isinstance(option, dict):
+                        continue
+                    dedupe_key = (
+                        option.get('kind') or field_name,
+                        option.get('id') or option.get('label') or option.get('index'),
+                    )
+                    if dedupe_key in index_by_key:
+                        continue
+                    normalized_option = dict(option)
+                    normalized_option['index'] = next_index
+                    target.append(normalized_option)
+                    index_by_key[dedupe_key] = next_index
+                    next_index += 1
+
+        return merged
+
+    def _normalize_parsed_batch(self, parsed, *, explicit_wallet_id=None, source_text=None, context=None):
+        context = context or self.build_context()
+        batch_raw = dict(parsed)
+        operations = batch_raw.pop('operations', []) or []
+        normalized_items = []
+
+        for item_raw in operations:
+            if not isinstance(item_raw, dict):
+                continue
+            merged_raw = dict(batch_raw)
+            merged_raw.update(item_raw)
+            item_source_text = _collect_fallback_text(
+                item_raw.get('comment'),
+                item_raw.get('merchant'),
+                item_raw.get('description'),
+                item_raw.get('bank_name') or batch_raw.get('bank_name'),
+                item_raw.get('wallet_hint') or batch_raw.get('wallet_hint'),
+                item_raw.get('wallet_from_hint') or batch_raw.get('wallet_from_hint'),
+                item_raw.get('wallet_to_hint') or batch_raw.get('wallet_to_hint'),
+                item_raw.get('cash_flow_item_hint') or batch_raw.get('cash_flow_item_hint'),
+            )
+            normalized_items.append(
+                self._normalize_parsed(
+                    merged_raw,
+                    explicit_wallet_id=explicit_wallet_id,
+                    source_text=item_source_text or source_text,
+                    context=context,
+                )
+            )
+
+        return {
+            'batch': True,
+            'intent': self._batch_intent(normalized_items),
+            'confidence': float(parsed.get('confidence') or 0.0),
+            'items': normalized_items,
+            'raw': parsed,
+        }
+
+    def serialize_normalized_batch(self, normalized):
+        return {
+            'batch': True,
+            'intent': normalized.get('intent', INTENT_CREATE_MULTIPLE_OPERATIONS),
+            'confidence': float(normalized.get('confidence') or 0.0),
+            'items': [
+                self.serialize_normalized(item)
+                for item in normalized.get('items', [])
+                if isinstance(item, dict)
+            ],
+            'raw': normalized.get('raw', {}),
+        }
+
+    def deserialize_normalized_batch(self, payload):
+        return {
+            'batch': True,
+            'intent': payload.get('intent', INTENT_CREATE_MULTIPLE_OPERATIONS),
+            'confidence': float(payload.get('confidence') or 0.0),
+            'items': [
+                self.deserialize_normalized(item)
+                for item in payload.get('items', [])
+                if isinstance(item, dict)
+            ],
+            'raw': payload.get('raw', {}),
+        }
+
+    def apply_confirmation_answer_to_batch(self, *, normalized, answer_text, missing_fields, options_payload=None):
+        updated_items = []
+        for item in normalized.get('items', []):
+            if not isinstance(item, dict):
+                continue
+            updated_items.append(
+                self.apply_confirmation_answer(
+                    normalized=item,
+                    answer_text=answer_text,
+                    missing_fields=missing_fields,
+                    options_payload=options_payload,
+                )
+            )
+
+        return {
+            'batch': True,
+            'intent': self._batch_intent(updated_items),
+            'confidence': float(normalized.get('confidence') or 0.0),
+            'items': updated_items,
+            'raw': normalized.get('raw', {}),
+        }
+
+    def _build_batch_preview(self, item_results):
+        previews = [result.get('preview') or {} for result in item_results]
+        return {
+            'count': len(previews),
+            'items': previews,
+        }
+
+    def _build_batch_created_reply(self, created_results):
+        count = len(created_results)
+        lines = [f'Создано документов: {count}.']
+        preview_lines = []
+        for result in created_results[:10]:
+            preview = result.get('preview') or {}
+            amount = preview.get('amount') or '0.00'
+            comment = preview.get('comment') or 'Без комментария'
+            model_name = preview.get('model') or result.get('created_object', {}).get('model') or 'Document'
+            preview_lines.append(f'- {model_name}: {amount} | {comment}')
+        lines.extend(preview_lines)
+        if count > len(preview_lines):
+            lines.append(f'И еще {count - len(preview_lines)} документ(ов).')
+        return '\n'.join(lines)
+
+    def _build_batch_confirmation_reply(self, count):
+        return f'Недостаточно данных для автоматического создания {count} документов.'
+
+    def _create_multiple_financial_documents(self, normalized, *, provider_name, dry_run):
+        item_results = [
+            self._create_financial_document(item, provider_name=provider_name, dry_run=True)
+            for item in normalized.get('items', [])
+            if isinstance(item, dict)
+        ]
+
+        normalized_items = [result.get('parsed') or {} for result in item_results]
+        batch_parsed = {
+            'batch': True,
+            'intent': self._batch_intent(normalized_items),
+            'confidence': float(normalized.get('confidence') or 0.0),
+            'items': normalized_items,
+            'raw': normalized.get('raw', {}),
+        }
+
+        missing_fields = []
+        options = []
+        for result in item_results:
+            if result.get('status') != 'needs_confirmation':
+                continue
+            for field_name in result.get('missing_fields') or []:
+                if field_name not in missing_fields:
+                    missing_fields.append(field_name)
+            options.append(result.get('options') or {})
+
+        merged_options = self._merge_batch_options(options)
+        preview = self._build_batch_preview(item_results)
+
+        if missing_fields:
+            return {
+                'status': 'needs_confirmation',
+                'intent': batch_parsed['intent'],
+                'provider': provider_name,
+                'confidence': batch_parsed['confidence'],
+                'reply_text': self._build_confirmation_reply(
+                    self._build_batch_confirmation_reply(len(item_results)),
+                    merged_options,
+                    missing_fields,
+                ),
+                'missing_fields': missing_fields,
+                'options': merged_options,
+                'preview': preview,
+                'parsed': batch_parsed,
+            }
+
+        if dry_run:
+            return {
+                'status': 'preview',
+                'intent': batch_parsed['intent'],
+                'provider': provider_name,
+                'confidence': batch_parsed['confidence'],
+                'reply_text': f'Распознано {len(item_results)} операций. Документы не созданы, потому что включен dry_run.',
+                'preview': preview,
+                'parsed': batch_parsed,
+            }
+
+        created_results = []
+        with transaction.atomic():
+            for item in normalized_items:
+                created_results.append(
+                    self._create_financial_document(item, provider_name=provider_name, dry_run=False)
+                )
+
+        created_objects = [result['created_object'] for result in created_results if result.get('created_object')]
+        return {
+            'status': 'created',
+            'intent': batch_parsed['intent'],
+            'provider': provider_name,
+            'confidence': batch_parsed['confidence'],
+            'reply_text': self._build_batch_created_reply(created_results),
+            'created_object': created_objects[0] if len(created_objects) == 1 else None,
+            'created_objects': created_objects,
+            'preview': preview,
+            'parsed': batch_parsed,
+        }
+
     def process(self, *, text=None, image_bytes=None, image_mime_type=None, wallet_id=None, dry_run=False, source='web'):
         context = self.build_context()
         parsed = None
@@ -732,6 +1006,18 @@ class AiOperationService:
                 image_bytes=image_bytes,
                 image_mime_type=image_mime_type,
                 context=context,
+            )
+        if self._is_batch_provider_payload(parsed):
+            normalized_batch = self._normalize_parsed_batch(
+                parsed,
+                explicit_wallet_id=wallet_id,
+                source_text=text,
+                context=context,
+            )
+            return self._create_multiple_financial_documents(
+                normalized_batch,
+                provider_name=provider_name,
+                dry_run=dry_run,
             )
         normalized = self._normalize_parsed(
             parsed,
@@ -793,6 +1079,8 @@ class AiOperationService:
         return self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
 
     def create_from_normalized(self, *, normalized, provider_name):
+        if self._is_batch_normalized(normalized):
+            return self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=False)
         return self._create_financial_document(normalized, provider_name=provider_name, dry_run=False)
 
     def continue_confirmation(
@@ -805,6 +1093,16 @@ class AiOperationService:
         dry_run=False,
         options_payload=None,
     ):
+        if self._is_batch_normalized(normalized_payload):
+            normalized = self.deserialize_normalized_batch(normalized_payload)
+            normalized = self.apply_confirmation_answer_to_batch(
+                normalized=normalized,
+                answer_text=answer_text,
+                missing_fields=missing_fields,
+                options_payload=options_payload,
+            )
+            return self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=dry_run)
+
         normalized = self.deserialize_normalized(normalized_payload)
         normalized = self.apply_confirmation_answer(
             normalized=normalized,
@@ -828,14 +1126,27 @@ class AiOperationService:
         elif intent == INTENT_UNKNOWN and operation_sign == 'transfer':
             intent = INTENT_CREATE_TRANSFER
 
+        fallback_text = _collect_fallback_text(
+            source_text,
+            parsed.get('amount'),
+            parsed.get('wallet_hint'),
+            parsed.get('wallet_from_hint'),
+            parsed.get('wallet_to_hint'),
+            parsed.get('cash_flow_item_hint'),
+            parsed.get('merchant'),
+            parsed.get('bank_name'),
+            parsed.get('description'),
+            parsed.get('comment'),
+        )
+
         cash_flow_item = _match_cash_flow_item_by_hint(parsed.get('cash_flow_item_hint'))
         if cash_flow_item is None:
             for fallback_hint in (parsed.get('merchant'), parsed.get('description'), parsed.get('comment')):
                 cash_flow_item = _match_cash_flow_item_by_hint(fallback_hint)
                 if cash_flow_item is not None:
                     break
-        if cash_flow_item is None and source_text:
-            extracted_hint = _extract_cash_flow_item_hint(source_text, wallets)
+        if cash_flow_item is None and fallback_text:
+            extracted_hint = _extract_cash_flow_item_hint(fallback_text, wallets)
             if extracted_hint:
                 cash_flow_item = _match_cash_flow_item_by_hint(extracted_hint)
 
@@ -843,8 +1154,8 @@ class AiOperationService:
         wallet = Wallet.objects.filter(pk=explicit_wallet_id).first() if explicit_wallet_id else None
         if wallet is None:
             wallet = _match_wallet_by_hint(wallet_hint)
-        if wallet is None and source_text:
-            wallet = _match_wallet_by_hint(source_text)
+        if wallet is None and fallback_text:
+            wallet = _match_wallet_by_hint(fallback_text)
 
         comment_parts = [
             parsed.get('comment'),
@@ -855,10 +1166,19 @@ class AiOperationService:
         if not comment and source_text:
             comment = source_text.strip()
 
+        amount = _parse_amount(parsed.get('amount'))
+        if amount is None:
+            amount = _extract_amount_from_text(fallback_text)
+        amount = _normalize_operation_amount(
+            amount,
+            intent=intent,
+            operation_sign=operation_sign,
+        )
+
         return {
             'intent': intent,
             'confidence': float(parsed.get('confidence') or 0.0),
-            'amount': _parse_amount(parsed.get('amount')) or _extract_amount_from_text(source_text),
+            'amount': amount,
             'wallet': wallet,
             'wallet_from': _match_wallet_by_hint(parsed.get('wallet_from_hint') or parsed.get('bank_name')),
             'wallet_to': _match_wallet_by_hint(parsed.get('wallet_to_hint')),
@@ -1131,10 +1451,23 @@ class AiOperationService:
             lines.append(f'- {row["wallet_name"]}: {row["balance"]}')
         return '\n'.join(lines)
 
-    def _build_confirmation_reply(self, reply_text, options):
-        if not options:
+    def _build_confirmation_reply(self, reply_text, options, missing_fields=None):
+        missing_fields = missing_fields or []
+        if not options and not missing_fields:
             return reply_text
         lines = [reply_text]
+        humanized_missing_fields = {
+            'amount': 'сумма',
+            'wallet': 'кошелек',
+            'cash_flow_item': 'статья движения',
+            'wallet_from': 'кошелек списания',
+            'wallet_to': 'кошелек зачисления',
+            'binding': 'привязка Telegram',
+            'intent': 'тип команды',
+        }
+        if missing_fields:
+            labels = [humanized_missing_fields.get(field, field) for field in missing_fields]
+            lines.append(f'Не хватает: {", ".join(labels)}.')
         for field_name, option_list in options.items():
             if not option_list:
                 continue
@@ -1151,7 +1484,7 @@ class AiOperationService:
             'intent': normalized['intent'],
             'provider': provider_name,
             'confidence': normalized['confidence'],
-            'reply_text': self._build_confirmation_reply(reply_text, options),
+            'reply_text': self._build_confirmation_reply(reply_text, options, missing_fields),
             'missing_fields': missing_fields,
             'options': options,
             'preview': preview or {},

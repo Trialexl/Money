@@ -22,7 +22,7 @@ export default function EditReceiptPage() {
     queryFn: ReceiptService.getReceipt,
   })
 
-  if (receiptQuery.isLoading || receiptQuery.isFetching) {
+  if (receiptQuery.isLoading) {
     return <FullPageLoader label="Загружаем приход..." />
   }
 

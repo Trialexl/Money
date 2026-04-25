@@ -632,6 +632,7 @@ class AiAssistantResponseSerializer(serializers.Serializer):
     reply_text = serializers.CharField()
     missing_fields = serializers.ListField(child=serializers.CharField(), required=False)
     created_object = AiAssistantCreatedObjectSerializer(required=False)
+    created_objects = AiAssistantCreatedObjectSerializer(many=True, required=False)
     preview = serializers.DictField(required=False)
     balances = AiAssistantBalanceRowSerializer(many=True, required=False)
     options = serializers.DictField(required=False)

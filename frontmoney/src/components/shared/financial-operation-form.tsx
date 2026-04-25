@@ -138,6 +138,7 @@ export default function FinancialOperationForm({
   const baseCashFlowItemId = operation?.cash_flow_item || defaultCashFlowItemId || ""
   const recentItemsQuery = useQuery({
     queryKey: ["recent-operation-items", mode],
+    enabled: !isEdit,
     queryFn: async () => {
       const operations = mode === "receipt" ? await ReceiptService.getReceipts() : await ExpenditureService.getExpenditures()
       const threshold = new Date()
