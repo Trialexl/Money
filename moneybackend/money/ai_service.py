@@ -1,6 +1,8 @@
 import base64
 import json
+import mimetypes
 import re
+import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib import error, request
@@ -31,6 +33,8 @@ SUPPORTED_INTENTS = {
     INTENT_HELP_CAPABILITIES,
     INTENT_UNKNOWN,
 }
+
+TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024
 
 
 def _normalize_text(value):
@@ -154,6 +158,44 @@ def _parse_datetime_value(value):
     if timezone.is_naive(dt):
         dt = timezone.make_aware(dt, timezone.get_current_timezone())
     return dt
+
+
+def _default_audio_filename(mime_type):
+    normalized_mime_type = (mime_type or '').split(';', 1)[0].strip().lower()
+    extension = mimetypes.guess_extension(normalized_mime_type) if normalized_mime_type else None
+    if not extension:
+        extension = '.ogg'
+    return f'telegram-voice{extension}'
+
+
+def _build_multipart_form_data(*, fields, files):
+    boundary = f'----MoneyBoundary{uuid.uuid4().hex}'
+    chunks = []
+
+    for field_name, value in fields.items():
+        if value in (None, ''):
+            continue
+        chunks.extend([
+            f'--{boundary}\r\n'.encode('utf-8'),
+            f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n'.encode('utf-8'),
+            str(value).encode('utf-8'),
+            b'\r\n',
+        ])
+
+    for file_info in files:
+        chunks.extend([
+            f'--{boundary}\r\n'.encode('utf-8'),
+            (
+                f'Content-Disposition: form-data; name="{file_info["field_name"]}"; '
+                f'filename="{file_info["file_name"]}"\r\n'
+            ).encode('utf-8'),
+            f'Content-Type: {file_info["content_type"]}\r\n\r\n'.encode('utf-8'),
+            file_info['content'],
+            b'\r\n',
+        ])
+
+    chunks.append(f'--{boundary}--\r\n'.encode('utf-8'))
+    return boundary, b''.join(chunks)
 
 
 def _serialize_options(items, *, kind):
@@ -431,6 +473,63 @@ class GeminiIntentProvider(OpenRouterIntentProvider):
         )
 
 
+class OpenAiTranscriptionService:
+    def __init__(self, *, api_key, model_name, base_url, language=None, prompt=''):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.base_url = base_url
+        self.language = language
+        self.prompt = prompt
+
+    def transcribe(self, *, audio_bytes, audio_mime_type=None, file_name=None):
+        if not audio_bytes:
+            raise ValueError('Пустое голосовое сообщение.')
+        if len(audio_bytes) > TRANSCRIPTION_MAX_BYTES:
+            raise ValueError('Голосовое сообщение слишком большое для распознавания.')
+
+        boundary, body = _build_multipart_form_data(
+            fields={
+                'model': self.model_name,
+                'response_format': 'json',
+                'language': self.language,
+                'prompt': self.prompt,
+            },
+            files=[
+                {
+                    'field_name': 'file',
+                    'file_name': file_name or _default_audio_filename(audio_mime_type),
+                    'content_type': audio_mime_type or 'audio/ogg',
+                    'content': audio_bytes,
+                }
+            ],
+        )
+
+        http_request = request.Request(
+            self.base_url,
+            data=body,
+            headers={
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': f'multipart/form-data; boundary={boundary}',
+            },
+            method='POST',
+        )
+
+        try:
+            with request.urlopen(http_request, timeout=60) as response:
+                raw = json.loads(response.read().decode('utf-8'))
+        except error.HTTPError as exc:
+            error_body = exc.read().decode('utf-8', errors='ignore')
+            raise ValueError(f'OpenAI transcription failed: {error_body or exc.reason}') from exc
+        except error.URLError as exc:
+            raise ValueError(f'OpenAI transcription failed: {exc.reason}') from exc
+
+        transcript = ((raw or {}).get('text') or '').strip()
+        if not transcript:
+            raise ValueError('OpenAI transcription response does not contain text.')
+
+        return transcript
+
+
 class RuleBasedIntentProvider:
     def parse(self, *, text=None, image_bytes=None, image_mime_type=None, context=None):
         context = context or {}
@@ -530,6 +629,24 @@ def _get_intent_provider():
     raise ValueError(f'Unknown AI provider: {provider_name}')
 
 
+def _get_transcription_service():
+    api_key = getattr(settings, 'AI_OPENAI_API_KEY', '')
+    if not api_key:
+        raise ValueError('Голосовые пока недоступны: не настроен AI_OPENAI_API_KEY.')
+
+    return OpenAiTranscriptionService(
+        api_key=api_key,
+        model_name=getattr(settings, 'AI_OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
+        base_url=getattr(
+            settings,
+            'AI_OPENAI_TRANSCRIBE_BASE_URL',
+            'https://api.openai.com/v1/audio/transcriptions',
+        ),
+        language=getattr(settings, 'AI_OPENAI_TRANSCRIBE_LANGUAGE', 'ru'),
+        prompt=getattr(settings, 'AI_OPENAI_TRANSCRIBE_PROMPT', ''),
+    )
+
+
 def _wallet_balance(wallet, *, at_time=None):
     at_time = at_time or timezone.now()
     balance = (
@@ -555,6 +672,14 @@ def _all_wallet_balances(*, at_time=None):
 
 
 class AiOperationService:
+    def transcribe_audio(self, *, audio_bytes, audio_mime_type=None, file_name=None):
+        transcription_service = _get_transcription_service()
+        return transcription_service.transcribe(
+            audio_bytes=audio_bytes,
+            audio_mime_type=audio_mime_type,
+            file_name=file_name,
+        )
+
     def detect_meta_intent(self, text):
         return _detect_assistant_meta_intent(text)
 
@@ -564,6 +689,7 @@ class AiOperationService:
             '- создавать приход, расход и перевод по тексту;',
             '- показывать остаток по одному кошельку или по всем кошелькам;',
             '- разбирать банковские скриншоты и предлагать документ;',
+            '- принимать голосовые сообщения в Telegram и распознавать их как обычный текст;',
             '- задавать уточняющие вопросы, если не хватает суммы, кошелька или статьи.',
             'Примеры:',
             'приход сбер зарплата 15000',

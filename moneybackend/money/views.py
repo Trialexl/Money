@@ -1733,6 +1733,9 @@ class AiAssistantViewSet(viewsets.ViewSet):
             key=lambda item: (item.get('file_size') or 0, item.get('width') or 0, item.get('height') or 0),
         )
 
+    def _telegram_audio_attachment(self, message):
+        return message.get('voice') or message.get('audio')
+
     def _telegram_bot_api_url(self, path, *, query=None, file_download=False):
         token = getattr(settings, 'AI_TELEGRAM_BOT_TOKEN', '')
         if not token:
@@ -1747,14 +1750,9 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 url = f'{url}?{urlparse.urlencode(query)}'
         return url
 
-    def _download_telegram_photo(self, message):
-        photo = self._largest_telegram_photo(message)
-        if photo is None:
-            return None, None
-
-        file_id = photo.get('file_id')
+    def _download_telegram_file(self, *, file_id):
         if not file_id:
-            return None, None
+            return None, None, None, None
 
         file_request = urlrequest.Request(
             self._telegram_bot_api_url('getFile', query={'file_id': file_id}),
@@ -1769,7 +1767,8 @@ class AiAssistantViewSet(viewsets.ViewSet):
         except urlerror.URLError as exc:
             raise ValueError(f'Telegram getFile failed: {exc.reason}') from exc
 
-        file_path = ((file_meta or {}).get('result') or {}).get('file_path')
+        file_result = (file_meta or {}).get('result') or {}
+        file_path = file_result.get('file_path')
         if not file_path:
             raise ValueError('Telegram getFile response does not contain file_path.')
 
@@ -1788,7 +1787,31 @@ class AiAssistantViewSet(viewsets.ViewSet):
             raise ValueError(f'Telegram file download failed: {exc.reason}') from exc
 
         guessed_content_type, _ = mimetypes.guess_type(file_path)
-        return image_bytes, content_type or guessed_content_type or 'image/jpeg'
+        resolved_content_type = content_type if content_type and content_type != 'application/octet-stream' else guessed_content_type
+        return image_bytes, resolved_content_type or 'application/octet-stream', file_path, file_result.get('file_size')
+
+    def _download_telegram_photo(self, message):
+        photo = self._largest_telegram_photo(message)
+        if photo is None:
+            return None, None
+
+        image_bytes, content_type, _, _ = self._download_telegram_file(file_id=photo.get('file_id'))
+        return image_bytes, content_type or 'image/jpeg'
+
+    def _download_telegram_audio(self, message):
+        attachment = self._telegram_audio_attachment(message)
+        if attachment is None:
+            return None, None, None
+
+        file_size = attachment.get('file_size') or 0
+        if file_size and file_size > 20 * 1024 * 1024:
+            raise ValueError('Telegram не позволяет скачать аудиофайл больше 20 MB через стандартный Bot API.')
+
+        audio_bytes, content_type, file_path, _ = self._download_telegram_file(file_id=attachment.get('file_id'))
+        file_name = attachment.get('file_name')
+        if not file_name and file_path:
+            file_name = file_path.rsplit('/', 1)[-1]
+        return audio_bytes, content_type or attachment.get('mime_type') or 'audio/ogg', file_name
 
     def _build_telegram_photo_error_response(self, error_message):
         return {
@@ -1798,6 +1821,17 @@ class AiAssistantViewSet(viewsets.ViewSet):
             'confidence': 0.0,
             'reply_text': error_message,
             'missing_fields': ['image'],
+            'parsed': {'source': 'telegram'},
+        }
+
+    def _build_telegram_audio_error_response(self, error_message):
+        return {
+            'status': 'needs_confirmation',
+            'intent': 'unknown',
+            'provider': 'telegram',
+            'confidence': 0.0,
+            'reply_text': error_message,
+            'missing_fields': ['audio'],
             'parsed': {'source': 'telegram'},
         }
 
@@ -2103,7 +2137,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
         responses={200: AiAssistantResponseSerializer},
         description=(
             'Webhook для Telegram-бота. '
-            'Принимает text, caption или photo из update и возвращает нормализованный reply.'
+            'Принимает text, caption, photo, voice или audio из update и возвращает нормализованный reply.'
         ),
     )
     @action(detail=False, methods=['post'], url_path='telegram-webhook')
@@ -2121,6 +2155,11 @@ class AiAssistantViewSet(viewsets.ViewSet):
         binding = self._resolve_telegram_binding(message)
         text = message.get('text') or message.get('caption')
         has_photo = bool(message.get('photo'))
+        has_audio = bool(self._telegram_audio_attachment(message))
+        effective_text = text
+        audio_bytes = None
+        audio_mime_type = None
+        audio_file_name = None
 
         if text and self.get_operation_service().detect_meta_intent(text):
             result = self._build_telegram_help_response(binding=binding)
@@ -2170,7 +2209,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             self._create_audit_log(
                 source='telegram',
                 result=result,
-                input_text=text or '',
+                input_text=effective_text or '',
                 telegram_binding=binding,
             )
             return self._telegram_response(binding=binding, message=message, result=result, http_status=status.HTTP_200_OK)
@@ -2192,7 +2231,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 self._create_audit_log(
                     source='telegram',
                     result=duplicate_result,
-                    input_text=text or '',
+                    input_text=effective_text or '',
                     user=binding.user,
                     telegram_binding=binding,
                     processed_input=existing_update,
@@ -2210,6 +2249,41 @@ class AiAssistantViewSet(viewsets.ViewSet):
                     source='telegram',
                     result=result,
                     input_text=text or '',
+                    user=binding.user,
+                    telegram_binding=binding,
+                )
+                return self._telegram_response(binding=binding, message=message, result=result, http_status=status.HTTP_200_OK)
+
+        if has_audio:
+            try:
+                audio_bytes, audio_mime_type, audio_file_name = self._download_telegram_audio(message)
+                transcript_text = self.get_operation_service().transcribe_audio(
+                    audio_bytes=audio_bytes,
+                    audio_mime_type=audio_mime_type,
+                    file_name=audio_file_name,
+                )
+            except ValueError as exc:
+                result = self._build_telegram_audio_error_response(str(exc))
+                self._create_audit_log(
+                    source='telegram',
+                    result=result,
+                    input_text=text or '',
+                    user=binding.user,
+                    telegram_binding=binding,
+                )
+                return self._telegram_response(binding=binding, message=message, result=result, http_status=status.HTTP_200_OK)
+
+            effective_text = (
+                f'{text.strip()}\n{transcript_text}'
+                if text and text.strip()
+                else transcript_text
+            )
+            if self.get_operation_service().detect_meta_intent(effective_text):
+                result = self._build_telegram_help_response(binding=binding)
+                self._create_audit_log(
+                    source='telegram',
+                    result=result,
+                    input_text=effective_text,
                     user=binding.user,
                     telegram_binding=binding,
                 )
@@ -2233,25 +2307,25 @@ class AiAssistantViewSet(viewsets.ViewSet):
             self._create_audit_log(
                 source='telegram',
                 result=result,
-                input_text=text,
+                input_text=effective_text or text,
                 user=binding.user,
                 telegram_binding=binding,
                 pending_confirmation=pending,
             )
             return self._telegram_response(binding=binding, message=message, result=result, http_status=status.HTTP_200_OK)
 
-        is_new_command = has_photo or self._looks_like_new_command(text)
+        is_new_command = has_photo or self._looks_like_new_command(effective_text)
 
         if pending and not is_new_command:
             result = self.get_operation_service().continue_confirmation(
                 normalized_payload=pending.normalized_payload,
                 missing_fields=pending.missing_fields,
-                answer_text=text,
+                answer_text=effective_text,
                 provider_name=pending.provider or 'telegram-confirmation',
                 dry_run=True,
                 options_payload=pending.options_payload,
             )
-            pending.confirmation_history = list(pending.confirmation_history) + [{'answer_text': text}]
+            pending.confirmation_history = list(pending.confirmation_history) + [{'answer_text': effective_text}]
             if result.get('status') == 'needs_confirmation':
                 pending.normalized_payload = self._serialize_result_parsed_payload(result['parsed'])
                 pending.missing_fields = result.get('missing_fields') or []
@@ -2270,7 +2344,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                     self._create_audit_log(
                         source='telegram',
                         result=duplicate_result,
-                        input_text=text,
+                        input_text=effective_text,
                         user=binding.user,
                         telegram_binding=binding,
                         processed_input=semantic_duplicate,
@@ -2287,8 +2361,8 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 fingerprint, normalized_text, image_sha256 = self._build_input_fingerprint(
                     source='telegram',
                     actor_key=f'tg:{binding.telegram_user_id}',
-                    text=text,
-                    image_bytes=None,
+                    text=effective_text,
+                    image_bytes=audio_bytes,
                 )
                 duplicate = self._recent_duplicate(
                     source='telegram',
@@ -2322,7 +2396,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 self._create_audit_log(
                     source='telegram',
                     result=result,
-                    input_text=text,
+                    input_text=effective_text,
                     image_sha256=image_sha256,
                     user=binding.user,
                     telegram_binding=binding,
@@ -2334,7 +2408,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 self._create_audit_log(
                     source='telegram',
                     result=result,
-                    input_text=text,
+                    input_text=effective_text,
                     user=binding.user,
                     telegram_binding=binding,
                     pending_confirmation=pending,
@@ -2353,8 +2427,8 @@ class AiAssistantViewSet(viewsets.ViewSet):
         fingerprint, normalized_text, image_sha256 = self._build_input_fingerprint(
             source='telegram',
             actor_key=f'tg:{binding.telegram_user_id}',
-            text=text,
-            image_bytes=image_bytes,
+            text=effective_text,
+            image_bytes=image_bytes or audio_bytes,
         )
         duplicate = self._recent_duplicate(
             source='telegram',
@@ -2367,7 +2441,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             self._create_audit_log(
                 source='telegram',
                 result=duplicate_result,
-                input_text=text,
+                input_text=effective_text,
                 user=binding.user,
                 telegram_binding=binding,
                 processed_input=duplicate,
@@ -2375,7 +2449,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             return self._telegram_response(binding=binding, message=message, result=duplicate_result, http_status=status.HTTP_200_OK)
 
         result = self.get_operation_service().process(
-            text=text,
+            text=effective_text,
             image_bytes=image_bytes,
             image_mime_type=image_mime_type,
             dry_run=True,
@@ -2393,7 +2467,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 self._create_audit_log(
                     source='telegram',
                     result=duplicate_result,
-                    input_text=text,
+                    input_text=effective_text,
                     user=binding.user,
                     telegram_binding=binding,
                     processed_input=semantic_duplicate,
@@ -2423,7 +2497,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
         self._create_audit_log(
             source='telegram',
             result=result,
-            input_text=text,
+            input_text=effective_text,
             image_sha256=image_sha256,
             user=binding.user,
             telegram_binding=binding,

@@ -2442,6 +2442,49 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('wallet_hint', prompt)
         self.assertIn('cash_flow_item_hint', prompt)
 
+    @override_settings(
+        AI_OPENAI_API_KEY='openai-test-key',
+        AI_OPENAI_TRANSCRIBE_BASE_URL='https://api.openai.com/v1/audio/transcriptions',
+        AI_OPENAI_TRANSCRIBE_MODEL='gpt-4o-mini-transcribe',
+        AI_OPENAI_TRANSCRIBE_LANGUAGE='ru',
+    )
+    def test_openai_transcription_service_calls_audio_transcriptions_endpoint(self):
+        service = ai_service.OpenAiTranscriptionService(
+            api_key='openai-test-key',
+            model_name='gpt-4o-mini-transcribe',
+            base_url='https://api.openai.com/v1/audio/transcriptions',
+            language='ru',
+        )
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({'text': 'расход сбер еда 2500'}).encode('utf-8')
+
+        with patch('money.ai_service.request.urlopen', return_value=_FakeResponse()) as mocked_urlopen:
+            transcript = service.transcribe(
+                audio_bytes=b'fake-voice-bytes',
+                audio_mime_type='audio/ogg',
+                file_name='voice.ogg',
+            )
+
+        self.assertEqual(transcript, 'расход сбер еда 2500')
+        http_request = mocked_urlopen.call_args.args[0]
+        request_headers = {key.lower(): value for key, value in http_request.header_items()}
+        self.assertEqual(http_request.full_url, 'https://api.openai.com/v1/audio/transcriptions')
+        self.assertEqual(request_headers['authorization'], 'Bearer openai-test-key')
+        self.assertIn('multipart/form-data', request_headers['content-type'])
+        self.assertIn(b'name="model"', http_request.data)
+        self.assertIn(b'gpt-4o-mini-transcribe', http_request.data)
+        self.assertIn(b'name="language"', http_request.data)
+        self.assertIn(b'\r\nru\r\n', http_request.data)
+        self.assertIn(b'filename="voice.ogg"', http_request.data)
+
     def test_ai_execute_returns_preview_when_required_fields_missing(self):
         response = self.client.post(
             '/api/v1/ai/execute/',
@@ -2581,6 +2624,51 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('file_id=large-photo', first_request.full_url)
         self.assertIn('/file/bottelegram-bot-token/photos/expense.jpg', second_request.full_url)
         self.assertIn('/bottelegram-bot-token/sendMessage', third_request.full_url)
+
+    def test_ai_telegram_webhook_transcribes_voice_and_creates_expenditure(self):
+        client = APIClient()
+
+        with patch(
+            'money.views.AiAssistantViewSet._download_telegram_audio',
+            return_value=(b'fake-telegram-voice', 'audio/ogg', 'expense.ogg'),
+        ) as mocked_download_audio:
+            with patch(
+                'money.ai_service.AiOperationService.transcribe_audio',
+                return_value='расход сбер еда 2500',
+            ) as mocked_transcribe_audio:
+                with patch('money.views.AiAssistantViewSet._send_telegram_reply', return_value=None):
+                    response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 188,
+                            'message': {
+                                'message_id': 198,
+                                'voice': {
+                                    'file_id': 'voice-file',
+                                    'file_size': 1024,
+                                    'duration': 4,
+                                    'mime_type': 'audio/ogg',
+                                },
+                                'chat': {'id': 1808},
+                                'from': {'id': 1908, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        expenditure = Expenditure.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(expenditure.wallet, self.wallet_sber)
+        self.assertEqual(expenditure.cash_flow_item, self.expense_item)
+        self.assertEqual(expenditure.amount, Decimal('2500.00'))
+        mocked_download_audio.assert_called_once()
+        mocked_transcribe_audio.assert_called_once_with(
+            audio_bytes=b'fake-telegram-voice',
+            audio_mime_type='audio/ogg',
+            file_name='expense.ogg',
+        )
 
     @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
     def test_ai_telegram_webhook_sends_reply_message(self):

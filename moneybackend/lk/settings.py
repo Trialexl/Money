@@ -175,6 +175,14 @@ AI_OPENROUTER_BASE_URL = config(
 )
 AI_OPENROUTER_SITE_URL = config('AI_OPENROUTER_SITE_URL', default='')
 AI_OPENROUTER_APP_NAME = config('AI_OPENROUTER_APP_NAME', default='djangolk')
+AI_OPENAI_API_KEY = config('AI_OPENAI_API_KEY', default='')
+AI_OPENAI_TRANSCRIBE_MODEL = config('AI_OPENAI_TRANSCRIBE_MODEL', default='gpt-4o-mini-transcribe')
+AI_OPENAI_TRANSCRIBE_BASE_URL = config(
+    'AI_OPENAI_TRANSCRIBE_BASE_URL',
+    default='https://api.openai.com/v1/audio/transcriptions',
+)
+AI_OPENAI_TRANSCRIBE_LANGUAGE = config('AI_OPENAI_TRANSCRIBE_LANGUAGE', default='ru')
+AI_OPENAI_TRANSCRIBE_PROMPT = config('AI_OPENAI_TRANSCRIBE_PROMPT', default='')
 AI_ALLOW_RULE_BASED_FALLBACK = config('AI_ALLOW_RULE_BASED_FALLBACK', default=True, cast=bool)
 AI_TELEGRAM_BOT_SECRET = config('AI_TELEGRAM_BOT_SECRET', default='')
 AI_TELEGRAM_BOT_TOKEN = config('AI_TELEGRAM_BOT_TOKEN', default='')

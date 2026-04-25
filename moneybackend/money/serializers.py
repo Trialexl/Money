@@ -549,8 +549,8 @@ class AiAssistantTelegramWebhookSerializer(serializers.Serializer):
         message = attrs.get('message') or attrs.get('edited_message')
         if not message:
             raise serializers.ValidationError('В Telegram update отсутствует message.')
-        if not message.get('text') and not message.get('caption') and not message.get('photo'):
-            raise serializers.ValidationError('Поддерживаются текст, caption или photo.')
+        if not any(message.get(field_name) for field_name in ('text', 'caption', 'photo', 'voice', 'audio')):
+            raise serializers.ValidationError('Поддерживаются text, caption, photo, voice или audio.')
         return attrs
 
 
