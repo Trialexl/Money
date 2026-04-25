@@ -472,18 +472,23 @@ def _get_intent_provider():
     raise ValueError(f'Unknown AI provider: {provider_name}')
 
 
-def _wallet_balance(wallet):
-    balance = FlowOfFunds.objects.filter(wallet=wallet).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+def _wallet_balance(wallet, *, at_time=None):
+    at_time = at_time or timezone.now()
+    balance = (
+        FlowOfFunds.objects.filter(wallet=wallet, period__lte=at_time).aggregate(total=Sum('amount'))['total']
+        or Decimal('0.00')
+    )
     return balance.quantize(Decimal('0.01'))
 
 
-def _all_wallet_balances():
+def _all_wallet_balances(*, at_time=None):
+    at_time = at_time or timezone.now()
     rows = []
     for wallet in Wallet.objects.filter(deleted=False).order_by('name'):
         rows.append({
             'wallet_id': str(wallet.id),
             'wallet_name': wallet.name,
-            'balance': _serialize_decimal(_wallet_balance(wallet)),
+            'balance': _serialize_decimal(_wallet_balance(wallet, at_time=at_time)),
         })
     return rows
 
@@ -515,7 +520,7 @@ class AiOperationService:
 
         intent = normalized['intent']
         if intent == INTENT_GET_ALL_WALLET_BALANCES:
-            balances = _all_wallet_balances()
+            balances = _all_wallet_balances(at_time=timezone.now())
             return {
                 'status': 'balance',
                 'intent': intent,
@@ -535,7 +540,7 @@ class AiOperationService:
                     missing_fields=['wallet'],
                     reply_text='Не удалось однозначно определить кошелек для запроса остатка.',
                 )
-            balance = _wallet_balance(wallet)
+            balance = _wallet_balance(wallet, at_time=timezone.now())
             return {
                 'status': 'balance',
                 'intent': intent,

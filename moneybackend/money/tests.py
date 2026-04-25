@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from unittest.mock import patch
@@ -2000,6 +2001,50 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.data['intent'], 'get_wallet_balance')
         self.assertEqual(response.data['balances'][0]['wallet_name'], 'Сбербанк')
         self.assertEqual(response.data['balances'][0]['balance'], '10000.00')
+
+    def test_ai_execute_returns_wallet_balance_for_current_date_only(self):
+        FlowOfFunds.objects.create(
+            document_id=uuid.uuid4(),
+            period=timezone.now() + timedelta(days=7),
+            type_of_document=3,
+            wallet=self.wallet_sber,
+            cash_flow_item=self.income_item,
+            amount=Decimal('5000.00'),
+        )
+
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'какой остаток на сбер',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['balances'][0]['balance'], '10000.00')
+
+    def test_ai_execute_returns_all_wallet_balances_for_current_date_only(self):
+        FlowOfFunds.objects.create(
+            document_id=uuid.uuid4(),
+            period=timezone.now() + timedelta(days=7),
+            type_of_document=3,
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.income_item,
+            amount=Decimal('7000.00'),
+        )
+
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'остатки по кошелькам',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        balances = {row['wallet_name']: row['balance'] for row in response.data['balances']}
+        self.assertEqual(balances['Сбербанк'], '10000.00')
+        self.assertEqual(balances['Альфа'], '0.00')
 
     def test_ai_execute_creates_expenditure_from_wallet_and_item_aliases(self):
         response = self.client.post(
