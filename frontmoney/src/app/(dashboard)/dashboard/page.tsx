@@ -39,16 +39,13 @@ import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { CashFlowItemService } from "@/services/cash-flow-item-service"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
 import { cn } from "@/lib/utils"
-import { ExpenditureService, ReceiptService, TransferService } from "@/services/financial-operations-service"
-import { DashboardService, type DashboardBudgetExpenseItem, type DashboardWalletSummary } from "@/services/dashboard-service"
-
-type DashboardActivity =
-  | { id: string; kind: "receipt"; date: string; amount: number; description?: string; wallet: string; cash_flow_item: string }
-  | { id: string; kind: "expenditure"; date: string; amount: number; description?: string; wallet: string; cash_flow_item: string }
-  | { id: string; kind: "transfer"; date: string; amount: number; description?: string; wallet_from: string; wallet_to: string }
+import {
+  DashboardService,
+  type DashboardBudgetExpenseItem,
+  type DashboardRecentActivity,
+} from "@/services/dashboard-service"
 
 type ActivityFilter = "all" | "receipt" | "expenditure" | "transfer"
 
@@ -75,20 +72,18 @@ export default function DashboardPage() {
   const dashboardQuery = useQuery({
     queryKey: ["dashboard-overview", { selectedDate, showHiddenWallets }],
     queryFn: async () => {
-      const [overview, receipts, expenditures, transfers, cashFlowItems] = await Promise.all([
+      const [overview, recentActivity] = await Promise.all([
         DashboardService.getOverview({ date: selectedDate, hideHiddenWallets: !showHiddenWallets }),
-        ReceiptService.getReceipts().then((items) => items.filter((item) => !item.deleted)),
-        ExpenditureService.getExpenditures().then((items) => items.filter((item) => !item.deleted)),
-        TransferService.getTransfers().then((items) => items.filter((item) => !item.deleted)),
-        CashFlowItemService.getCashFlowItems().then((items) => items.filter((item) => !item.deleted)),
+        DashboardService.getRecentActivity({
+          date: selectedDate,
+          hideHiddenWallets: !showHiddenWallets,
+          limit: 20,
+        }),
       ])
 
       return {
         overview,
-        receipts,
-        expenditures,
-        transfers,
-        cashFlowItems,
+        recentActivity,
       }
     },
     staleTime: 60_000,
@@ -109,13 +104,8 @@ export default function DashboardPage() {
     )
   }
 
-  const { overview, receipts, expenditures, transfers, cashFlowItems } = dashboardQuery.data
-  const walletNameMap = Object.fromEntries(
-    overview.wallets.map((wallet: DashboardWalletSummary) => [wallet.wallet_id, wallet.wallet_name])
-  )
-  const cashFlowItemNameMap = Object.fromEntries(
-    cashFlowItems.map((item) => [item.id, item.name || "Без статьи"])
-  )
+  const overview = dashboardQuery.data.overview
+  const allRecentActivity: DashboardRecentActivity[] = dashboardQuery.data.recentActivity
 
   const currentMonthIncome = overview.month_comparison.current_month.income
   const currentMonthExpense = overview.month_comparison.current_month.expense
@@ -129,15 +119,6 @@ export default function DashboardPage() {
     .filter((item) => item.overrun > 0)
     .sort((left, right) => right.overrun - left.overrun)
     .slice(0, 5)
-
-  const allRecentActivity: DashboardActivity[] = [
-    ...receipts.map((receipt) => ({ ...receipt, kind: "receipt" as const })),
-    ...expenditures.map((expenditure) => ({ ...expenditure, kind: "expenditure" as const })),
-    ...transfers.map((transfer) => ({ ...transfer, kind: "transfer" as const })),
-  ]
-    .filter((item) => new Date(item.date).getTime() <= new Date(`${selectedDate}T23:59:59`).getTime())
-    .sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime())
-    .slice(0, 20)
 
   const recentActivity = allRecentActivity.filter((item) => activityFilter === "all" || item.kind === activityFilter)
 
@@ -155,7 +136,7 @@ export default function DashboardPage() {
     setIsDatePickerOpen(false)
   }
 
-  const getActivityDuplicateHref = (operation: DashboardActivity) => {
+  const getActivityDuplicateHref = (operation: DashboardRecentActivity) => {
     const params = new URLSearchParams({ duplicate: operation.id })
 
     if (operation.kind === "receipt" || operation.kind === "expenditure") {
@@ -518,8 +499,8 @@ export default function DashboardPage() {
                     >
                       <div className="truncate text-sm font-medium text-foreground">
                         {operation.kind === "transfer"
-                          ? `${walletNameMap[operation.wallet_from] || "Без кошелька"} → ${walletNameMap[operation.wallet_to] || "Без кошелька"}`
-                          : `${walletNameMap[operation.wallet] || "Без кошелька"} · ${cashFlowItemNameMap[operation.cash_flow_item] || "Без статьи"}`}
+                          ? `${operation.wallet_from_name || "Без кошелька"} → ${operation.wallet_to_name || "Без кошелька"}`
+                          : `${operation.wallet_name || "Без кошелька"} · ${operation.cash_flow_item_name || "Без статьи"}`}
                       </div>
                       <div className="mt-1 text-xs leading-4 text-muted-foreground">
                         {operation.description ? <div className="truncate">{operation.description}</div> : null}

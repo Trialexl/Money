@@ -13,8 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency, formatDate } from "@/lib/formatters"
-import { ExpenditureService, ReceiptService } from "@/services/financial-operations-service"
-import { WalletService } from "@/services/wallet-service"
+import { WalletService, type WalletRecentOperation } from "@/services/wallet-service"
 
 export default function WalletDetailPage() {
   const params = useParams()
@@ -24,14 +23,12 @@ export default function WalletDetailPage() {
     queryKey: ["wallet", idParam],
     enabled: Boolean(idParam),
     queryFn: async () => {
-      const [wallet, balance, receipts, expenditures] = await Promise.all([
+      const [wallet, summary] = await Promise.all([
         WalletService.getWallet(idParam as string),
-        WalletService.getWalletBalance(idParam as string),
-        ReceiptService.getReceipts(),
-        ExpenditureService.getExpenditures(),
+        WalletService.getWalletSummary(idParam as string),
       ])
 
-      return { wallet, balance, receipts, expenditures }
+      return { wallet, summary }
     },
   })
 
@@ -54,17 +51,8 @@ export default function WalletDetailPage() {
     )
   }
 
-  const { wallet, balance, receipts, expenditures } = walletQuery.data
-  const walletReceipts = receipts.filter((receipt) => receipt.wallet === wallet.id)
-  const walletExpenditures = expenditures.filter((expenditure) => expenditure.wallet === wallet.id)
-  const totalIncome = walletReceipts.reduce((sum, receipt) => sum + receipt.amount, 0)
-  const totalExpense = walletExpenditures.reduce((sum, expenditure) => sum + expenditure.amount, 0)
-  const recentOperations = [
-    ...walletReceipts.map((receipt) => ({ ...receipt, kind: "receipt" as const })),
-    ...walletExpenditures.map((expenditure) => ({ ...expenditure, kind: "expenditure" as const })),
-  ]
-    .sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime())
-    .slice(0, 10)
+  const wallet = walletQuery.data.wallet
+  const summary = walletQuery.data.summary
 
   return (
     <div className="space-y-8">
@@ -88,9 +76,9 @@ export default function WalletDetailPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Текущий баланс" value={formatCurrency(balance.balance)} hint="По данным backend endpoint balance/" icon={Wallet2} />
-        <StatCard label="Всего приходов" value={formatCurrency(totalIncome)} hint="Сумма всех приходов по этому кошельку" icon={ArrowUpRight} tone="positive" />
-        <StatCard label="Всего расходов" value={formatCurrency(totalExpense)} hint="Сумма всех расходов по этому кошельку" icon={ArrowDownRight} tone="danger" />
+        <StatCard label="Текущий баланс" value={formatCurrency(summary.balance)} hint="По данным backend summary endpoint" icon={Wallet2} />
+        <StatCard label="Всего приходов" value={formatCurrency(summary.income_total)} hint="Сумма всех приходов по этому кошельку" icon={ArrowUpRight} tone="positive" />
+        <StatCard label="Всего расходов" value={formatCurrency(summary.expense_total)} hint="Сумма всех расходов по этому кошельку" icon={ArrowDownRight} tone="danger" />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
@@ -143,8 +131,8 @@ export default function WalletDetailPage() {
             <CardDescription>Последние 10 движений по этому кошельку.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {recentOperations.length > 0 ? (
-              recentOperations.map((operation) => (
+            {summary.recent_operations.length > 0 ? (
+              summary.recent_operations.map((operation: WalletRecentOperation) => (
                 <div key={`${operation.kind}-${operation.id}`} className="flex items-start justify-between gap-4 rounded-[22px] border border-border/60 bg-background/70 px-4 py-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">

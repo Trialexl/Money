@@ -25,6 +25,31 @@ export interface WalletBalancesSnapshot {
   total_wallets: number
 }
 
+export type WalletRecentOperation =
+  | {
+      id: string
+      kind: "receipt"
+      date: string
+      amount: number
+      description?: string
+    }
+  | {
+      id: string
+      kind: "expenditure"
+      date: string
+      amount: number
+      description?: string
+    }
+
+export interface WalletSummary {
+  wallet_id: string
+  wallet_name: string
+  balance: number
+  income_total: number
+  expense_total: number
+  recent_operations: WalletRecentOperation[]
+}
+
 export const WalletService = {
   getWallets: async () => {
     const { data } = await api.get<any[]>("/wallets/")
@@ -85,6 +110,27 @@ export const WalletService = {
       currency: data?.currency ?? "RUB",
       last_updated: fromApiDateTime(data?.last_updated) ?? data?.last_updated ?? undefined,
     } satisfies WalletBalanceResponse
+  },
+
+  getWalletSummary: async (id: string) => {
+    const { data } = await api.get<any>(`/wallets/${id}/summary/`)
+
+    return {
+      wallet_id: data?.wallet_id ?? id,
+      wallet_name: data?.wallet_name ?? "",
+      balance: fromApiAmount(data?.balance),
+      income_total: fromApiAmount(data?.income_total),
+      expense_total: fromApiAmount(data?.expense_total),
+      recent_operations: Array.isArray(data?.recent_operations)
+        ? data.recent_operations.map((item: any) => ({
+            id: item?.id ?? "",
+            kind: item?.kind === "receipt" ? "receipt" : "expenditure",
+            date: fromApiDateTime(item?.date) ?? "",
+            amount: fromApiAmount(item?.amount),
+            description: typeof item?.description === "string" && item.description.trim() ? item.description : undefined,
+          }))
+        : [],
+    } satisfies WalletSummary
   },
 
   getWalletBalances: async () => {

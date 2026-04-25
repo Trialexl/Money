@@ -191,6 +191,12 @@ class DashboardOverviewQuerySerializer(serializers.Serializer):
     hide_hidden_wallets = serializers.BooleanField(required=False, default=True)
 
 
+class DashboardRecentActivityQuerySerializer(serializers.Serializer):
+    date = serializers.DateTimeField(required=False)
+    hide_hidden_wallets = serializers.BooleanField(required=False, default=True)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
+
+
 class WalletBalanceResponseSerializer(serializers.Serializer):
     wallet_id = serializers.UUIDField()
     wallet_name = serializers.CharField()
@@ -203,6 +209,23 @@ class WalletBalancesResponseSerializer(serializers.Serializer):
     balances = WalletBalanceResponseSerializer(many=True)
     total_wallets = serializers.IntegerField()
     total_balance = serializers.FloatField()
+
+
+class WalletSummaryOperationSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    kind = serializers.ChoiceField(choices=['receipt', 'expenditure'])
+    date = serializers.DateTimeField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    description = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+
+
+class WalletSummaryResponseSerializer(serializers.Serializer):
+    wallet_id = serializers.UUIDField()
+    wallet_name = serializers.CharField()
+    balance = serializers.DecimalField(max_digits=12, decimal_places=2)
+    income_total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    expense_total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    recent_operations = WalletSummaryOperationSerializer(many=True)
 
 
 class FinancialOperationListQuerySerializer(serializers.Serializer):
@@ -292,6 +315,29 @@ class DashboardOverviewResponseSerializer(serializers.Serializer):
     budget_income = DashboardBudgetIncomeSerializer()
     cash_with_budget = serializers.DecimalField(max_digits=12, decimal_places=2)
     month_comparison = DashboardMonthComparisonSerializer()
+
+
+class DashboardRecentActivityItemSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    kind = serializers.ChoiceField(choices=['receipt', 'expenditure', 'transfer'])
+    date = serializers.DateTimeField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    description = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    wallet = serializers.UUIDField(allow_null=True, required=False)
+    wallet_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    cash_flow_item = serializers.UUIDField(allow_null=True, required=False)
+    cash_flow_item_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    wallet_from = serializers.UUIDField(allow_null=True, required=False)
+    wallet_from_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    wallet_to = serializers.UUIDField(allow_null=True, required=False)
+    wallet_to_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+
+
+class DashboardRecentActivityResponseSerializer(serializers.Serializer):
+    date = serializers.DateTimeField()
+    hide_hidden_wallets = serializers.BooleanField()
+    limit = serializers.IntegerField()
+    items = DashboardRecentActivityItemSerializer(many=True)
 
 
 class CashFlowReportQuerySerializer(serializers.Serializer):

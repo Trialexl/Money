@@ -1818,6 +1818,90 @@ class DashboardOverviewTests(TestCase):
             [wallet['wallet_id'] for wallet in response.data['wallets']],
         )
 
+    def test_dashboard_recent_activity_uses_limit_and_selected_date(self):
+        reserve_wallet = Wallet.objects.create(name='Резервный кошелек')
+        transfer = Transfer.objects.create(
+            amount=Decimal('120.00'),
+            date=self.make_dt(2024, 3, 5),
+            wallet_out=self.visible_wallet,
+            wallet_in=reserve_wallet,
+            comment='Перевод в резерв',
+        )
+        Receipt.objects.create(
+            amount=Decimal('999.00'),
+            date=self.make_dt(2024, 3, 20),
+            wallet=self.visible_wallet,
+            cash_flow_item=self.salary_item,
+            comment='Будущий доход',
+        )
+
+        response = self.client.get(
+            '/api/v1/dashboard/recent-activity/',
+            {
+                'date': self.selected_at.isoformat(),
+                'limit': 2,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['hide_hidden_wallets'])
+        self.assertEqual(response.data['limit'], 2)
+        self.assertEqual(len(response.data['items']), 2)
+        self.assertEqual(
+            [item['kind'] for item in response.data['items']],
+            ['transfer', 'expenditure'],
+        )
+        self.assertEqual(response.data['items'][0]['id'], str(transfer.id))
+        self.assertEqual(response.data['items'][0]['wallet_from_name'], 'Основной кошелек')
+        self.assertEqual(response.data['items'][0]['wallet_to_name'], 'Резервный кошелек')
+        self.assertEqual(response.data['items'][0]['description'], 'Перевод в резерв')
+        self.assertEqual(response.data['items'][1]['cash_flow_item_name'], 'Путешествия')
+
+    def test_dashboard_recent_activity_respects_hidden_wallet_filter(self):
+        reserve_wallet = Wallet.objects.create(name='Второй видимый кошелек')
+        hidden_transfer = Transfer.objects.create(
+            amount=Decimal('50.00'),
+            date=self.make_dt(2024, 3, 6),
+            wallet_out=self.hidden_wallet,
+            wallet_in=reserve_wallet,
+            comment='Скрытый перевод',
+        )
+
+        hidden_response = self.client.get(
+            '/api/v1/dashboard/recent-activity/',
+            {
+                'date': self.selected_at.isoformat(),
+                'limit': 10,
+            },
+        )
+        self.assertEqual(hidden_response.status_code, 200)
+        self.assertNotIn(
+            str(hidden_transfer.id),
+            [item['id'] for item in hidden_response.data['items']],
+        )
+        self.assertNotIn(
+            str(self.hidden_wallet.id),
+            [item.get('wallet') for item in hidden_response.data['items']],
+        )
+
+        visible_response = self.client.get(
+            '/api/v1/dashboard/recent-activity/',
+            {
+                'date': self.selected_at.isoformat(),
+                'limit': 10,
+                'hide_hidden_wallets': 'false',
+            },
+        )
+        self.assertEqual(visible_response.status_code, 200)
+        self.assertIn(
+            str(hidden_transfer.id),
+            [item['id'] for item in visible_response.data['items']],
+        )
+        self.assertIn(
+            str(self.hidden_wallet.id),
+            [item.get('wallet') for item in visible_response.data['items']],
+        )
+
     def test_dashboard_uses_requested_timezone_for_end_of_day_balance(self):
         moscow_tz = dt_timezone(timedelta(hours=3))
         boundary_item = CashFlowItem.objects.create(name='Граница дня', include_in_budget=False)
@@ -1853,6 +1937,65 @@ class DashboardOverviewTests(TestCase):
                     'balance': '1100.00',
                 }
             ],
+        )
+
+
+class WalletSummaryTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = CustomUser.objects.create_superuser(
+            username='wallet-summary-admin',
+            email='wallet-summary-admin@example.com',
+            password='adminpass123',
+        )
+        cls.wallet = Wallet.objects.create(name='Основной кошелек')
+        cls.other_wallet = Wallet.objects.create(name='Второй кошелек')
+        cls.salary_item = CashFlowItem.objects.create(name='Зарплата')
+        cls.food_item = CashFlowItem.objects.create(name='Еда')
+
+        Receipt.objects.create(
+            amount=Decimal('100.00'),
+            date=timezone.make_aware(datetime(2024, 3, 1, 10, 0, 0)),
+            wallet=cls.wallet,
+            cash_flow_item=cls.salary_item,
+            comment='Аванс',
+        )
+        Expenditure.objects.create(
+            amount=Decimal('30.00'),
+            date=timezone.make_aware(datetime(2024, 3, 2, 10, 0, 0)),
+            wallet=cls.wallet,
+            cash_flow_item=cls.food_item,
+            include_in_budget=False,
+            comment='Продукты',
+        )
+        Receipt.objects.create(
+            amount=Decimal('15.00'),
+            date=timezone.make_aware(datetime(2024, 3, 3, 10, 0, 0)),
+            wallet=cls.other_wallet,
+            cash_flow_item=cls.salary_item,
+            comment='Чужой доход',
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin_user)
+
+    def test_wallet_summary_returns_balances_totals_and_recent_operations(self):
+        response = self.client.get(f'/api/v1/wallets/{self.wallet.id}/summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['wallet_id'], str(self.wallet.id))
+        self.assertEqual(response.data['wallet_name'], 'Основной кошелек')
+        self.assertEqual(response.data['balance'], '70.00')
+        self.assertEqual(response.data['income_total'], '100.00')
+        self.assertEqual(response.data['expense_total'], '30.00')
+        self.assertEqual(
+            [item['kind'] for item in response.data['recent_operations']],
+            ['expenditure', 'receipt'],
+        )
+        self.assertEqual(
+            [item['description'] for item in response.data['recent_operations']],
+            ['Продукты', 'Аванс'],
         )
 
 

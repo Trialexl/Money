@@ -284,6 +284,53 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
         if not self.request.user.is_staff:
             queryset = queryset.filter(hidden=False)
         return queryset
+
+    def _build_wallet_recent_operations(self, wallet, limit=10):
+        receipt_queryset = Receipt.objects.filter(
+            deleted=False,
+            wallet=wallet,
+        ).order_by('-date')
+        expenditure_queryset = Expenditure.objects.filter(
+            deleted=False,
+            wallet=wallet,
+        ).order_by('-date')
+
+        items = []
+
+        for receipt in receipt_queryset[:limit]:
+            items.append({
+                'id': _serialize_uuid(receipt.id),
+                'kind': 'receipt',
+                'date': receipt.date.isoformat(),
+                'amount': _dashboard_money_str(receipt.amount),
+                'description': receipt.comment or None,
+                '_sort_date': receipt.date,
+            })
+
+        for expenditure in expenditure_queryset[:limit]:
+            items.append({
+                'id': _serialize_uuid(expenditure.id),
+                'kind': 'expenditure',
+                'date': expenditure.date.isoformat(),
+                'amount': _dashboard_money_str(expenditure.amount),
+                'description': expenditure.comment or None,
+                '_sort_date': expenditure.date,
+            })
+
+        items.sort(
+            key=lambda row: (
+                row['_sort_date'],
+                row['kind'],
+                str(row['id']),
+            ),
+            reverse=True,
+        )
+        items = items[:limit]
+
+        for item in items:
+            item.pop('_sort_date')
+
+        return items
     
     @extend_schema(
         responses={200: WalletBalanceResponseSerializer},
@@ -306,6 +353,33 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
             'balance': float(balance),
             'currency': 'RUB',  # Можно добавить поле валюты в модель Wallet
             'last_updated': timezone.now()
+        })
+
+    @extend_schema(
+        responses={200: WalletSummaryResponseSerializer},
+    )
+    @action(detail=True, methods=['get'])
+    def summary(self, request, pk=None):
+        """Компактная сводка по кошельку для быстрой загрузки detail page."""
+        wallet = self.get_object()
+
+        balance = _dashboard_money(
+            FlowOfFunds.objects.filter(wallet=wallet).aggregate(total=Sum('amount'))['total']
+        )
+        income_total = _dashboard_money(
+            Receipt.objects.filter(wallet=wallet, deleted=False).aggregate(total=Sum('amount'))['total']
+        )
+        expense_total = _dashboard_money(
+            Expenditure.objects.filter(wallet=wallet, deleted=False).aggregate(total=Sum('amount'))['total']
+        )
+
+        return Response({
+            'wallet_id': str(wallet.id),
+            'wallet_name': wallet.name,
+            'balance': _dashboard_money_str(balance),
+            'income_total': _dashboard_money_str(income_total),
+            'expense_total': _dashboard_money_str(expense_total),
+            'recent_operations': self._build_wallet_recent_operations(wallet),
         })
     
     @extend_schema(
@@ -544,6 +618,87 @@ class DashboardViewSet(viewsets.ViewSet):
 
     permission_classes = [permissions.IsAdminUser]
 
+    def _build_recent_activity_items(self, *, selected_day_end, hide_hidden_wallets, limit):
+        receipt_queryset = Receipt.objects.filter(
+            deleted=False,
+            date__lte=selected_day_end,
+        ).select_related('wallet', 'cash_flow_item').order_by('-date')
+        expenditure_queryset = Expenditure.objects.filter(
+            deleted=False,
+            date__lte=selected_day_end,
+        ).select_related('wallet', 'cash_flow_item').order_by('-date')
+        transfer_queryset = Transfer.objects.filter(
+            deleted=False,
+            date__lte=selected_day_end,
+        ).select_related('wallet_out', 'wallet_in').order_by('-date')
+
+        if hide_hidden_wallets:
+            receipt_queryset = receipt_queryset.filter(wallet__hidden=False)
+            expenditure_queryset = expenditure_queryset.filter(wallet__hidden=False)
+            transfer_queryset = transfer_queryset.filter(
+                wallet_out__hidden=False,
+                wallet_in__hidden=False,
+            )
+
+        items = []
+
+        for receipt in receipt_queryset[:limit]:
+            items.append({
+                'id': _serialize_uuid(receipt.id),
+                'kind': 'receipt',
+                'date': receipt.date.isoformat(),
+                'amount': _dashboard_money_str(receipt.amount),
+                'description': receipt.comment or None,
+                'wallet': _serialize_uuid(receipt.wallet_id),
+                'wallet_name': getattr(receipt.wallet, 'name', None),
+                'cash_flow_item': _serialize_uuid(receipt.cash_flow_item_id),
+                'cash_flow_item_name': getattr(receipt.cash_flow_item, 'name', None),
+                '_sort_date': receipt.date,
+            })
+
+        for expenditure in expenditure_queryset[:limit]:
+            items.append({
+                'id': _serialize_uuid(expenditure.id),
+                'kind': 'expenditure',
+                'date': expenditure.date.isoformat(),
+                'amount': _dashboard_money_str(expenditure.amount),
+                'description': expenditure.comment or None,
+                'wallet': _serialize_uuid(expenditure.wallet_id),
+                'wallet_name': getattr(expenditure.wallet, 'name', None),
+                'cash_flow_item': _serialize_uuid(expenditure.cash_flow_item_id),
+                'cash_flow_item_name': getattr(expenditure.cash_flow_item, 'name', None),
+                '_sort_date': expenditure.date,
+            })
+
+        for transfer in transfer_queryset[:limit]:
+            items.append({
+                'id': _serialize_uuid(transfer.id),
+                'kind': 'transfer',
+                'date': transfer.date.isoformat(),
+                'amount': _dashboard_money_str(transfer.amount),
+                'description': transfer.comment or None,
+                'wallet_from': _serialize_uuid(transfer.wallet_out_id),
+                'wallet_from_name': getattr(transfer.wallet_out, 'name', None),
+                'wallet_to': _serialize_uuid(transfer.wallet_in_id),
+                'wallet_to_name': getattr(transfer.wallet_in, 'name', None),
+                '_sort_date': transfer.date,
+            })
+
+        items.sort(
+            key=lambda row: (
+                row['_sort_date'],
+                row['kind'],
+                str(row['id']),
+            ),
+            reverse=True,
+        )
+        items = items[:limit]
+
+        for item in items:
+            item.pop('_sort_date')
+
+        return items
+
     @extend_schema(
         parameters=[DashboardOverviewQuerySerializer],
         responses=DashboardOverviewResponseSerializer,
@@ -699,6 +854,42 @@ class DashboardViewSet(viewsets.ViewSet):
                     'income': _dashboard_percent_str(income_difference),
                 },
             },
+        })
+
+    @extend_schema(
+        parameters=[DashboardRecentActivityQuerySerializer],
+        responses=DashboardRecentActivityResponseSerializer,
+        description='Последние документы для dashboard с учетом даты среза.',
+    )
+    @action(detail=False, methods=['get'], url_path='recent-activity')
+    def recent_activity(self, request):
+        query = DashboardRecentActivityQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+
+        selected_at = query.validated_data.get('date')
+        if selected_at is None:
+            selected_at = timezone.localtime(timezone.now())
+        else:
+            selected_at = _parse_dashboard_selected_at(
+                request.query_params.get('date'),
+                selected_at,
+            )
+
+        selected_day_end = _day_end(selected_at)
+        hide_hidden_wallets = query.validated_data.get('hide_hidden_wallets', True)
+        limit = query.validated_data.get('limit', 20)
+
+        items = self._build_recent_activity_items(
+            selected_day_end=selected_day_end,
+            hide_hidden_wallets=hide_hidden_wallets,
+            limit=limit,
+        )
+
+        return Response({
+            'date': selected_day_end.isoformat(),
+            'hide_hidden_wallets': hide_hidden_wallets,
+            'limit': limit,
+            'items': items,
         })
 
 

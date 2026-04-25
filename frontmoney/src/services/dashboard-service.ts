@@ -25,6 +25,41 @@ export interface DashboardMonthDifference {
   expense: number
 }
 
+export type DashboardRecentActivity =
+  | {
+      id: string
+      kind: "receipt"
+      date: string
+      amount: number
+      description?: string
+      wallet: string
+      wallet_name?: string
+      cash_flow_item: string
+      cash_flow_item_name?: string
+    }
+  | {
+      id: string
+      kind: "expenditure"
+      date: string
+      amount: number
+      description?: string
+      wallet: string
+      wallet_name?: string
+      cash_flow_item: string
+      cash_flow_item_name?: string
+    }
+  | {
+      id: string
+      kind: "transfer"
+      date: string
+      amount: number
+      description?: string
+      wallet_from: string
+      wallet_from_name?: string
+      wallet_to: string
+      wallet_to_name?: string
+    }
+
 export interface DashboardOverview {
   date: string
   hide_hidden_wallets: boolean
@@ -53,6 +88,36 @@ function mapMonthTotals(raw: any): DashboardMonthTotals {
     start: fromApiDateTime(raw?.start) ?? "",
     income: fromApiAmount(raw?.income),
     expense: fromApiAmount(raw?.expense),
+  }
+}
+
+function mapRecentActivity(raw: any): DashboardRecentActivity {
+  const base = {
+    id: raw?.id ?? "",
+    date: fromApiDateTime(raw?.date) ?? "",
+    amount: fromApiAmount(raw?.amount),
+    description: typeof raw?.description === "string" && raw.description.trim() ? raw.description : undefined,
+  }
+
+  if (raw?.kind === "transfer") {
+    return {
+      ...base,
+      kind: "transfer",
+      wallet_from: raw?.wallet_from ?? "",
+      wallet_from_name: typeof raw?.wallet_from_name === "string" && raw.wallet_from_name.trim() ? raw.wallet_from_name : undefined,
+      wallet_to: raw?.wallet_to ?? "",
+      wallet_to_name: typeof raw?.wallet_to_name === "string" && raw.wallet_to_name.trim() ? raw.wallet_to_name : undefined,
+    }
+  }
+
+  return {
+    ...base,
+    kind: raw?.kind === "receipt" ? "receipt" : "expenditure",
+    wallet: raw?.wallet ?? "",
+    wallet_name: typeof raw?.wallet_name === "string" && raw.wallet_name.trim() ? raw.wallet_name : undefined,
+    cash_flow_item: raw?.cash_flow_item ?? "",
+    cash_flow_item_name:
+      typeof raw?.cash_flow_item_name === "string" && raw.cash_flow_item_name.trim() ? raw.cash_flow_item_name : undefined,
   }
 }
 
@@ -103,5 +168,16 @@ export const DashboardService = {
         },
       },
     } satisfies DashboardOverview
+  },
+
+  getRecentActivity: async (options?: { date?: string; hideHiddenWallets?: boolean; limit?: number }) => {
+    const params = {
+      ...(options?.date ? { date: toApiDateTime(options.date) } : {}),
+      ...(typeof options?.hideHiddenWallets === "boolean" ? { hide_hidden_wallets: options.hideHiddenWallets } : {}),
+      ...(typeof options?.limit === "number" ? { limit: options.limit } : {}),
+    }
+
+    const { data } = await api.get<any>("/dashboard/recent-activity/", { params })
+    return Array.isArray(data?.items) ? data.items.map(mapRecentActivity) : []
   },
 }
