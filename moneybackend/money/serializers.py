@@ -205,8 +205,32 @@ class WalletBalancesResponseSerializer(serializers.Serializer):
     total_balance = serializers.FloatField()
 
 
-class ExpenditureListQuerySerializer(serializers.Serializer):
+class FinancialOperationListQuerySerializer(serializers.Serializer):
+    search = serializers.CharField(required=False)
+    wallet = serializers.UUIDField(required=False)
+    cash_flow_item = serializers.UUIDField(required=False)
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+    amount_min = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    amount_max = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+
+
+class ReceiptListQuerySerializer(FinancialOperationListQuerySerializer):
+    pass
+
+
+class ExpenditureListQuerySerializer(FinancialOperationListQuerySerializer):
     include_in_budget = serializers.BooleanField(required=False)
+
+
+class TransferListQuerySerializer(serializers.Serializer):
+    search = serializers.CharField(required=False)
+    wallet_from = serializers.UUIDField(required=False)
+    wallet_to = serializers.UUIDField(required=False)
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+    amount_min = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    amount_max = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
 
 
 class BudgetListQuerySerializer(serializers.Serializer):

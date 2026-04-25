@@ -1344,6 +1344,139 @@ class JwtWriteAuthenticationRegressionTests(TestCase):
         )
 
 
+class FinancialOperationCatalogApiTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = CustomUser.objects.create_superuser(
+            username='catalog-admin',
+            email='catalog-admin@example.com',
+            password='adminpass123',
+        )
+        cls.wallet_main = Wallet.objects.create(name='Основной кошелек')
+        cls.wallet_secondary = Wallet.objects.create(name='Резервный кошелек')
+        cls.wallet_target = Wallet.objects.create(name='Целевой кошелек')
+        cls.item_salary = CashFlowItem.objects.create(name='Зарплата', include_in_budget=True)
+        cls.item_transport = CashFlowItem.objects.create(name='Транспорт', include_in_budget=True)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin_user)
+
+    def make_dt(self, day):
+        return timezone.make_aware(datetime(2024, 4, day, 10, 0, 0))
+
+    def test_receipts_list_is_paginated_with_default_page_size(self):
+        for day in range(1, 26):
+            Receipt.objects.create(
+                date=self.make_dt(day),
+                amount=Decimal('100.00') + Decimal(day),
+                comment=f'Приход {day}',
+                wallet=self.wallet_main,
+                cash_flow_item=self.item_salary,
+            )
+
+        response = self.client.get('/api/v1/receipts/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 25)
+        self.assertEqual(len(response.data['results']), 20)
+        self.assertIsNotNone(response.data['next'])
+        self.assertIsNone(response.data['previous'])
+
+    def test_receipts_list_accepts_only_supported_page_sizes(self):
+        for day in range(1, 26):
+            Receipt.objects.create(
+                date=self.make_dt(day),
+                amount=Decimal('50.00') + Decimal(day),
+                comment=f'Размер {day}',
+                wallet=self.wallet_main,
+                cash_flow_item=self.item_salary,
+            )
+
+        supported = self.client.get('/api/v1/receipts/', {'page_size': 50})
+        fallback = self.client.get('/api/v1/receipts/', {'page_size': 30})
+
+        self.assertEqual(supported.status_code, 200)
+        self.assertEqual(len(supported.data['results']), 25)
+        self.assertEqual(fallback.status_code, 200)
+        self.assertEqual(len(fallback.data['results']), 20)
+
+    def test_expenditures_list_applies_server_side_filters(self):
+        target = Expenditure.objects.create(
+            date=self.make_dt(10),
+            amount=Decimal('250.00'),
+            comment='Такси до офиса',
+            wallet=self.wallet_main,
+            cash_flow_item=self.item_transport,
+            include_in_budget=True,
+        )
+        Expenditure.objects.create(
+            date=self.make_dt(12),
+            amount=Decimal('250.00'),
+            comment='Такси домой',
+            wallet=self.wallet_secondary,
+            cash_flow_item=self.item_transport,
+            include_in_budget=True,
+        )
+        Expenditure.objects.create(
+            date=self.make_dt(10),
+            amount=Decimal('120.00'),
+            comment='Такси до офиса',
+            wallet=self.wallet_main,
+            cash_flow_item=self.item_salary,
+            include_in_budget=False,
+        )
+
+        response = self.client.get(
+            '/api/v1/expenditures/',
+            {
+                'wallet': str(self.wallet_main.id),
+                'cash_flow_item': str(self.item_transport.id),
+                'date_from': '2024-04-09',
+                'date_to': '2024-04-11',
+                'amount_min': '200.00',
+                'amount_max': '300.00',
+                'include_in_budget': 'true',
+                'search': 'такси',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], str(target.id))
+
+    def test_transfers_list_filters_route_and_falls_back_for_invalid_page_size(self):
+        for day in range(1, 22):
+            Transfer.objects.create(
+                date=self.make_dt(day),
+                amount=Decimal('1000.00') + Decimal(day),
+                comment=f'Перевод {day}',
+                wallet_out=self.wallet_main,
+                wallet_in=self.wallet_target,
+            )
+
+        Transfer.objects.create(
+            date=self.make_dt(22),
+            amount=Decimal('500.00'),
+            comment='Лишний маршрут',
+            wallet_out=self.wallet_secondary,
+            wallet_in=self.wallet_target,
+        )
+
+        response = self.client.get(
+            '/api/v1/transfers/',
+            {
+                'wallet_from': str(self.wallet_main.id),
+                'wallet_to': str(self.wallet_target.id),
+                'page_size': 30,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 21)
+        self.assertEqual(len(response.data['results']), 20)
+
+
 class PlanningDefaultsAndGenerationTests(TestCase):
     @classmethod
     def setUpTestData(cls):

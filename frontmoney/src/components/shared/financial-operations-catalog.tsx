@@ -1,10 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { useDeferredValue, useState } from "react"
+import { useDeferredValue, useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDownRight, ArrowUpRight, Copy, PencilLine, Search, SlidersHorizontal, Trash2, Wallet2, X } from "lucide-react"
 
+import { CatalogPaginationControls } from "@/components/shared/catalog-pagination-controls"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
@@ -20,6 +21,7 @@ import { formatCurrency, formatDate } from "@/lib/formatters"
 import {
   Expenditure,
   ExpenditureService,
+  PageSizeOption,
   Receipt,
   ReceiptService,
 } from "@/services/financial-operations-service"
@@ -36,7 +38,6 @@ const CATALOG_CONFIG = {
   receipt: {
     accentIcon: ArrowDownRight,
     accentTone: "positive" as const,
-    accentBadge: "Incoming",
     categoryLabel: "Статья прихода",
     createHref: "/receipts/new",
     createLabel: "Новый приход",
@@ -57,7 +58,6 @@ const CATALOG_CONFIG = {
   expenditure: {
     accentIcon: ArrowUpRight,
     accentTone: "danger" as const,
-    accentBadge: "Outgoing",
     categoryLabel: "Статья расхода",
     createHref: "/expenditures/new",
     createLabel: "Новый расход",
@@ -113,15 +113,61 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
   const [budgetFilter, setBudgetFilter] = useState<BudgetFilter>("all")
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<PageSizeOption>(20)
   const deferredSearch = useDeferredValue(searchTerm)
   const referencesQuery = useOperationReferenceDataQuery()
+  const normalizedSearch = deferredSearch.trim()
+
+  useEffect(() => {
+    setPage(1)
+  }, [normalizedSearch, dateFrom, dateTo, selectedWalletId, selectedCategoryId, amountMin, amountMax, budgetFilter])
 
   const operationsQuery = useQuery({
-    queryKey: [config.listQueryKey],
+    queryKey: [
+      config.listQueryKey,
+      {
+        search: normalizedSearch,
+        dateFrom,
+        dateTo,
+        wallet: selectedWalletId,
+        cashFlowItem: selectedCategoryId,
+        amountMin,
+        amountMax,
+        budgetFilter,
+        page,
+        pageSize,
+      },
+    ],
     queryFn: async () => {
-      const operations = mode === "receipt" ? await ReceiptService.getReceipts() : await ExpenditureService.getExpenditures()
-      return operations.filter((operation) => !operation.deleted)
+      if (mode === "receipt") {
+        return ReceiptService.getReceiptsPage({
+          search: normalizedSearch || undefined,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+          wallet: selectedWalletId !== "all-wallets" ? selectedWalletId : undefined,
+          cashFlowItem: selectedCategoryId !== "all-categories" ? selectedCategoryId : undefined,
+          amountMin: amountMin || undefined,
+          amountMax: amountMax || undefined,
+          page,
+          pageSize,
+        })
+      }
+
+      return ExpenditureService.getExpendituresPage({
+        search: normalizedSearch || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        wallet: selectedWalletId !== "all-wallets" ? selectedWalletId : undefined,
+        cashFlowItem: selectedCategoryId !== "all-categories" ? selectedCategoryId : undefined,
+        amountMin: amountMin || undefined,
+        amountMax: amountMax || undefined,
+        includedInBudget: budgetFilter === "all" ? undefined : budgetFilter === "included",
+        page,
+        pageSize,
+      })
     },
+    placeholderData: (previousData) => previousData,
   })
 
   const deleteMutation = useMutation({
@@ -152,9 +198,10 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
     setAmountMax("")
     setBudgetFilter("all")
     setShowAdvancedFilters(false)
+    setPage(1)
   }
 
-  if (operationsQuery.isLoading || referencesQuery.isLoading) {
+  if ((operationsQuery.isLoading && !operationsQuery.data) || referencesQuery.isLoading) {
     return <FullPageLoader label={config.loadingLabel} />
   }
 
@@ -169,78 +216,30 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
     )
   }
 
-  const operations = operationsQuery.data
+  const operationsPage = operationsQuery.data
+  const operations = operationsPage.results
+  const totalOperations = operationsPage.count
+  const pageCount = operationsPage.totalPages
   const wallets = referencesQuery.wallets
   const cashFlowItems = referencesQuery.cashFlowItems
   const walletMap = Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))
   const categoryMap = Object.fromEntries(cashFlowItems.map((item) => [item.id, item.name || "Без названия"]))
-  const normalizedSearch = deferredSearch.trim().toLowerCase()
-  const parsedAmountMin = amountMin ? Number.parseFloat(amountMin) : null
-  const parsedAmountMax = amountMax ? Number.parseFloat(amountMax) : null
 
-  const filteredOperations = operations
-    .filter((operation) => {
-      const walletName = walletMap[operation.wallet] || ""
-      const categoryName = categoryMap[operation.cash_flow_item] || ""
-      const haystack = `${operation.description || ""} ${operation.number || ""} ${walletName} ${categoryName}`.toLowerCase()
-
-      if (normalizedSearch && !haystack.includes(normalizedSearch)) {
-        return false
-      }
-
-      if (selectedWalletId !== "all-wallets" && operation.wallet !== selectedWalletId) {
-        return false
-      }
-
-      if (selectedCategoryId !== "all-categories" && operation.cash_flow_item !== selectedCategoryId) {
-        return false
-      }
-
-      if (dateFrom && operation.date < dateFrom) {
-        return false
-      }
-
-      if (dateTo && operation.date > dateTo) {
-        return false
-      }
-
-      if (parsedAmountMin !== null && operation.amount < parsedAmountMin) {
-        return false
-      }
-
-      if (parsedAmountMax !== null && operation.amount > parsedAmountMax) {
-        return false
-      }
-
-      if (mode === "expenditure" && budgetFilter !== "all" && isExpenditureOperation(operation)) {
-        return budgetFilter === "included" ? operation.include_in_budget : !operation.include_in_budget
-      }
-
-      return true
-    })
-    .sort((left, right) => {
-      if (left.date === right.date) {
-        return right.amount - left.amount
-      }
-
-      return right.date.localeCompare(left.date)
-    })
-
-  const totalAmount = filteredOperations.reduce((sum, operation) => sum + operation.amount, 0)
-  const uniqueWalletsCount = new Set(filteredOperations.map((operation) => operation.wallet)).size
-  const uniqueCategoriesCount = new Set(filteredOperations.map((operation) => operation.cash_flow_item)).size
+  const totalAmount = operations.reduce((sum, operation) => sum + operation.amount, 0)
+  const uniqueWalletsCount = new Set(operations.map((operation) => operation.wallet)).size
+  const uniqueCategoriesCount = new Set(operations.map((operation) => operation.cash_flow_item)).size
   const monthStart = getMonthStart()
-  const monthOperationsCount = filteredOperations.filter((operation) => new Date(operation.date) >= monthStart).length
+  const monthOperationsCount = operations.filter((operation) => new Date(operation.date) >= monthStart).length
   const budgetIncludedAmount =
     mode === "expenditure"
-      ? filteredOperations.reduce(
+      ? operations.reduce(
           (sum, operation) => sum + (isExpenditureOperation(operation) && operation.include_in_budget ? operation.amount : 0),
           0
         )
       : 0
   const budgetIncludedCount =
     mode === "expenditure"
-      ? filteredOperations.filter((operation) => isExpenditureOperation(operation) && operation.include_in_budget).length
+      ? operations.filter((operation) => isExpenditureOperation(operation) && operation.include_in_budget).length
       : 0
   const hasActiveFilters =
     Boolean(searchTerm.trim() || dateFrom || dateTo || amountMin || amountMax) ||
@@ -258,6 +257,12 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
   ].filter(Boolean) as string[]
   const advancedFilterCount = [Boolean(dateFrom), Boolean(dateTo), Boolean(amountMin), Boolean(amountMax)].filter(Boolean).length
 
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount)
+    }
+  }, [page, pageCount])
+
   const handleDelete = async (operationId: string) => {
     setActionError(null)
 
@@ -274,33 +279,28 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        className="mb-2"
-        compact
-        title={config.pageTitle}
-        description={config.pageDescription}
-      />
+      <PageHeader className="mb-2" compact title={config.pageTitle} description={config.pageDescription} />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
         <StatCard
           label="Сумма на экране"
           value={formatCurrency(totalAmount)}
-          hint={mode === "receipt" ? "По текущему фильтру" : "По текущему фильтру"}
+          hint="Текущая страница"
           icon={AccentIcon}
           tone={config.accentTone}
           variant="compact"
         />
         <StatCard
-          label="Операций в этом месяце"
-          value={String(monthOperationsCount)}
-          hint="Текущий месяц"
+          label="Операций на странице"
+          value={String(operations.length)}
+          hint={`Страница ${page}${monthOperationsCount > 0 ? ` · ${monthOperationsCount} в текущем месяце` : ""}`}
           icon={Wallet2}
           variant="compact"
         />
         <StatCard
           label={mode === "receipt" ? "Кошельков в потоке" : "Категорий в потоке"}
           value={String(mode === "receipt" ? uniqueWalletsCount : uniqueCategoriesCount)}
-          hint={mode === "receipt" ? "Активные кошельки" : "Активные статьи"}
+          hint="На текущей странице"
           icon={mode === "receipt" ? Wallet2 : AccentIcon}
           className="col-span-2 xl:col-span-1"
           variant="compact"
@@ -312,25 +312,19 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
           <StatCard
             label="В бюджете"
             value={formatCurrency(budgetIncludedAmount)}
-            hint={`${budgetIncludedCount} операций участвуют в план-факт анализе`}
+            hint={`${budgetIncludedCount} операций на текущей странице`}
             icon={AccentIcon}
             tone={budgetIncludedCount > 0 ? "positive" : "neutral"}
             variant="compact"
           />
-          <StatCard
-            label="Все расходы на экране"
-            value={String(filteredOperations.length)}
-            hint="После фильтрации"
-            icon={Wallet2}
-            variant="compact"
-          />
+          <StatCard label="Все расходы на экране" value={String(operations.length)} hint="На текущей странице" icon={Wallet2} variant="compact" />
         </div>
       ) : null}
 
       <Card>
         <CardContent className="space-y-4 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <div className="uppercase tracking-[0.16em]">Найдено {filteredOperations.length} из {operations.length}</div>
+            <div className="uppercase tracking-[0.16em]">Найдено {totalOperations}, показано {operations.length}</div>
             <div className="flex flex-wrap gap-2">
               {hasActiveFilters ? (
                 <Button variant="outline" size="sm" onClick={handleResetFilters}>
@@ -338,11 +332,7 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
                   Очистить
                 </Button>
               ) : null}
-              <Button
-                variant={showAdvancedFilters ? "default" : "outline"}
-                size="sm"
-                onClick={() => setShowAdvancedFilters((current) => !current)}
-              >
+              <Button variant={showAdvancedFilters ? "default" : "outline"} size="sm" onClick={() => setShowAdvancedFilters((current) => !current)}>
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 {showAdvancedFilters ? "Скрыть детали" : "Даты и суммы"}
                 {advancedFilterCount > 0 ? ` · ${advancedFilterCount}` : null}
@@ -491,13 +481,13 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
         </div>
       ) : null}
 
-      {filteredOperations.length === 0 ? (
+      {operations.length === 0 ? (
         <EmptyState
           icon={AccentIcon}
-          title={operations.length === 0 ? config.emptyTitle : config.resetEmptyTitle}
-          description={operations.length === 0 ? config.emptyDescription : config.resetEmptyDescription}
+          title={hasActiveFilters ? config.resetEmptyTitle : config.emptyTitle}
+          description={hasActiveFilters ? config.resetEmptyDescription : config.emptyDescription}
           action={
-            operations.length === 0 ? (
+            !hasActiveFilters ? (
               <Button asChild>
                 <Link href={config.createHref}>{config.createLabel}</Link>
               </Button>
@@ -513,11 +503,11 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
           <CardContent className="p-0">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-6 py-4">
               <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">Журнал операций</div>
-              <Badge variant="outline">{filteredOperations.length} строк</Badge>
+              <Badge variant="outline">{operations.length} строк</Badge>
             </div>
 
             <div className="divide-y divide-border/60 md:hidden">
-              {filteredOperations.map((operation) => {
+              {operations.map((operation) => {
                 const budgetIncluded = mode === "expenditure" && isExpenditureOperation(operation) ? operation.include_in_budget : null
 
                 return (
@@ -531,9 +521,7 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
                           {budgetIncluded === true ? <Badge variant="success">В бюджете</Badge> : null}
                           {budgetIncluded === false ? <Badge variant="outline">Вне бюджета</Badge> : null}
                         </div>
-                        {operation.description ? (
-                          <div className="text-sm font-medium text-foreground">{operation.description}</div>
-                        ) : null}
+                        {operation.description ? <div className="text-sm font-medium text-foreground">{operation.description}</div> : null}
                         <div className="text-xs text-muted-foreground">
                           {operation.number || "Без номера"} · {formatDate(operation.date)}
                         </div>
@@ -592,19 +580,15 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredOperations.map((operation) => {
+                  {operations.map((operation) => {
                     const budgetIncluded = mode === "expenditure" && isExpenditureOperation(operation) ? operation.include_in_budget : null
 
                     return (
                       <tr key={operation.id} className="border-b border-border/60 align-top last:border-b-0">
                         <td className="px-6 py-4">
                           <div className="max-w-[280px]">
-                            {operation.description ? (
-                              <div className="text-sm font-medium text-foreground">{operation.description}</div>
-                            ) : null}
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {operation.number || "Без номера"}
-                            </div>
+                            {operation.description ? <div className="text-sm font-medium text-foreground">{operation.description}</div> : null}
+                            <div className="mt-1 text-xs text-muted-foreground">{operation.number || "Без номера"}</div>
                           </div>
                         </td>
                         <td className="px-4 py-4 text-sm text-foreground">{formatDate(operation.date)}</td>
@@ -649,6 +633,19 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
                 </tbody>
               </table>
             </div>
+
+            <CatalogPaginationControls
+              page={page}
+              pageCount={pageCount}
+              pageSize={pageSize}
+              totalCount={totalOperations}
+              currentCount={operations.length}
+              onPageChange={setPage}
+              onPageSizeChange={(value) => {
+                setPageSize(value as PageSizeOption)
+                setPage(1)
+              }}
+            />
           </CardContent>
         </Card>
       )}

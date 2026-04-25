@@ -1,10 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { useDeferredValue, useState } from "react"
+import { useDeferredValue, useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRightLeft, Copy, PencilLine, Search, SlidersHorizontal, Trash2, Wallet2, X } from "lucide-react"
 
+import { CatalogPaginationControls } from "@/components/shared/catalog-pagination-controls"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
@@ -17,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency, formatDate } from "@/lib/formatters"
-import { TransferService } from "@/services/financial-operations-service"
+import { PageSizeOption, TransferService } from "@/services/financial-operations-service"
 
 function getMonthStart(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), 1)
@@ -48,15 +49,44 @@ export default function TransferCatalog() {
   const [amountMax, setAmountMax] = useState("")
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<PageSizeOption>(20)
   const deferredSearch = useDeferredValue(searchTerm)
+  const normalizedSearch = deferredSearch.trim()
   const walletsQuery = useActiveWalletsQuery()
 
+  useEffect(() => {
+    setPage(1)
+  }, [normalizedSearch, dateFrom, dateTo, walletFromId, walletToId, amountMin, amountMax])
+
   const transfersQuery = useQuery({
-    queryKey: ["transfers"],
-    queryFn: async () => {
-      const transfers = await TransferService.getTransfers()
-      return transfers.filter((transfer) => !transfer.deleted)
-    },
+    queryKey: [
+      "transfers",
+      {
+        search: normalizedSearch,
+        dateFrom,
+        dateTo,
+        walletFromId,
+        walletToId,
+        amountMin,
+        amountMax,
+        page,
+        pageSize,
+      },
+    ],
+    queryFn: () =>
+      TransferService.getTransfersPage({
+        search: normalizedSearch || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        walletFrom: walletFromId !== "all-wallets-from" ? walletFromId : undefined,
+        walletTo: walletToId !== "all-wallets-to" ? walletToId : undefined,
+        amountMin: amountMin || undefined,
+        amountMax: amountMax || undefined,
+        page,
+        pageSize,
+      }),
+    placeholderData: (previousData) => previousData,
   })
 
   const deleteMutation = useMutation({
@@ -79,9 +109,10 @@ export default function TransferCatalog() {
     setAmountMin("")
     setAmountMax("")
     setShowAdvancedFilters(false)
+    setPage(1)
   }
 
-  if (transfersQuery.isLoading || walletsQuery.isLoading) {
+  if ((transfersQuery.isLoading && !transfersQuery.data) || walletsQuery.isLoading) {
     return <FullPageLoader label="Загружаем переводы..." />
   }
 
@@ -96,63 +127,18 @@ export default function TransferCatalog() {
     )
   }
 
-  const transfers = transfersQuery.data
+  const transfersPage = transfersQuery.data
+  const transfers = transfersPage.results
+  const totalTransfers = transfersPage.count
+  const pageCount = transfersPage.totalPages
   const wallets = walletsQuery.data || []
   const walletMap = Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))
-  const normalizedSearch = deferredSearch.trim().toLowerCase()
-  const parsedAmountMin = amountMin ? Number.parseFloat(amountMin) : null
-  const parsedAmountMax = amountMax ? Number.parseFloat(amountMax) : null
-
-  const filteredTransfers = transfers
-    .filter((transfer) => {
-      const fromWallet = walletMap[transfer.wallet_from] || ""
-      const toWallet = walletMap[transfer.wallet_to] || ""
-      const haystack = `${transfer.description || ""} ${transfer.number || ""} ${fromWallet} ${toWallet}`.toLowerCase()
-
-      if (normalizedSearch && !haystack.includes(normalizedSearch)) {
-        return false
-      }
-
-      if (walletFromId !== "all-wallets-from" && transfer.wallet_from !== walletFromId) {
-        return false
-      }
-
-      if (walletToId !== "all-wallets-to" && transfer.wallet_to !== walletToId) {
-        return false
-      }
-
-      if (dateFrom && transfer.date < dateFrom) {
-        return false
-      }
-
-      if (dateTo && transfer.date > dateTo) {
-        return false
-      }
-
-      if (parsedAmountMin !== null && transfer.amount < parsedAmountMin) {
-        return false
-      }
-
-      if (parsedAmountMax !== null && transfer.amount > parsedAmountMax) {
-        return false
-      }
-
-      return true
-    })
-    .sort((left, right) => {
-      if (left.date === right.date) {
-        return right.amount - left.amount
-      }
-
-      return right.date.localeCompare(left.date)
-    })
-
-  const totalAmount = filteredTransfers.reduce((sum, transfer) => sum + transfer.amount, 0)
+  const totalAmount = transfers.reduce((sum, transfer) => sum + transfer.amount, 0)
   const monthStart = getMonthStart()
-  const thisMonthCount = filteredTransfers.filter((transfer) => new Date(transfer.date) >= monthStart).length
-  const uniqueRoutes = new Set(filteredTransfers.map((transfer) => `${transfer.wallet_from}:${transfer.wallet_to}`)).size
+  const thisMonthCount = transfers.filter((transfer) => new Date(transfer.date) >= monthStart).length
+  const uniqueRoutes = new Set(transfers.map((transfer) => `${transfer.wallet_from}:${transfer.wallet_to}`)).size
   const uniqueWallets = new Set(
-    filteredTransfers.reduce<string[]>((accumulator, transfer) => {
+    transfers.reduce<string[]>((accumulator, transfer) => {
       accumulator.push(transfer.wallet_from, transfer.wallet_to)
       return accumulator
     }, [])
@@ -170,6 +156,12 @@ export default function TransferCatalog() {
   ].filter(Boolean) as string[]
   const advancedFilterCount = [Boolean(dateFrom), Boolean(dateTo), Boolean(amountMin), Boolean(amountMax)].filter(Boolean).length
 
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount)
+    }
+  }, [page, pageCount])
+
   const handleDelete = async (transferId: string) => {
     setActionError(null)
 
@@ -186,22 +178,25 @@ export default function TransferCatalog() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        compact
-        title="Переводы"
-      />
+      <PageHeader compact title="Переводы" />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <StatCard label="Сумма на экране" value={formatCurrency(totalAmount)} hint="По текущему фильтру" icon={ArrowRightLeft} variant="compact" />
-        <StatCard label="Переводов в этом месяце" value={String(thisMonthCount)} hint="Текущий месяц" icon={Wallet2} variant="compact" />
-        <StatCard label="Маршрутов" value={String(uniqueRoutes)} hint="Уникальные пары" icon={ArrowRightLeft} tone={uniqueRoutes > 0 ? "positive" : "neutral"} variant="compact" />
-        <StatCard label="Кошельков в движении" value={String(uniqueWallets)} hint="Активные кошельки" icon={Wallet2} variant="compact" />
+        <StatCard label="Сумма на экране" value={formatCurrency(totalAmount)} hint="Текущая страница" icon={ArrowRightLeft} variant="compact" />
+        <StatCard
+          label="Переводов на странице"
+          value={String(transfers.length)}
+          hint={`Страница ${page}${thisMonthCount > 0 ? ` · ${thisMonthCount} в текущем месяце` : ""}`}
+          icon={Wallet2}
+          variant="compact"
+        />
+        <StatCard label="Маршрутов" value={String(uniqueRoutes)} hint="На текущей странице" icon={ArrowRightLeft} tone={uniqueRoutes > 0 ? "positive" : "neutral"} variant="compact" />
+        <StatCard label="Кошельков в движении" value={String(uniqueWallets)} hint="На текущей странице" icon={Wallet2} variant="compact" />
       </div>
 
       <Card>
         <CardContent className="space-y-4 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <div className="uppercase tracking-[0.16em]">Найдено {filteredTransfers.length} из {transfers.length}</div>
+            <div className="uppercase tracking-[0.16em]">Найдено {totalTransfers}, показано {transfers.length}</div>
             <div className="flex flex-wrap gap-2">
               {hasActiveFilters ? (
                 <Button variant="outline" size="sm" onClick={handleResetFilters}>
@@ -209,11 +204,7 @@ export default function TransferCatalog() {
                   Очистить
                 </Button>
               ) : null}
-              <Button
-                variant={showAdvancedFilters ? "default" : "outline"}
-                size="sm"
-                onClick={() => setShowAdvancedFilters((current) => !current)}
-              >
+              <Button variant={showAdvancedFilters ? "default" : "outline"} size="sm" onClick={() => setShowAdvancedFilters((current) => !current)}>
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 {showAdvancedFilters ? "Скрыть детали" : "Даты и суммы"}
                 {advancedFilterCount > 0 ? ` · ${advancedFilterCount}` : null}
@@ -345,17 +336,17 @@ export default function TransferCatalog() {
         </div>
       ) : null}
 
-      {filteredTransfers.length === 0 ? (
+      {transfers.length === 0 ? (
         <EmptyState
           icon={ArrowRightLeft}
-          title={transfers.length === 0 ? "Переводов пока нет" : "Переводы не найдены"}
+          title={hasActiveFilters ? "Переводы не найдены" : "Переводов пока нет"}
           description={
-            transfers.length === 0
-              ? "Добавь первый перевод, чтобы контролировать внутренние перемещения между кошельками."
-              : "По текущим фильтрам ничего не найдено. Ослабь ограничения или очисти форму поиска."
+            hasActiveFilters
+              ? "По текущим фильтрам ничего не найдено. Ослабь ограничения или очисти форму поиска."
+              : "Добавь первый перевод, чтобы контролировать внутренние перемещения между кошельками."
           }
           action={
-            transfers.length === 0 ? (
+            !hasActiveFilters ? (
               <Button asChild>
                 <Link href="/transfers/new">Создать перевод</Link>
               </Button>
@@ -376,27 +367,23 @@ export default function TransferCatalog() {
                   Плотный реестр для быстрой сверки маршрутов между кошельками, дат и сумм.
                 </div>
               </div>
-              <Badge variant="outline">{filteredTransfers.length} строк</Badge>
+              <Badge variant="outline">{transfers.length} строк</Badge>
             </div>
 
             <div className="divide-y divide-border/60 md:hidden">
-              {filteredTransfers.map((transfer) => (
+              {transfers.map((transfer) => (
                 <div key={transfer.id} className="space-y-4 px-5 py-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">Перевод</Badge>
                       </div>
-                      {transfer.description ? (
-                        <div className="text-sm font-medium text-foreground">{transfer.description}</div>
-                      ) : null}
+                      {transfer.description ? <div className="text-sm font-medium text-foreground">{transfer.description}</div> : null}
                       <div className="text-xs text-muted-foreground">
                         {transfer.number || "Без номера"} · {formatDate(transfer.date)}
                       </div>
                     </div>
-                    <div className="text-right text-lg font-semibold tracking-[-0.03em] text-foreground">
-                      {formatCurrency(transfer.amount)}
-                    </div>
+                    <div className="text-right text-lg font-semibold tracking-[-0.03em] text-foreground">{formatCurrency(transfer.amount)}</div>
                   </div>
 
                   <div className="grid gap-3 rounded-[20px] border border-border/60 bg-background/70 p-4 text-sm">
@@ -445,16 +432,12 @@ export default function TransferCatalog() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTransfers.map((transfer) => (
+                  {transfers.map((transfer) => (
                     <tr key={transfer.id} className="border-b border-border/60 align-top last:border-b-0">
                       <td className="px-6 py-4">
                         <div className="max-w-[280px]">
-                          {transfer.description ? (
-                            <div className="text-sm font-medium text-foreground">{transfer.description}</div>
-                          ) : null}
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {transfer.number || "Без номера"}
-                          </div>
+                          {transfer.description ? <div className="text-sm font-medium text-foreground">{transfer.description}</div> : null}
+                          <div className="mt-1 text-xs text-muted-foreground">{transfer.number || "Без номера"}</div>
                         </div>
                       </td>
                       <td className="px-4 py-4 text-sm text-foreground">{formatDate(transfer.date)}</td>
@@ -465,9 +448,7 @@ export default function TransferCatalog() {
                           <span className="text-foreground">{walletMap[transfer.wallet_to] || "Неизвестный кошелек"}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-4 text-right text-sm font-semibold text-foreground">
-                        {formatCurrency(transfer.amount)}
-                      </td>
+                      <td className="px-4 py-4 text-right text-sm font-semibold text-foreground">{formatCurrency(transfer.amount)}</td>
                       <td className="px-4 py-4">
                         <Badge variant="outline">Перевод</Badge>
                       </td>
@@ -493,6 +474,19 @@ export default function TransferCatalog() {
                 </tbody>
               </table>
             </div>
+
+            <CatalogPaginationControls
+              page={page}
+              pageCount={pageCount}
+              pageSize={pageSize}
+              totalCount={totalTransfers}
+              currentCount={transfers.length}
+              onPageChange={setPage}
+              onPageSizeChange={(value) => {
+                setPageSize(value as PageSizeOption)
+                setPage(1)
+              }}
+            />
           </CardContent>
         </Card>
       )}

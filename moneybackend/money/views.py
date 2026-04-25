@@ -12,10 +12,12 @@ from urllib import request as urlrequest
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.paginator import InvalidPage
 from django.http import HttpResponse
 from django.db import transaction
 from rest_framework import permissions, serializers, viewsets, status
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from django.db.models import Sum, Count, Q
 from django.db.models.functions import TruncMonth
@@ -139,6 +141,73 @@ class OneCSyncSoftDeleteCompatibilityMixin:
         if self.include_soft_deleted_for_onec_detail():
             return queryset
         return queryset.filter(**{self.soft_delete_field: False})
+
+
+class CatalogPageNumberPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+    allowed_page_sizes = {20, 50, 100}
+
+    def get_page_size(self, request):
+        raw_value = request.query_params.get(self.page_size_query_param)
+        if raw_value is None:
+            return self.page_size
+
+        try:
+            page_size = int(raw_value)
+        except (TypeError, ValueError):
+            return self.page_size
+
+        if page_size not in self.allowed_page_sizes:
+            return self.page_size
+        return page_size
+
+    def paginate_queryset(self, queryset, request, view=None):
+        self.request = request
+        page_size = self.get_page_size(request)
+        if not page_size:
+            return None
+
+        paginator = self.django_paginator_class(queryset, page_size)
+        page_number = request.query_params.get(self.page_query_param, 1)
+
+        if page_number in self.last_page_strings:
+            page_number = paginator.num_pages
+
+        try:
+            self.page = paginator.page(page_number)
+        except InvalidPage:
+            fallback_page = paginator.num_pages or 1
+            self.page = paginator.page(fallback_page)
+
+        if paginator.num_pages > 1 and self.template is not None:
+            self.display_page_controls = True
+
+        return list(self.page)
+
+
+class FinancialOperationListFilteringMixin:
+    list_query_serializer_class = None
+    search_fields = ()
+
+    def get_list_filters(self):
+        serializer_class = self.list_query_serializer_class
+        if serializer_class is None:
+            return {}
+
+        serializer = serializer_class(data=self.request.query_params)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    def apply_search_filter(self, queryset, search):
+        if not search or not self.search_fields:
+            return queryset
+
+        conditions = Q()
+        for field_name in self.search_fields:
+            conditions |= Q(**{f'{field_name}__icontains': search})
+        return queryset.filter(conditions)
 
 
 # Справочники
@@ -887,7 +956,7 @@ class ReportViewSet(viewsets.ViewSet):
 
 
 # Финансовые операции
-class ReceiptViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet):
+class ReceiptViewSet(OneCSyncSoftDeleteCompatibilityMixin, FinancialOperationListFilteringMixin, viewsets.ModelViewSet):
     """
     API для управления приходами денежных средств
     
@@ -896,10 +965,43 @@ class ReceiptViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet
     queryset = Receipt.objects.all()
     serializer_class = ReceiptSerializer
     permission_classes = [permissions.IsAdminUser]
+    pagination_class = CatalogPageNumberPagination
+    list_query_serializer_class = ReceiptListQuerySerializer
+    search_fields = ('comment', 'number', 'wallet__name', 'cash_flow_item__name')
     
     def get_queryset(self):
         """Фильтрация неудаленных записей"""
-        return self.filter_soft_deleted(self.queryset).order_by('-date')
+        queryset = self.filter_soft_deleted(
+            self.queryset.select_related('wallet', 'cash_flow_item')
+        ).order_by('-date')
+
+        if getattr(self, 'action', None) != 'list':
+            return queryset
+
+        filters = self.get_list_filters()
+        queryset = self.apply_search_filter(queryset, filters.get('search'))
+
+        if filters.get('wallet'):
+            queryset = queryset.filter(wallet_id=filters['wallet'])
+        if filters.get('cash_flow_item'):
+            queryset = queryset.filter(cash_flow_item_id=filters['cash_flow_item'])
+        if filters.get('date_from'):
+            queryset = queryset.filter(date__date__gte=filters['date_from'])
+        if filters.get('date_to'):
+            queryset = queryset.filter(date__date__lte=filters['date_to'])
+        if filters.get('amount_min') is not None:
+            queryset = queryset.filter(amount__gte=filters['amount_min'])
+        if filters.get('amount_max') is not None:
+            queryset = queryset.filter(amount__lte=filters['amount_max'])
+
+        return queryset
+
+    @extend_schema(
+        parameters=[ReceiptListQuerySerializer],
+        responses={200: ReceiptSerializer(many=True)},
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
     
     def perform_destroy(self, instance):
         """Мягкое удаление с очисткой регистров"""
@@ -947,7 +1049,7 @@ class DocumentGraphicReplacementMixin:
         )
 
 
-class ExpenditureViewSet(OneCSyncSoftDeleteCompatibilityMixin, DocumentGraphicReplacementMixin, viewsets.ModelViewSet):
+class ExpenditureViewSet(OneCSyncSoftDeleteCompatibilityMixin, FinancialOperationListFilteringMixin, DocumentGraphicReplacementMixin, viewsets.ModelViewSet):
     """
     API для управления расходами денежных средств
     
@@ -959,15 +1061,39 @@ class ExpenditureViewSet(OneCSyncSoftDeleteCompatibilityMixin, DocumentGraphicRe
     permission_classes = [permissions.IsAdminUser]
     graphic_model = ExpenditureGraphic
     graphic_serializer_class = ExpenditureGraphicSerializer
+    pagination_class = CatalogPageNumberPagination
+    list_query_serializer_class = ExpenditureListQuerySerializer
+    search_fields = ('comment', 'number', 'wallet__name', 'cash_flow_item__name')
     
     def get_queryset(self):
         """Фильтрация с возможностью фильтра по бюджету"""
-        queryset = self.filter_soft_deleted(self.queryset).order_by('-date')
+        queryset = self.filter_soft_deleted(
+            self.queryset.select_related('wallet', 'cash_flow_item')
+        ).order_by('-date')
+
+        if getattr(self, 'action', None) != 'list':
+            return queryset
+
+        filters = self.get_list_filters()
+        queryset = self.apply_search_filter(queryset, filters.get('search'))
+
+        if filters.get('wallet'):
+            queryset = queryset.filter(wallet_id=filters['wallet'])
+        if filters.get('cash_flow_item'):
+            queryset = queryset.filter(cash_flow_item_id=filters['cash_flow_item'])
+        if filters.get('date_from'):
+            queryset = queryset.filter(date__date__gte=filters['date_from'])
+        if filters.get('date_to'):
+            queryset = queryset.filter(date__date__lte=filters['date_to'])
+        if filters.get('amount_min') is not None:
+            queryset = queryset.filter(amount__gte=filters['amount_min'])
+        if filters.get('amount_max') is not None:
+            queryset = queryset.filter(amount__lte=filters['amount_max'])
         
         # Фильтр по включению в бюджет
-        include_in_budget = self.request.query_params.get('include_in_budget')
+        include_in_budget = filters.get('include_in_budget')
         if include_in_budget is not None:
-            queryset = queryset.filter(include_in_budget=include_in_budget.lower() == 'true')
+            queryset = queryset.filter(include_in_budget=include_in_budget)
             
         return queryset
 
@@ -996,7 +1122,7 @@ class ExpenditureViewSet(OneCSyncSoftDeleteCompatibilityMixin, DocumentGraphicRe
             raise serializers.ValidationError(error)
 
 
-class TransferViewSet(OneCSyncSoftDeleteCompatibilityMixin, DocumentGraphicReplacementMixin, viewsets.ModelViewSet):
+class TransferViewSet(OneCSyncSoftDeleteCompatibilityMixin, FinancialOperationListFilteringMixin, DocumentGraphicReplacementMixin, viewsets.ModelViewSet):
     """
     API для управления переводами между кошельками
     
@@ -1008,10 +1134,43 @@ class TransferViewSet(OneCSyncSoftDeleteCompatibilityMixin, DocumentGraphicRepla
     permission_classes = [permissions.IsAdminUser]
     graphic_model = TransferGraphic
     graphic_serializer_class = TransferGraphicSerializer
+    pagination_class = CatalogPageNumberPagination
+    list_query_serializer_class = TransferListQuerySerializer
+    search_fields = ('comment', 'number', 'wallet_out__name', 'wallet_in__name')
     
     def get_queryset(self):
         """Фильтрация неудаленных переводов"""
-        return self.filter_soft_deleted(self.queryset).order_by('-date')
+        queryset = self.filter_soft_deleted(
+            self.queryset.select_related('wallet_out', 'wallet_in')
+        ).order_by('-date')
+
+        if getattr(self, 'action', None) != 'list':
+            return queryset
+
+        filters = self.get_list_filters()
+        queryset = self.apply_search_filter(queryset, filters.get('search'))
+
+        if filters.get('wallet_from'):
+            queryset = queryset.filter(wallet_out_id=filters['wallet_from'])
+        if filters.get('wallet_to'):
+            queryset = queryset.filter(wallet_in_id=filters['wallet_to'])
+        if filters.get('date_from'):
+            queryset = queryset.filter(date__date__gte=filters['date_from'])
+        if filters.get('date_to'):
+            queryset = queryset.filter(date__date__lte=filters['date_to'])
+        if filters.get('amount_min') is not None:
+            queryset = queryset.filter(amount__gte=filters['amount_min'])
+        if filters.get('amount_max') is not None:
+            queryset = queryset.filter(amount__lte=filters['amount_max'])
+
+        return queryset
+
+    @extend_schema(
+        parameters=[TransferListQuerySerializer],
+        responses={200: TransferSerializer(many=True)},
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
     
     def perform_create(self, serializer):
         """Валидация при создании перевода"""

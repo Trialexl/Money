@@ -72,6 +72,160 @@ export interface Transfer extends FinancialOperation {
   wallet_to: string
 }
 
+export type PageSizeOption = 20 | 50 | 100
+
+export interface PaginatedResult<T> {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+interface BaseOperationListParams {
+  search?: string
+  dateFrom?: string
+  dateTo?: string
+  amountMin?: number | string
+  amountMax?: number | string
+  page?: number
+  pageSize?: PageSizeOption
+}
+
+export interface ReceiptListParams extends BaseOperationListParams {
+  wallet?: string
+  cashFlowItem?: string
+}
+
+export interface ExpenditureListParams extends ReceiptListParams {
+  includedInBudget?: boolean
+}
+
+export interface TransferListParams extends BaseOperationListParams {
+  walletFrom?: string
+  walletTo?: string
+}
+
+function buildCommonOperationListParams(params?: BaseOperationListParams) {
+  return {
+    ...(params?.search?.trim() ? { search: params.search.trim() } : {}),
+    ...(params?.dateFrom ? { date_from: params.dateFrom } : {}),
+    ...(params?.dateTo ? { date_to: params.dateTo } : {}),
+    ...(params?.amountMin !== undefined && params.amountMin !== "" ? { amount_min: toApiAmount(params.amountMin) } : {}),
+    ...(params?.amountMax !== undefined && params.amountMax !== "" ? { amount_max: toApiAmount(params.amountMax) } : {}),
+    ...(params?.page ? { page: params.page } : {}),
+    ...(params?.pageSize ? { page_size: params.pageSize } : {}),
+  }
+}
+
+function mapReceipt(raw: any): Receipt {
+  return {
+    id: raw.id,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+    date: fromApiDateTime(raw.date) ?? "",
+    amount: fromApiAmount(raw.amount),
+    number: raw.number ?? undefined,
+    description: raw.comment ?? undefined,
+    graphic_contract: raw.graphic_contract ?? null,
+    wallet: fromApiRelationId(raw.wallet ?? raw.wallet_id),
+    cash_flow_item: fromApiRelationId(raw.cash_flow_item ?? raw.cash_flow_item_id),
+    wallet_name: fromApiRelationName(raw.wallet, raw.wallet_name),
+    cash_flow_item_name: fromApiRelationName(raw.cash_flow_item, raw.cash_flow_item_name),
+    project: fromApiRelationId(raw.project ?? raw.project_id) || undefined,
+    deleted: raw.deleted,
+  }
+}
+
+function mapExpenditure(raw: any): Expenditure {
+  return {
+    id: raw.id,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+    date: fromApiDateTime(raw.date) ?? "",
+    amount: fromApiAmount(raw.amount),
+    number: raw.number ?? undefined,
+    description: raw.comment ?? undefined,
+    graphic_contract: raw.graphic_contract ?? null,
+    wallet: fromApiRelationId(raw.wallet ?? raw.wallet_id),
+    cash_flow_item: fromApiRelationId(raw.cash_flow_item ?? raw.cash_flow_item_id),
+    include_in_budget: !!raw.include_in_budget,
+    wallet_name: fromApiRelationName(raw.wallet, raw.wallet_name),
+    cash_flow_item_name: fromApiRelationName(raw.cash_flow_item, raw.cash_flow_item_name),
+    project: fromApiRelationId(raw.project ?? raw.project_id) || undefined,
+    deleted: raw.deleted,
+  }
+}
+
+function mapTransfer(raw: any): Transfer {
+  return {
+    id: raw.id,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+    date: fromApiDateTime(raw.date) ?? "",
+    amount: fromApiAmount(raw.amount),
+    number: raw.number ?? undefined,
+    description: raw.comment ?? undefined,
+    graphic_contract: raw.graphic_contract ?? null,
+    wallet_from: fromApiRelationId(raw.wallet_out),
+    wallet_to: fromApiRelationId(raw.wallet_in),
+    deleted: raw.deleted,
+  }
+}
+
+function mapPaginatedResponse<T>(data: any, mapper: (raw: any) => T, page: number, pageSize: number): PaginatedResult<T> {
+  if (Array.isArray(data)) {
+    return {
+      count: data.length,
+      next: null,
+      previous: null,
+      results: data.map(mapper),
+      page,
+      pageSize,
+      totalPages: data.length === 0 ? 1 : Math.ceil(data.length / pageSize),
+    }
+  }
+
+  const count = typeof data?.count === "number" ? data.count : 0
+  const results = Array.isArray(data?.results) ? data.results.map(mapper) : []
+
+  return {
+    count,
+    next: typeof data?.next === "string" ? data.next : null,
+    previous: typeof data?.previous === "string" ? data.previous : null,
+    results,
+    page,
+    pageSize,
+    totalPages: count === 0 ? 1 : Math.ceil(count / pageSize),
+  }
+}
+
+async function fetchAllPaginated<T>(
+  path: string,
+  params: Record<string, unknown>,
+  mapper: (raw: any) => T,
+): Promise<T[]> {
+  const pageSize = 100
+  let page = 1
+  const items: T[] = []
+
+  while (true) {
+    const { data } = await api.get<any>(path, { params: { ...params, page, page_size: pageSize } })
+    const paginated = mapPaginatedResponse(data, mapper, page, pageSize)
+    items.push(...paginated.results)
+
+    if (!paginated.next || items.length >= paginated.count) {
+      break
+    }
+
+    page += 1
+  }
+
+  return items
+}
+
 // Budgets
 export interface Budget extends FinancialOperation {
   type: 'income' | 'expense'
@@ -92,44 +246,25 @@ export interface AutoPayment extends FinancialOperation {
 
 // Receipt service
 export const ReceiptService = {
+  getReceiptsPage: async (params: ReceiptListParams = {}) => {
+    const page = params.page ?? 1
+    const pageSize = params.pageSize ?? 20
+    const query = {
+      ...buildCommonOperationListParams(params),
+      ...(params.wallet ? { wallet: params.wallet } : {}),
+      ...(params.cashFlowItem ? { cash_flow_item: params.cashFlowItem } : {}),
+    }
+    const response = await api.get<any>("/receipts/", { params: query })
+    return mapPaginatedResponse(response.data, mapReceipt, page, pageSize)
+  },
+
   getReceipts: async () => {
-    const response = await api.get<any[]>("/receipts/")
-    return response.data.map((r) => ({
-      id: r.id,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      date: fromApiDateTime(r.date) ?? "",
-      amount: fromApiAmount(r.amount),
-      number: r.number ?? undefined,
-      description: r.comment ?? undefined,
-      graphic_contract: r.graphic_contract ?? null,
-      wallet: fromApiRelationId(r.wallet ?? r.wallet_id),
-      cash_flow_item: fromApiRelationId(r.cash_flow_item ?? r.cash_flow_item_id),
-      wallet_name: fromApiRelationName(r.wallet, r.wallet_name),
-      cash_flow_item_name: fromApiRelationName(r.cash_flow_item, r.cash_flow_item_name),
-      project: fromApiRelationId(r.project ?? r.project_id) || undefined,
-      deleted: r.deleted,
-    })) as Receipt[]
+    return fetchAllPaginated("/receipts/", {}, mapReceipt)
   },
 
   getReceipt: async (id: string) => {
     const { data: r } = await api.get<any>(`/receipts/${id}/`)
-    const mapped: Receipt = {
-      id: r.id,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      date: fromApiDateTime(r.date) ?? "",
-      amount: fromApiAmount(r.amount),
-      number: r.number ?? undefined,
-      description: r.comment ?? undefined,
-      graphic_contract: r.graphic_contract ?? null,
-      wallet: fromApiRelationId(r.wallet ?? r.wallet_id),
-      cash_flow_item: fromApiRelationId(r.cash_flow_item ?? r.cash_flow_item_id),
-      wallet_name: fromApiRelationName(r.wallet, r.wallet_name),
-      cash_flow_item_name: fromApiRelationName(r.cash_flow_item, r.cash_flow_item_name),
-      project: fromApiRelationId(r.project ?? r.project_id) || undefined,
-      deleted: r.deleted,
-    }
+    const mapped = mapReceipt(r)
 
     if (!mapped.wallet || !mapped.cash_flow_item) {
       const source = (await ReceiptService.getReceipts()).find((item) => item.id === id)
@@ -177,47 +312,27 @@ export const ReceiptService = {
 
 // Expenditure service
 export const ExpenditureService = {
+  getExpendituresPage: async (params: ExpenditureListParams = {}) => {
+    const page = params.page ?? 1
+    const pageSize = params.pageSize ?? 20
+    const query = {
+      ...buildCommonOperationListParams(params),
+      ...(params.wallet ? { wallet: params.wallet } : {}),
+      ...(params.cashFlowItem ? { cash_flow_item: params.cashFlowItem } : {}),
+      ...(params.includedInBudget !== undefined ? { include_in_budget: params.includedInBudget } : {}),
+    }
+    const response = await api.get<any>("/expenditures/", { params: query })
+    return mapPaginatedResponse(response.data, mapExpenditure, page, pageSize)
+  },
+
   getExpenditures: async (includedInBudget?: boolean) => {
     const params = includedInBudget !== undefined ? { include_in_budget: includedInBudget } : {}
-    const { data } = await api.get<any[]>("/expenditures/", { params })
-    return data.map((e) => ({
-      id: e.id,
-      created_at: e.created_at,
-      updated_at: e.updated_at,
-      date: fromApiDateTime(e.date) ?? "",
-      amount: fromApiAmount(e.amount),
-      number: e.number ?? undefined,
-      description: e.comment ?? undefined,
-      graphic_contract: e.graphic_contract ?? null,
-      wallet: fromApiRelationId(e.wallet ?? e.wallet_id),
-      cash_flow_item: fromApiRelationId(e.cash_flow_item ?? e.cash_flow_item_id),
-      include_in_budget: !!e.include_in_budget,
-      wallet_name: fromApiRelationName(e.wallet, e.wallet_name),
-      cash_flow_item_name: fromApiRelationName(e.cash_flow_item, e.cash_flow_item_name),
-      project: fromApiRelationId(e.project ?? e.project_id) || undefined,
-      deleted: e.deleted,
-    })) as Expenditure[]
+    return fetchAllPaginated("/expenditures/", params, mapExpenditure)
   },
 
   getExpenditure: async (id: string) => {
     const { data: e } = await api.get<any>(`/expenditures/${id}/`)
-    const mapped: Expenditure = {
-      id: e.id,
-      created_at: e.created_at,
-      updated_at: e.updated_at,
-      date: fromApiDateTime(e.date) ?? "",
-      amount: fromApiAmount(e.amount),
-      number: e.number ?? undefined,
-      description: e.comment ?? undefined,
-      graphic_contract: e.graphic_contract ?? null,
-      wallet: fromApiRelationId(e.wallet ?? e.wallet_id),
-      cash_flow_item: fromApiRelationId(e.cash_flow_item ?? e.cash_flow_item_id),
-      include_in_budget: !!e.include_in_budget,
-      wallet_name: fromApiRelationName(e.wallet, e.wallet_name),
-      cash_flow_item_name: fromApiRelationName(e.cash_flow_item, e.cash_flow_item_name),
-      project: fromApiRelationId(e.project ?? e.project_id) || undefined,
-      deleted: e.deleted,
-    }
+    const mapped = mapExpenditure(e)
 
     if (!mapped.wallet || !mapped.cash_flow_item) {
       const source = (await ExpenditureService.getExpenditures()).find((item) => item.id === id)
@@ -267,38 +382,25 @@ export const ExpenditureService = {
 
 // Transfer service
 export const TransferService = {
+  getTransfersPage: async (params: TransferListParams = {}) => {
+    const page = params.page ?? 1
+    const pageSize = params.pageSize ?? 20
+    const query = {
+      ...buildCommonOperationListParams(params),
+      ...(params.walletFrom ? { wallet_from: params.walletFrom } : {}),
+      ...(params.walletTo ? { wallet_to: params.walletTo } : {}),
+    }
+    const response = await api.get<any>("/transfers/", { params: query })
+    return mapPaginatedResponse(response.data, mapTransfer, page, pageSize)
+  },
+
   getTransfers: async () => {
-    const { data } = await api.get<any[]>("/transfers/")
-    return data.map((t) => ({
-      id: t.id,
-      created_at: t.created_at,
-      updated_at: t.updated_at,
-      date: fromApiDateTime(t.date) ?? "",
-      amount: fromApiAmount(t.amount),
-      number: t.number ?? undefined,
-      description: t.comment ?? undefined,
-      graphic_contract: t.graphic_contract ?? null,
-      wallet_from: fromApiRelationId(t.wallet_out),
-      wallet_to: fromApiRelationId(t.wallet_in),
-      deleted: t.deleted,
-    })) as Transfer[]
+    return fetchAllPaginated("/transfers/", {}, mapTransfer)
   },
 
   getTransfer: async (id: string) => {
     const { data: t } = await api.get<any>(`/transfers/${id}/`)
-    const mapped: Transfer = {
-      id: t.id,
-      created_at: t.created_at,
-      updated_at: t.updated_at,
-      date: fromApiDateTime(t.date) ?? "",
-      amount: fromApiAmount(t.amount),
-      number: t.number ?? undefined,
-      description: t.comment ?? undefined,
-      graphic_contract: t.graphic_contract ?? null,
-      wallet_from: fromApiRelationId(t.wallet_out),
-      wallet_to: fromApiRelationId(t.wallet_in),
-      deleted: t.deleted,
-    }
+    const mapped = mapTransfer(t)
     return mapped
   },
 
