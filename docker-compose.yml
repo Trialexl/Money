@@ -31,10 +31,7 @@ services:
       - django_static:/app/staticfiles
 
   frontend:
-    build:
-      context: ./frontmoney
-      dockerfile: Dockerfile
-    image: trialexl/money-frontend:local
+    image: trialexl/money-frontend@sha256:be6e3f61998d9d5eff584be27c588642773f462a2cbf8c6f128d7da2b9ff1632
     restart: unless-stopped
     depends_on:
       - backend
