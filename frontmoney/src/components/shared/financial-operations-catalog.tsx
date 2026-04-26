@@ -169,6 +169,7 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
     },
     placeholderData: (previousData) => previousData,
   })
+  const pageCount = Math.max(operationsQuery.data?.totalPages ?? 1, 1)
 
   const deleteMutation = useMutation({
     mutationFn: async (operationId: string) => {
@@ -201,6 +202,12 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
     setPage(1)
   }
 
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount)
+    }
+  }, [page, pageCount])
+
   if ((operationsQuery.isLoading && !operationsQuery.data) || referencesQuery.isLoading) {
     return <FullPageLoader label={config.loadingLabel} />
   }
@@ -219,7 +226,6 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
   const operationsPage = operationsQuery.data
   const operations = operationsPage.results
   const totalOperations = operationsPage.count
-  const pageCount = operationsPage.totalPages
   const wallets = referencesQuery.wallets
   const cashFlowItems = referencesQuery.cashFlowItems
   const walletMap = Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))
@@ -256,12 +262,6 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
     mode === "expenditure" && budgetFilter === "excluded" ? "Вне бюджета" : null,
   ].filter(Boolean) as string[]
   const advancedFilterCount = [Boolean(dateFrom), Boolean(dateTo), Boolean(amountMin), Boolean(amountMax)].filter(Boolean).length
-
-  useEffect(() => {
-    if (page > pageCount) {
-      setPage(pageCount)
-    }
-  }, [page, pageCount])
 
   const handleDelete = async (operationId: string) => {
     setActionError(null)

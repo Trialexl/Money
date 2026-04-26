@@ -27,12 +27,15 @@ export default function DashboardLayout({
         return
       }
 
-      try {
-        await loadProfile()
-      } finally {
-        if (!cancelled) {
-          setIsReady(true)
-        }
+      await loadProfile()
+
+      if (!isAuthenticated()) {
+        router.replace("/auth/login")
+        return
+      }
+
+      if (!cancelled) {
+        setIsReady(true)
       }
     }
 

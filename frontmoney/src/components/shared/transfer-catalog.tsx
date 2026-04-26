@@ -88,6 +88,7 @@ export default function TransferCatalog() {
       }),
     placeholderData: (previousData) => previousData,
   })
+  const pageCount = Math.max(transfersQuery.data?.totalPages ?? 1, 1)
 
   const deleteMutation = useMutation({
     mutationFn: (transferId: string) => TransferService.deleteTransfer(transferId),
@@ -112,6 +113,12 @@ export default function TransferCatalog() {
     setPage(1)
   }
 
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount)
+    }
+  }, [page, pageCount])
+
   if ((transfersQuery.isLoading && !transfersQuery.data) || walletsQuery.isLoading) {
     return <FullPageLoader label="Загружаем переводы..." />
   }
@@ -130,7 +137,6 @@ export default function TransferCatalog() {
   const transfersPage = transfersQuery.data
   const transfers = transfersPage.results
   const totalTransfers = transfersPage.count
-  const pageCount = transfersPage.totalPages
   const wallets = walletsQuery.data || []
   const walletMap = Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))
   const totalAmount = transfers.reduce((sum, transfer) => sum + transfer.amount, 0)
@@ -155,12 +161,6 @@ export default function TransferCatalog() {
     amountMin || amountMax ? `Сумма: ${amountMin || "0"} - ${amountMax || "..."}` : null,
   ].filter(Boolean) as string[]
   const advancedFilterCount = [Boolean(dateFrom), Boolean(dateTo), Boolean(amountMin), Boolean(amountMax)].filter(Boolean).length
-
-  useEffect(() => {
-    if (page > pageCount) {
-      setPage(pageCount)
-    }
-  }, [page, pageCount])
 
   const handleDelete = async (transferId: string) => {
     setActionError(null)
