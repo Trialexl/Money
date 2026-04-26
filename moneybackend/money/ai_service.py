@@ -1143,10 +1143,10 @@ class AiOperationService:
         model_name = (item or {}).get('model') or 'Document'
         amount = (item or {}).get('amount') or '0.00'
         operation_icon = {
-            'Receipt': '💰',
-            'Expenditure': '💸',
-            'Transfer': '🔁',
-        }.get(model_name, '📄')
+            'Receipt': '➕',
+            'Expenditure': '➖',
+            'Transfer': '🔄',
+        }.get(model_name, '•')
         parts.append(f'{operation_icon} {amount}')
         if item.get('wallet_name'):
             parts.append(f'👛 {item["wallet_name"]}')
