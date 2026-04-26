@@ -1857,6 +1857,34 @@ class DashboardOverviewTests(TestCase):
         self.assertEqual(response.data['items'][0]['description'], 'Перевод в резерв')
         self.assertEqual(response.data['items'][1]['cash_flow_item_name'], 'Путешествия')
 
+    def test_dashboard_budget_expense_breakdown_matches_selected_item(self):
+        response = self.client.get(
+            '/api/v1/dashboard/budget-expense-breakdown/',
+            {
+                'date': self.selected_at.isoformat(),
+                'cash_flow_item': str(self.food_item.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['cash_flow_item_id'], str(self.food_item.id))
+        self.assertEqual(response.data['cash_flow_item_name'], 'Еда')
+        self.assertEqual(response.data['planned_total'], '500.00')
+        self.assertEqual(response.data['actual_total'], '300.00')
+        self.assertEqual(response.data['remaining'], '200.00')
+        self.assertEqual(response.data['overrun'], '0.00')
+        self.assertEqual(len(response.data['details']), 2)
+        self.assertEqual(response.data['details'][0]['period'], self.make_dt(2024, 3, 1).isoformat())
+        self.assertEqual(response.data['details'][0]['entry_type'], 'budget')
+        self.assertEqual(response.data['details'][0]['document_type'], 'Budget')
+        self.assertEqual(response.data['details'][0]['amount'], '500.00')
+        self.assertIsNotNone(response.data['details'][0]['document_id'])
+        self.assertEqual(response.data['details'][1]['period'], self.make_dt(2024, 3, 3).isoformat())
+        self.assertEqual(response.data['details'][1]['entry_type'], 'actual')
+        self.assertEqual(response.data['details'][1]['document_type'], 'Expenditure')
+        self.assertEqual(response.data['details'][1]['amount'], '300.00')
+        self.assertIsNotNone(response.data['details'][1]['document_id'])
+
     def test_dashboard_recent_activity_respects_hidden_wallet_filter(self):
         reserve_wallet = Wallet.objects.create(name='Второй видимый кошелек')
         hidden_transfer = Transfer.objects.create(

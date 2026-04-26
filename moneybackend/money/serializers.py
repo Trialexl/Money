@@ -197,6 +197,11 @@ class DashboardRecentActivityQuerySerializer(serializers.Serializer):
     limit = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
 
 
+class DashboardBudgetExpenseBreakdownQuerySerializer(serializers.Serializer):
+    date = serializers.DateTimeField(required=False)
+    cash_flow_item = serializers.UUIDField()
+
+
 class WalletBalanceResponseSerializer(serializers.Serializer):
     wallet_id = serializers.UUIDField()
     wallet_name = serializers.CharField()
@@ -281,6 +286,25 @@ class DashboardBudgetExpenseSerializer(serializers.Serializer):
     items = DashboardBudgetExpenseItemSerializer(many=True)
     remaining_total = serializers.DecimalField(max_digits=12, decimal_places=2)
     overrun_total = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class DashboardBudgetExpenseBreakdownDetailSerializer(serializers.Serializer):
+    period = serializers.DateTimeField()
+    document_id = serializers.UUIDField(allow_null=True, required=False)
+    document_type = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    entry_type = serializers.ChoiceField(choices=['budget', 'actual'])
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class DashboardBudgetExpenseBreakdownResponseSerializer(serializers.Serializer):
+    date = serializers.DateTimeField()
+    cash_flow_item_id = serializers.UUIDField()
+    cash_flow_item_name = serializers.CharField()
+    planned_total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    actual_total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    remaining = serializers.DecimalField(max_digits=12, decimal_places=2)
+    overrun = serializers.DecimalField(max_digits=12, decimal_places=2)
+    details = DashboardBudgetExpenseBreakdownDetailSerializer(many=True)
 
 
 class DashboardBudgetIncomeSerializer(serializers.Serializer):

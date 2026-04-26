@@ -14,6 +14,25 @@ export interface DashboardBudgetExpenseItem {
   overrun: number
 }
 
+export interface DashboardBudgetExpenseBreakdownDetail {
+  period: string
+  document_id?: string | null
+  document_type?: string | null
+  entry_type: "budget" | "actual"
+  amount: number
+}
+
+export interface DashboardBudgetExpenseBreakdown {
+  date: string
+  cash_flow_item_id: string
+  cash_flow_item_name: string
+  planned_total: number
+  actual_total: number
+  remaining: number
+  overrun: number
+  details: DashboardBudgetExpenseBreakdownDetail[]
+}
+
 export interface DashboardMonthTotals {
   start: string
   income: number
@@ -179,5 +198,33 @@ export const DashboardService = {
 
     const { data } = await api.get<any>("/dashboard/recent-activity/", { params })
     return Array.isArray(data?.items) ? data.items.map(mapRecentActivity) : []
+  },
+
+  getBudgetExpenseBreakdown: async (options: { date?: string; cashFlowItemId: string }) => {
+    const params = {
+      ...(options?.date ? { date: toApiDateTime(options.date) } : {}),
+      cash_flow_item: options.cashFlowItemId,
+    }
+
+    const { data } = await api.get<any>("/dashboard/budget-expense-breakdown/", { params })
+
+    return {
+      date: fromApiDateTime(data?.date) ?? "",
+      cash_flow_item_id: data?.cash_flow_item_id ?? "",
+      cash_flow_item_name: data?.cash_flow_item_name ?? "",
+      planned_total: fromApiAmount(data?.planned_total),
+      actual_total: fromApiAmount(data?.actual_total),
+      remaining: fromApiAmount(data?.remaining),
+      overrun: fromApiAmount(data?.overrun),
+      details: Array.isArray(data?.details)
+        ? data.details.map((row: any) => ({
+            period: fromApiDateTime(row?.period) ?? "",
+            document_id: row?.document_id ?? null,
+            document_type: row?.document_type ?? null,
+            entry_type: row?.entry_type === "budget" ? "budget" : "actual",
+            amount: fromApiAmount(row?.amount),
+          }))
+        : [],
+    } satisfies DashboardBudgetExpenseBreakdown
   },
 }

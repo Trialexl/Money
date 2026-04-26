@@ -43,6 +43,7 @@ import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters
 import { cn } from "@/lib/utils"
 import {
   DashboardService,
+  type DashboardBudgetExpenseBreakdown,
   type DashboardBudgetExpenseItem,
   type DashboardRecentActivity,
 } from "@/services/dashboard-service"
@@ -55,6 +56,7 @@ export default function DashboardPage() {
   const [showHiddenWallets, setShowHiddenWallets] = useState(false)
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false)
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all")
+  const [expandedBudgetItemId, setExpandedBudgetItemId] = useState<string | null>(null)
   const today = formatDateForInput()
   const selectedDate = searchParams.get("date") || today
   const selectedDashboardDate = new Date(`${selectedDate}T12:00:00`)
@@ -89,6 +91,17 @@ export default function DashboardPage() {
     staleTime: 60_000,
   })
 
+  const budgetBreakdownQuery = useQuery({
+    queryKey: ["dashboard-budget-expense-breakdown", { selectedDate, cashFlowItemId: expandedBudgetItemId }],
+    queryFn: async () =>
+      DashboardService.getBudgetExpenseBreakdown({
+        date: selectedDate,
+        cashFlowItemId: expandedBudgetItemId!,
+      }),
+    enabled: Boolean(expandedBudgetItemId),
+    staleTime: 60_000,
+  })
+
   if (dashboardQuery.isLoading) {
     return <FullPageLoader label="Собираем обзор денег..." />
   }
@@ -119,6 +132,10 @@ export default function DashboardPage() {
     .filter((item) => item.overrun > 0)
     .sort((left, right) => right.overrun - left.overrun)
     .slice(0, 5)
+  const expandedBudgetBreakdown: DashboardBudgetExpenseBreakdown | null =
+    expandedBudgetItemId && budgetBreakdownQuery.data?.cash_flow_item_id === expandedBudgetItemId
+      ? budgetBreakdownQuery.data
+      : null
 
   const recentActivity = allRecentActivity.filter((item) => activityFilter === "all" || item.kind === activityFilter)
 
@@ -134,6 +151,25 @@ export default function DashboardPage() {
     router.replace(query ? `/dashboard?${query}` : "/dashboard", { scroll: false })
     setVisibleMonth(startOfMonth(value))
     setIsDatePickerOpen(false)
+  }
+
+  const handleToggleBudgetBreakdown = (cashFlowItemId: string) => {
+    setExpandedBudgetItemId((current) => (current === cashFlowItemId ? null : cashFlowItemId))
+  }
+
+  const formatBudgetDetailType = (documentType?: string | null) => {
+    if (!documentType) {
+      return null
+    }
+
+    return (
+      {
+        Budget: "План",
+        Expenditure: "Расход",
+        Receipt: "Приход",
+        Transfer: "Перевод",
+      }[documentType] ?? documentType
+    )
   }
 
   const getActivityDuplicateHref = (operation: DashboardRecentActivity) => {
@@ -431,17 +467,117 @@ export default function DashboardPage() {
                   {budgetAlerts.length > 0 ? (
                     <div className="space-y-2">
                       {budgetAlerts.map((item: DashboardBudgetExpenseItem) => (
-                        <div
-                          key={item.cash_flow_item_id}
-                          className="flex items-center justify-between gap-3 rounded-[20px] border border-border/60 bg-background/75 px-4 py-3"
-                        >
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-foreground">{item.cash_flow_item_name}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">Перерасход по статье</div>
-                          </div>
-                          <div className="text-sm font-semibold text-rose-600 dark:text-rose-300">
-                            {formatCurrency(item.overrun)}
-                          </div>
+                        <div key={item.cash_flow_item_id} className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleBudgetBreakdown(item.cash_flow_item_id)}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-3 rounded-[20px] border border-border/60 bg-background/75 px-4 py-3 text-left transition-colors hover:bg-background",
+                              expandedBudgetItemId === item.cash_flow_item_id && "border-primary/30 bg-background"
+                            )}
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-foreground">{item.cash_flow_item_name}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">Нажми, чтобы увидеть расчет суммы</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-sm font-semibold text-rose-600 dark:text-rose-300">
+                                {formatCurrency(item.overrun)}
+                              </div>
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                {expandedBudgetItemId === item.cash_flow_item_id ? "Скрыть" : "Раскрыть"}
+                              </div>
+                            </div>
+                          </button>
+
+                          {expandedBudgetItemId === item.cash_flow_item_id ? (
+                            <div className="rounded-[20px] border border-border/60 bg-card/70 p-4">
+                              {budgetBreakdownQuery.isLoading ? (
+                                <div className="text-sm text-muted-foreground">Собираем расшифровку статьи...</div>
+                              ) : budgetBreakdownQuery.isError || !expandedBudgetBreakdown ? (
+                                <div className="space-y-3">
+                                  <div className="text-sm text-muted-foreground">
+                                    Не удалось загрузить расшифровку суммы.
+                                  </div>
+                                  <Button size="sm" variant="outline" onClick={() => budgetBreakdownQuery.refetch()}>
+                                    Повторить
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  <div className="grid gap-2 sm:grid-cols-3">
+                                    <div className="rounded-2xl border border-border/60 bg-background/75 p-3">
+                                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                        План
+                                      </div>
+                                      <div className="mt-1 text-lg font-semibold text-foreground">
+                                        {formatCurrency(expandedBudgetBreakdown.planned_total)}
+                                      </div>
+                                    </div>
+                                    <div className="rounded-2xl border border-border/60 bg-background/75 p-3">
+                                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                        Факт
+                                      </div>
+                                      <div className="mt-1 text-lg font-semibold text-foreground">
+                                        {formatCurrency(expandedBudgetBreakdown.actual_total)}
+                                      </div>
+                                    </div>
+                                    <div className="rounded-2xl border border-border/60 bg-background/75 p-3">
+                                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                        {expandedBudgetBreakdown.overrun > 0 ? "Перерасход" : "Остаток"}
+                                      </div>
+                                      <div
+                                        className={cn(
+                                          "mt-1 text-lg font-semibold",
+                                          expandedBudgetBreakdown.overrun > 0
+                                            ? "text-rose-600 dark:text-rose-300"
+                                            : "text-emerald-600 dark:text-emerald-300"
+                                        )}
+                                      >
+                                        {formatCurrency(
+                                          expandedBudgetBreakdown.overrun > 0
+                                            ? expandedBudgetBreakdown.overrun
+                                            : expandedBudgetBreakdown.remaining
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-2xl border border-border/60 bg-background/60 p-3 text-sm text-muted-foreground">
+                                    {expandedBudgetBreakdown.overrun > 0
+                                      ? "Перерасход считается как факт минус план по выбранной статье на текущую дату."
+                                      : "Остаток считается как план минус факт по выбранной статье на текущую дату."}
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {expandedBudgetBreakdown.details.map((detail) => (
+                                      <div
+                                        key={`${detail.entry_type}-${detail.document_id ?? detail.period}-${detail.amount}`}
+                                        className="flex items-start justify-between gap-3 rounded-2xl border border-border/60 bg-background/75 px-3 py-3"
+                                      >
+                                        <div className="min-w-0 space-y-1">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <Badge variant={detail.entry_type === "budget" ? "outline" : "destructive"}>
+                                              {detail.entry_type === "budget" ? "План" : "Факт"}
+                                            </Badge>
+                                            {formatBudgetDetailType(detail.document_type) ? (
+                                              <span className="text-xs text-muted-foreground">
+                                                {formatBudgetDetailType(detail.document_type)}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                          <div className="text-sm text-foreground">{formatDate(detail.period)}</div>
+                                        </div>
+                                        <div className="text-sm font-semibold text-foreground">
+                                          {formatCurrency(detail.amount)}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       ))}
                     </div>

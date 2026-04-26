@@ -892,6 +892,80 @@ class DashboardViewSet(viewsets.ViewSet):
             'items': items,
         })
 
+    @extend_schema(
+        parameters=[DashboardBudgetExpenseBreakdownQuerySerializer],
+        responses=DashboardBudgetExpenseBreakdownResponseSerializer,
+        description='Расшифровка перерасхода по статье бюджета для dashboard.',
+    )
+    @action(detail=False, methods=['get'], url_path='budget-expense-breakdown')
+    def budget_expense_breakdown(self, request):
+        query = DashboardBudgetExpenseBreakdownQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+
+        selected_at = query.validated_data.get('date')
+        if selected_at is None:
+            selected_at = timezone.localtime(timezone.now())
+        else:
+            selected_at = _parse_dashboard_selected_at(
+                request.query_params.get('date'),
+                selected_at,
+            )
+
+        cash_flow_item_id = query.validated_data['cash_flow_item']
+        cash_flow_item = CashFlowItem.objects.filter(pk=cash_flow_item_id).first()
+        if cash_flow_item is None:
+            return Response({'detail': 'Статья не найдена.'}, status=status.HTTP_404_NOT_FOUND)
+
+        selected_day_end = _day_end(selected_at)
+        selected_month_start = _month_start(selected_at)
+
+        base_queryset = BudgetExpense.objects.select_related('cash_flow_item').filter(
+            period__gte=selected_month_start,
+            period__lte=selected_day_end,
+            project__isnull=True,
+            cash_flow_item_id=cash_flow_item_id,
+        )
+        plan_queryset = base_queryset.filter(type_of_document=5)
+        actual_queryset = base_queryset.filter(type_of_document__in=[1, 2, 4])
+
+        planned_total = _dashboard_money(plan_queryset.aggregate(total=Sum('amount'))['total'])
+        actual_total = _dashboard_money(actual_queryset.aggregate(total=Sum('amount'))['total'])
+        remaining = _dashboard_money(max(planned_total - actual_total, ZERO_AMOUNT))
+        overrun = _dashboard_money(max(actual_total - planned_total, ZERO_AMOUNT))
+
+        details = [
+            {
+                'period': row.period.isoformat(),
+                'document_id': _serialize_uuid(row.document_id),
+                'document_type': row.get_type_of_document_display(),
+                'entry_type': 'budget',
+                'amount': _dashboard_money_str(row.amount),
+            }
+            for row in plan_queryset.order_by('period', 'id')
+        ]
+        details.extend([
+            {
+                'period': row.period.isoformat(),
+                'document_id': _serialize_uuid(row.document_id),
+                'document_type': row.get_type_of_document_display(),
+                'entry_type': 'actual',
+                'amount': _dashboard_money_str(row.amount),
+            }
+            for row in actual_queryset.order_by('period', 'id')
+        ])
+        details.sort(key=lambda row: (row['period'], row['entry_type'], str(row['document_id'] or '')))
+
+        return Response({
+            'date': selected_day_end.isoformat(),
+            'cash_flow_item_id': str(cash_flow_item.id),
+            'cash_flow_item_name': cash_flow_item.name,
+            'planned_total': _dashboard_money_str(planned_total),
+            'actual_total': _dashboard_money_str(actual_total),
+            'remaining': _dashboard_money_str(remaining),
+            'overrun': _dashboard_money_str(overrun),
+            'details': details,
+        })
+
 
 class ReportViewSet(viewsets.ViewSet):
     """Отчетные endpoints по мотивам 1С-отчетов."""
