@@ -1142,20 +1142,18 @@ class AiOperationService:
         parts = []
         model_name = (item or {}).get('model') or 'Document'
         amount = (item or {}).get('amount') or '0.00'
-        label = {
-            'Receipt': 'Приход',
-            'Expenditure': 'Расход',
-            'Transfer': 'Перевод',
-        }.get(model_name, model_name)
-        parts.append(f'{label}: {amount}')
+        operation_icon = {
+            'Receipt': '💰',
+            'Expenditure': '💸',
+            'Transfer': '🔁',
+        }.get(model_name, '📄')
+        parts.append(f'{operation_icon} {amount}')
         if item.get('wallet_name'):
-            parts.append(f'кошелек {item["wallet_name"]}')
+            parts.append(f'👛 {item["wallet_name"]}')
         if item.get('wallet_out_name') and item.get('wallet_in_name'):
-            parts.append(f'{item["wallet_out_name"]} -> {item["wallet_in_name"]}')
+            parts.append(f'👛 {item["wallet_out_name"]} -> {item["wallet_in_name"]}')
         if item.get('cash_flow_item_name'):
-            parts.append(f'статья {item["cash_flow_item_name"]}')
-        if item.get('comment'):
-            parts.append(f'комм. {item["comment"]}')
+            parts.append(f'🏷 {item["cash_flow_item_name"]}')
         prefix = f'{index}. ' if index is not None else '- '
         return prefix + ' | '.join(parts)
 
