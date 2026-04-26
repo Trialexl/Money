@@ -3186,6 +3186,12 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(third_response.status_code, 201)
         self.assertEqual(third_response.data['status'], 'created')
         self.assertEqual(len(third_response.data['created_objects']), 2)
+        self.assertIn('Создано документов: 2.', third_response.data['reply_text'])
+        self.assertIn('Расход: 342.00', third_response.data['reply_text'])
+        self.assertIn('Расход: 465.75', third_response.data['reply_text'])
+        self.assertIn('Дикий океан', third_response.data['reply_text'])
+        self.assertIn('Магнит', third_response.data['reply_text'])
+        self.assertNotIn('0.00 | Без комментария', third_response.data['reply_text'])
         expenditures = list(
             Expenditure.objects.filter(wallet=self.wallet_alpha, comment__icontains='₽').order_by('amount')
         )

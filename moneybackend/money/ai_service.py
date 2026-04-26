@@ -1221,11 +1221,10 @@ class AiOperationService:
         lines = [f'Создано документов: {count}.']
         preview_lines = []
         for result in created_results[:10]:
-            preview = result.get('preview') or {}
+            preview = result.get('preview') or self._build_preview_for_item(result.get('parsed') or {})
             amount = preview.get('amount') or '0.00'
             comment = preview.get('comment') or 'Без комментария'
-            model_name = preview.get('model') or result.get('created_object', {}).get('model') or 'Document'
-            preview_lines.append(f'- {model_name}: {amount} | {comment}')
+            preview_lines.append(self._build_final_confirmation_line(preview))
         lines.extend(preview_lines)
         if count > len(preview_lines):
             lines.append(f'И еще {count - len(preview_lines)} документ(ов).')
