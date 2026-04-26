@@ -233,6 +233,19 @@ def _is_affirmative_confirmation(text):
     }
 
 
+def _contains_batch_exclusion_instruction(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+
+    patterns = (
+        r'\bне\s+(?:заноси|заносить|вноси|вносить|добавляй|добавлять|создавай|создавать|учитывай|учитывать)\b',
+        r'\b(?:исключи|игнорируй|пропусти|убери|удали)\b',
+        r'\b(?:не\s+нужно|не\s+надо)\s+(?:заносить|вносить|добавлять|создавать|учитывать)\b',
+    )
+    return any(re.search(pattern, normalized) for pattern in patterns)
+
+
 def _parse_datetime_value(value):
     if not value:
         return None
@@ -1104,6 +1117,106 @@ class AiOperationService:
             'raw': normalized.get('raw', {}),
         }
 
+    def _batch_exclusion_score(self, *, answer_text, item, index):
+        normalized_answer = _normalize_text(answer_text)
+        if not normalized_answer:
+            return 0
+
+        score = 0
+
+        index_matches = {
+            int(match)
+            for match in re.findall(r'(?<!\d)(\d{1,2})(?!\d)', normalized_answer)
+        }
+        if index in index_matches:
+            score = max(score, 1000)
+
+        intent_aliases = {
+            INTENT_CREATE_RECEIPT: ('приход', 'доход', 'поступление'),
+            INTENT_CREATE_EXPENDITURE: ('расход', 'трата', 'покупка', 'списание'),
+            INTENT_CREATE_TRANSFER: ('перевод', 'сбп', 'между счетами', 'между кошельками'),
+        }
+        for alias in intent_aliases.get(item.get('intent'), ()):
+            if _score_hint_against_pattern(normalized_answer, alias) >= 700:
+                score = max(score, 900 + len(alias))
+
+        parsed_amount = _extract_amount_from_text(answer_text)
+        item_amount = item.get('amount')
+        if parsed_amount is not None and item_amount is not None and abs(parsed_amount) == abs(item_amount):
+            score = max(score, 850)
+
+        raw = item.get('raw') or {}
+        text_hints = [
+            raw.get('merchant'),
+            raw.get('description'),
+            raw.get('comment'),
+            raw.get('bank_name'),
+            getattr(item.get('cash_flow_item'), 'name', None),
+            getattr(item.get('wallet'), 'name', None),
+            getattr(item.get('wallet_from'), 'name', None),
+            getattr(item.get('wallet_to'), 'name', None),
+        ]
+        for hint in text_hints:
+            if not hint:
+                continue
+            hint_score = _score_hint_against_pattern(normalized_answer, hint)
+            if hint_score >= 700:
+                score = max(score, 700 + min(len(_normalize_text(hint)), 50))
+
+        return score
+
+    def apply_batch_answer_directives(self, *, normalized, answer_text):
+        if not self._is_batch_normalized(normalized) or not _contains_batch_exclusion_instruction(answer_text):
+            return normalized, []
+
+        items = [
+            item for item in normalized.get('items', [])
+            if isinstance(item, dict)
+        ]
+        if not items:
+            return normalized, []
+
+        scored_items = []
+        for index, item in enumerate(items, start=1):
+            score = self._batch_exclusion_score(answer_text=answer_text, item=item, index=index)
+            if score > 0:
+                scored_items.append((index, score))
+
+        if not scored_items:
+            return normalized, []
+
+        max_score = max(score for _, score in scored_items)
+        excluded_indexes = [
+            index for index, score in scored_items
+            if score == max_score
+        ]
+        if not excluded_indexes:
+            return normalized, []
+
+        updated_items = [
+            item for index, item in enumerate(items, start=1)
+            if index not in excluded_indexes
+        ]
+        updated = dict(normalized)
+        updated['items'] = updated_items
+        updated['intent'] = self._batch_intent(updated_items)
+        return updated, excluded_indexes
+
+    def _build_empty_batch_result(self, *, provider_name, normalized, excluded_indexes):
+        excluded_count = len(excluded_indexes)
+        return {
+            'status': 'info',
+            'intent': normalized.get('intent', INTENT_CREATE_MULTIPLE_OPERATIONS),
+            'provider': provider_name,
+            'confidence': float(normalized.get('confidence') or 0.0),
+            'reply_text': (
+                f'Исключил {excluded_count} операцию. Нечего создавать.'
+                if excluded_count == 1
+                else f'Исключил {excluded_count} операций. Нечего создавать.'
+            ),
+            'parsed': normalized,
+        }
+
     def _build_preview_for_item(self, normalized):
         intent = normalized.get('intent')
         amount = normalized.get('amount')
@@ -1135,7 +1248,7 @@ class AiOperationService:
         else:
             lines.append(self._build_final_confirmation_line(preview))
         lines.append('Если всё верно, ответь: да или создать.')
-        lines.append('Если нужно исправить данные, напиши уточнение или /cancel.')
+        lines.append('Если нужно исправить данные или исключить операцию, напиши уточнение или /cancel.')
         return '\n'.join(lines)
 
     def _build_final_confirmation_line(self, item, *, index=None):
@@ -1351,6 +1464,16 @@ class AiOperationService:
                 context=context,
                 image_based=bool(image_bytes),
             )
+            normalized_batch, excluded_indexes = self.apply_batch_answer_directives(
+                normalized=normalized_batch,
+                answer_text=text,
+            )
+            if not normalized_batch.get('items'):
+                return self._build_empty_batch_result(
+                    provider_name=provider_name,
+                    normalized=normalized_batch,
+                    excluded_indexes=excluded_indexes,
+                )
             result = self._create_multiple_financial_documents(
                 normalized_batch,
                 provider_name=provider_name,
@@ -1450,6 +1573,30 @@ class AiOperationService:
         source='web',
     ):
         if missing_fields == [FINAL_CONFIRMATION_FIELD]:
+            if self._is_batch_normalized(normalized_payload):
+                normalized = self.deserialize_normalized_batch(normalized_payload)
+                normalized, excluded_indexes = self.apply_batch_answer_directives(
+                    normalized=normalized,
+                    answer_text=answer_text,
+                )
+                if excluded_indexes:
+                    if not normalized.get('items'):
+                        return self._build_empty_batch_result(
+                            provider_name=provider_name,
+                            normalized=normalized,
+                            excluded_indexes=excluded_indexes,
+                        )
+                    return self._final_confirmation_result(
+                        parsed=normalized,
+                        provider_name=provider_name,
+                        preview=self._build_batch_preview([
+                            {'preview': self._build_preview_for_item(item)}
+                            for item in normalized.get('items', [])
+                            if isinstance(item, dict)
+                        ]),
+                        confidence=float(normalized.get('confidence') or 0.0),
+                    )
+
             if _is_affirmative_confirmation(answer_text):
                 if self._is_batch_normalized(normalized_payload):
                     normalized = self.deserialize_normalized_batch(normalized_payload)
@@ -1500,8 +1647,18 @@ class AiOperationService:
 
         if self._is_batch_normalized(normalized_payload):
             normalized = self.deserialize_normalized_batch(normalized_payload)
+            normalized, excluded_indexes = self.apply_batch_answer_directives(
+                normalized=normalized,
+                answer_text=answer_text,
+            )
+            if not normalized.get('items'):
+                return self._build_empty_batch_result(
+                    provider_name=provider_name,
+                    normalized=normalized,
+                    excluded_indexes=excluded_indexes,
+                )
             patch = self._resolve_confirmation_with_provider(
-                normalized_payload=normalized_payload,
+                normalized_payload=self.serialize_normalized_batch(normalized),
                 missing_fields=missing_fields,
                 answer_text=answer_text,
                 provider_name=provider_name,

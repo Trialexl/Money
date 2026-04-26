@@ -3233,6 +3233,166 @@ class AiAssistantApiTests(TestCase):
         pending.refresh_from_db()
         self.assertFalse(pending.is_active)
 
+    @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
+    def test_ai_telegram_webhook_photo_caption_can_exclude_transfer_before_preview(self):
+        client = APIClient()
+        current_image_dt = timezone.make_aware(datetime(2026, 4, 26, 11, 35, 0))
+
+        class _FakeHeaders:
+            def get_content_type(self):
+                return 'image/jpeg'
+
+        class _FakeResponse:
+            def __init__(self, body, headers=None):
+                self._body = body
+                self.headers = headers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return self._body
+
+        get_file_response = _FakeResponse(
+            json.dumps({'ok': True, 'result': {'file_path': 'photos/history-filter.jpg'}}).encode('utf-8')
+        )
+        image_response = _FakeResponse(b'fake-telegram-history-filter-image', headers=_FakeHeaders())
+        send_message_response = _FakeResponse(json.dumps({'ok': True, 'result': {'message_id': 1003}}).encode('utf-8'))
+        first_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.9,
+            'amount': '157.97',
+            'merchant': 'Пятёрочка',
+            'description': 'Продукты',
+            'comment': 'Пятёрочка',
+            'operation_sign': 'outgoing',
+        }
+        second_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.98,
+            'operations': [
+                {
+                    'intent': 'create_transfer',
+                    'amount': '100000.00',
+                    'merchant': 'Алексей А.',
+                    'description': 'Переводы СБП Банк ВТБ',
+                    'comment': 'Перевод СБП',
+                    'occurred_at': '2024-04-21T17:35:00+03:00',
+                    'operation_sign': 'transfer',
+                },
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-157,97 ₽',
+                    'merchant': 'Пятёрочка',
+                    'description': 'Продукты',
+                    'comment': 'Пятёрочка -157,97 ₽',
+                    'occurred_at': '2024-04-21T17:36:00+03:00',
+                    'operation_sign': 'outgoing',
+                },
+            ],
+        }
+
+        with patch(
+            'money.views.urlrequest.urlopen',
+            side_effect=[
+                get_file_response,
+                image_response,
+                send_message_response,
+                send_message_response,
+                send_message_response,
+            ],
+        ):
+            with patch(
+                'money.ai_service._get_intent_provider',
+                return_value=(
+                    type(
+                        'MockProvider',
+                        (),
+                        {'parse': Mock(side_effect=[first_provider_result, second_provider_result])},
+                    )(),
+                    'openrouter',
+                ),
+            ):
+                with patch('money.ai_service.timezone.now', return_value=current_image_dt):
+                    first_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 338,
+                            'message': {
+                                'message_id': 438,
+                                'caption': 'Альфа\nПеревод не заноси',
+                                'photo': [
+                                    {'file_id': 'history-filter-photo', 'file_size': 9000, 'width': 900, 'height': 1600},
+                                ],
+                                'chat': {'id': 913},
+                                'from': {'id': 914, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+                    pending = AiPendingConfirmation.objects.get(telegram_binding__telegram_user_id=914, is_active=True)
+
+                    second_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 339,
+                            'message': {
+                                'message_id': 439,
+                                'text': 'Альфа',
+                                'chat': {'id': 913},
+                                'from': {'id': 914, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+                    third_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 340,
+                            'message': {
+                                'message_id': 440,
+                                'text': 'Создать',
+                                'chat': {'id': 913},
+                                'from': {'id': 914, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.data['status'], 'needs_confirmation')
+        self.assertEqual(first_response.data['missing_fields'], ['wallet'])
+        self.assertEqual(len(pending.normalized_payload['items']), 1)
+        self.assertEqual(pending.normalized_payload['items'][0]['amount'], '157.97')
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data['status'], 'needs_confirmation')
+        self.assertEqual(second_response.data['missing_fields'], ['final_confirmation'])
+        self.assertIn('Проверь, что будет создано:', second_response.data['reply_text'])
+        self.assertIn('➖ 157.97', second_response.data['reply_text'])
+        self.assertNotIn('100000.00', second_response.data['reply_text'])
+
+        self.assertEqual(third_response.status_code, 201)
+        self.assertEqual(third_response.data['status'], 'created')
+        self.assertEqual(len(third_response.data['created_objects']), 1)
+        expenditure = Expenditure.objects.get(id=third_response.data['created_object']['id'])
+        self.assertEqual(expenditure.wallet, self.wallet_alpha)
+        self.assertEqual(expenditure.amount, Decimal('157.97'))
+        self.assertEqual(expenditure.date, current_image_dt)
+        self.assertEqual(
+            Expenditure.objects.filter(wallet=self.wallet_alpha, amount=Decimal('157.97')).count(),
+            1,
+        )
+        self.assertEqual(Transfer.objects.filter(amount=Decimal('100000.00')).count(), 0)
+
     def test_ai_telegram_webhook_transcribes_voice_and_creates_expenditure(self):
         client = APIClient()
 
