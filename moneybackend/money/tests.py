@@ -2,7 +2,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.forms import inlineformset_factory, modelform_factory
 from django.test import TestCase, TransactionTestCase, override_settings
@@ -2512,7 +2512,16 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('Альфа история операций', expenditure.comment)
 
     def test_ai_execute_creates_multiple_expenditures_from_bank_history_screenshot(self):
-        mock_provider_result = {
+        first_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.9,
+            'amount': '342.00',
+            'merchant': 'Дикий океан',
+            'description': 'Дикий океан',
+            'comment': 'Дикий океан',
+            'operation_sign': 'outgoing',
+        }
+        second_provider_result = {
             'intent': 'create_expenditure',
             'confidence': 0.96,
             'bank_name': 'Альфа',
@@ -2544,7 +2553,14 @@ class AiAssistantApiTests(TestCase):
 
         with patch(
             'money.ai_service._get_intent_provider',
-            return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
+            return_value=(
+                type(
+                    'MockProvider',
+                    (),
+                    {'parse': Mock(side_effect=[first_provider_result, second_provider_result])},
+                )(),
+                'openrouter',
+            ),
         ):
             response = self.client.post(
                 '/api/v1/ai/execute/',
@@ -2992,7 +3008,16 @@ class AiAssistantApiTests(TestCase):
         )
         image_response = _FakeResponse(b'fake-telegram-history-multi-image', headers=_FakeHeaders())
         send_message_response = _FakeResponse(json.dumps({'ok': True, 'result': {'message_id': 1002}}).encode('utf-8'))
-        mock_provider_result = {
+        first_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.9,
+            'amount': '342.00',
+            'merchant': 'Дикий океан',
+            'description': 'Дикий океан',
+            'comment': 'Дикий океан',
+            'operation_sign': 'outgoing',
+        }
+        second_provider_result = {
             'intent': 'create_expenditure',
             'confidence': 0.98,
             'operations': [
@@ -3026,7 +3051,14 @@ class AiAssistantApiTests(TestCase):
         ):
             with patch(
                 'money.ai_service._get_intent_provider',
-                return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
+                return_value=(
+                    type(
+                        'MockProvider',
+                        (),
+                        {'parse': Mock(side_effect=[first_provider_result, second_provider_result])},
+                    )(),
+                    'openrouter',
+                ),
             ):
                 first_response = client.post(
                     '/api/v1/ai/telegram-webhook/',

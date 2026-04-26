@@ -453,6 +453,18 @@ class OpenRouterIntentProvider:
         return _extract_json_object(raw_text)
 
     def _build_prompt(self, *, text, context):
+        force_all_operations = bool((context or {}).get('force_all_operations'))
+        image_instruction = (
+            'и извлеки все видимые денежные операции из скриншота. '
+            if force_all_operations
+            else 'и извлеки наиболее вероятную одну операцию из скриншота. '
+        )
+        force_note = (
+            'Это режим обязательного полного разбора истории: не возвращай только одну операцию, '
+            'если на изображении видно несколько списаний или поступлений. '
+            if force_all_operations
+            else ''
+        )
         return (
             'Ты помощник по личным финансам. '
             'Верни только JSON без пояснений. '
@@ -460,7 +472,7 @@ class OpenRouterIntentProvider:
             'create_receipt, create_expenditure, create_transfer, '
             'get_wallet_balance, get_all_wallet_balances, help_capabilities, unknown. '
             'Если передано изображение, считай, что это банковский скриншот операции или истории операций, '
-            'и извлеки наиболее вероятную одну операцию из скриншота. '
+            f'{image_instruction}'
             'Если на изображении список или история операций, выбери одну самую вероятную строку операции: '
             'обычно верхнюю или последнюю видимую покупку с суммой, торговой точкой и датой. '
             'Игнорируй кнопки интерфейса, баннеры, баланс, поисковую строку и декоративные элементы. '
@@ -468,6 +480,7 @@ class OpenRouterIntentProvider:
             'Если на изображении видно несколько денежных операций, верни их все в массиве operations. '
             'Каждый элемент operations должен описывать одну денежную операцию. '
             'Игнорируй бонусные баллы, кешбэк в баллах, награды, счетчики и нефинансовые элементы. '
+            f'{force_note}'
             'Используй только доступные кошельки и статьи. '
             'Кошельки и статьи ниже являются справочниками системы: '
             'если в тексте есть совпадение по имени, коду или алиасу, обязательно верни это совпадение в соответствующем hint-поле. '
@@ -993,6 +1006,16 @@ class AiOperationService:
             'parsed': batch_parsed,
         }
 
+    def _retry_image_as_batch(self, *, provider, text, image_bytes, image_mime_type, context):
+        retry_context = dict(context)
+        retry_context['force_all_operations'] = True
+        return provider.parse(
+            text=text,
+            image_bytes=image_bytes,
+            image_mime_type=image_mime_type,
+            context=retry_context,
+        )
+
     def process(self, *, text=None, image_bytes=None, image_mime_type=None, wallet_id=None, dry_run=False, source='web'):
         context = self.build_context()
         parsed = None
@@ -1007,6 +1030,16 @@ class AiOperationService:
                 image_mime_type=image_mime_type,
                 context=context,
             )
+            if image_bytes and provider_name != 'rule_based' and not self._is_batch_provider_payload(parsed):
+                retry_parsed = self._retry_image_as_batch(
+                    provider=provider,
+                    text=text,
+                    image_bytes=image_bytes,
+                    image_mime_type=image_mime_type,
+                    context=context,
+                )
+                if self._is_batch_provider_payload(retry_parsed):
+                    parsed = retry_parsed
         if self._is_batch_provider_payload(parsed):
             normalized_batch = self._normalize_parsed_batch(
                 parsed,
