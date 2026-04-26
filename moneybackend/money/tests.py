@@ -2431,6 +2431,7 @@ class AiAssistantApiTests(TestCase):
         )
 
     def test_ai_execute_creates_expenditure_from_bank_screenshot_with_mocked_provider(self):
+        current_image_dt = timezone.make_aware(datetime(2026, 4, 26, 11, 30, 0))
         mock_provider_result = {
             'intent': 'create_expenditure',
             'confidence': 0.98,
@@ -2453,12 +2454,13 @@ class AiAssistantApiTests(TestCase):
             'money.ai_service._get_intent_provider',
             return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'gemini'),
         ):
-            response = self.client.post(
-                '/api/v1/ai/execute/',
-                {
-                    'image': screenshot,
-                },
-            )
+            with patch('money.ai_service.timezone.now', return_value=current_image_dt):
+                response = self.client.post(
+                    '/api/v1/ai/execute/',
+                    {
+                        'image': screenshot,
+                    },
+                )
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['status'], 'created')
@@ -2467,7 +2469,7 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(expenditure.wallet, self.wallet_sber)
         self.assertEqual(expenditure.cash_flow_item, self.expense_item)
         self.assertEqual(expenditure.amount, Decimal('349.00'))
-        self.assertEqual(expenditure.date, timezone.make_aware(datetime(2024, 6, 3, 9, 15, 0)))
+        self.assertEqual(expenditure.date, current_image_dt)
         self.assertIn('Скриншот банка', expenditure.comment)
         self.assertIn('Еда', expenditure.comment)
 
@@ -2802,6 +2804,7 @@ class AiAssistantApiTests(TestCase):
     @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
     def test_ai_telegram_webhook_downloads_photo_and_creates_expenditure(self):
         client = APIClient()
+        current_image_dt = timezone.make_aware(datetime(2026, 4, 26, 11, 40, 0))
 
         class _FakeHeaders:
             def get_content_type(self):
@@ -2843,24 +2846,25 @@ class AiAssistantApiTests(TestCase):
                 'money.ai_service._get_intent_provider',
                 return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
             ):
-                response = client.post(
-                    '/api/v1/ai/telegram-webhook/',
-                    {
-                        'update_id': 88,
-                        'message': {
-                            'message_id': 98,
-                            'caption': 'разбери операцию',
-                            'photo': [
-                                {'file_id': 'small-photo', 'file_size': 1000, 'width': 90, 'height': 90},
-                                {'file_id': 'large-photo', 'file_size': 9000, 'width': 800, 'height': 800},
-                            ],
-                            'chat': {'id': 808},
-                            'from': {'id': 908, 'username': 'trialex'},
+                with patch('money.ai_service.timezone.now', return_value=current_image_dt):
+                    response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 88,
+                            'message': {
+                                'message_id': 98,
+                                'caption': 'разбери операцию',
+                                'photo': [
+                                    {'file_id': 'small-photo', 'file_size': 1000, 'width': 90, 'height': 90},
+                                    {'file_id': 'large-photo', 'file_size': 9000, 'width': 800, 'height': 800},
+                                ],
+                                'chat': {'id': 808},
+                                'from': {'id': 908, 'username': 'trialex'},
+                            },
                         },
-                    },
-                    format='json',
-                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
-                )
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['status'], 'created')
@@ -2868,7 +2872,7 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(expenditure.wallet, self.wallet_sber)
         self.assertEqual(expenditure.cash_flow_item, self.expense_item)
         self.assertEqual(expenditure.amount, Decimal('515.00'))
-        self.assertEqual(expenditure.date, timezone.make_aware(datetime(2024, 6, 4, 10, 45, 0)))
+        self.assertEqual(expenditure.date, current_image_dt)
         first_request = mocked_urlopen.call_args_list[0].args[0]
         second_request = mocked_urlopen.call_args_list[1].args[0]
         third_request = mocked_urlopen.call_args_list[2].args[0]
@@ -2984,6 +2988,7 @@ class AiAssistantApiTests(TestCase):
     @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
     def test_ai_telegram_webhook_photo_can_create_multiple_operations_after_wallet_answer(self):
         client = APIClient()
+        current_image_dt = timezone.make_aware(datetime(2026, 4, 26, 11, 35, 0))
 
         class _FakeHeaders:
             def get_content_type(self):
@@ -3027,6 +3032,7 @@ class AiAssistantApiTests(TestCase):
                     'merchant': 'Магнит',
                     'description': 'Продукты',
                     'comment': 'Магнит -465,75 ₽',
+                    'occurred_at': '2024-04-25T17:35:00+03:00',
                     'operation_sign': 'outgoing',
                 },
                 {
@@ -3035,6 +3041,7 @@ class AiAssistantApiTests(TestCase):
                     'merchant': 'Дикий океан',
                     'description': 'Продукты',
                     'comment': 'Дикий океан -342 ₽',
+                    'occurred_at': '2024-04-25T16:15:00+03:00',
                     'operation_sign': 'outgoing',
                 },
             ],
@@ -3060,39 +3067,40 @@ class AiAssistantApiTests(TestCase):
                     'openrouter',
                 ),
             ):
-                first_response = client.post(
-                    '/api/v1/ai/telegram-webhook/',
-                    {
-                        'update_id': 335,
-                        'message': {
-                            'message_id': 435,
-                            'photo': [
-                                {'file_id': 'history-multi-photo', 'file_size': 9000, 'width': 900, 'height': 1600},
-                            ],
-                            'chat': {'id': 911},
-                            'from': {'id': 912, 'username': 'trialex'},
+                with patch('money.ai_service.timezone.now', return_value=current_image_dt):
+                    first_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 335,
+                            'message': {
+                                'message_id': 435,
+                                'photo': [
+                                    {'file_id': 'history-multi-photo', 'file_size': 9000, 'width': 900, 'height': 1600},
+                                ],
+                                'chat': {'id': 911},
+                                'from': {'id': 912, 'username': 'trialex'},
+                            },
                         },
-                    },
-                    format='json',
-                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
-                )
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
 
-                pending = AiPendingConfirmation.objects.get(telegram_binding__telegram_user_id=912, is_active=True)
+                    pending = AiPendingConfirmation.objects.get(telegram_binding__telegram_user_id=912, is_active=True)
 
-                second_response = client.post(
-                    '/api/v1/ai/telegram-webhook/',
-                    {
-                        'update_id': 336,
-                        'message': {
-                            'message_id': 436,
-                            'text': 'это альфа',
-                            'chat': {'id': 911},
-                            'from': {'id': 912, 'username': 'trialex'},
+                    second_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 336,
+                            'message': {
+                                'message_id': 436,
+                                'text': 'это альфа',
+                                'chat': {'id': 911},
+                                'from': {'id': 912, 'username': 'trialex'},
+                            },
                         },
-                    },
-                    format='json',
-                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
-                )
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(first_response.data['status'], 'needs_confirmation')
@@ -3107,6 +3115,7 @@ class AiAssistantApiTests(TestCase):
             Expenditure.objects.filter(wallet=self.wallet_alpha, comment__icontains='₽').order_by('amount')
         )
         self.assertEqual([expense.amount for expense in expenditures], [Decimal('342.00'), Decimal('465.75')])
+        self.assertEqual([expense.date for expense in expenditures], [current_image_dt, current_image_dt])
         pending.refresh_from_db()
         self.assertFalse(pending.is_active)
 

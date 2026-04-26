@@ -195,6 +195,10 @@ def _parse_datetime_value(value):
     return dt
 
 
+def _normalize_image_occurred_at(dt, *, raw=None, source_text=None):
+    return timezone.now()
+
+
 def _default_audio_filename(mime_type):
     normalized_mime_type = (mime_type or '').split(';', 1)[0].strip().lower()
     extension = mimetypes.guess_extension(normalized_mime_type) if normalized_mime_type else None
@@ -818,7 +822,7 @@ class AiOperationService:
 
         return merged
 
-    def _normalize_parsed_batch(self, parsed, *, explicit_wallet_id=None, source_text=None, context=None):
+    def _normalize_parsed_batch(self, parsed, *, explicit_wallet_id=None, source_text=None, context=None, image_based=False):
         context = context or self.build_context()
         batch_raw = dict(parsed)
         operations = batch_raw.pop('operations', []) or []
@@ -845,6 +849,7 @@ class AiOperationService:
                     explicit_wallet_id=explicit_wallet_id,
                     source_text=item_source_text or source_text,
                     context=context,
+                    image_based=image_based,
                 )
             )
 
@@ -1046,6 +1051,7 @@ class AiOperationService:
                 explicit_wallet_id=wallet_id,
                 source_text=text,
                 context=context,
+                image_based=bool(image_bytes),
             )
             return self._create_multiple_financial_documents(
                 normalized_batch,
@@ -1057,6 +1063,7 @@ class AiOperationService:
             explicit_wallet_id=wallet_id,
             source_text=text,
             context=context,
+            image_based=bool(image_bytes),
         )
         normalized['provider'] = provider_name
         normalized['source'] = source
@@ -1145,7 +1152,7 @@ class AiOperationService:
         )
         return self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
 
-    def _normalize_parsed(self, parsed, explicit_wallet_id=None, source_text=None, context=None):
+    def _normalize_parsed(self, parsed, explicit_wallet_id=None, source_text=None, context=None, image_based=False):
         context = context or self.build_context()
         wallets = context.get('wallets', [])
         intent = parsed.get('intent') or INTENT_UNKNOWN
@@ -1208,6 +1215,14 @@ class AiOperationService:
             operation_sign=operation_sign,
         )
 
+        occurred_at = _parse_datetime_value(parsed.get('occurred_at'))
+        if image_based:
+            occurred_at = _normalize_image_occurred_at(
+                occurred_at,
+                raw=parsed,
+                source_text=source_text,
+            )
+
         return {
             'intent': intent,
             'confidence': float(parsed.get('confidence') or 0.0),
@@ -1218,7 +1233,7 @@ class AiOperationService:
             'cash_flow_item': cash_flow_item,
             'comment': comment,
             'include_in_budget': bool(parsed.get('include_in_budget', False)),
-            'occurred_at': _parse_datetime_value(parsed.get('occurred_at')),
+            'occurred_at': occurred_at,
             'operation_sign': operation_sign,
             'raw': parsed,
         }
