@@ -24,6 +24,7 @@ INTENT_GET_ALL_WALLET_BALANCES = 'get_all_wallet_balances'
 INTENT_HELP_CAPABILITIES = 'help_capabilities'
 INTENT_UNKNOWN = 'unknown'
 INTENT_CREATE_MULTIPLE_OPERATIONS = 'create_multiple_operations'
+FINAL_CONFIRMATION_FIELD = 'final_confirmation'
 
 SUPPORTED_INTENTS = {
     INTENT_CREATE_RECEIPT,
@@ -44,6 +45,37 @@ def _normalize_text(value):
     normalized = value.strip().lower().replace('ё', 'е')
     normalized = re.sub(r'\s+', ' ', normalized)
     return normalized
+
+
+def _match_text_variants(value):
+    normalized = _normalize_text(value)
+    if not normalized:
+        return []
+
+    loose = re.sub(r'[^0-9a-zа-я]+', ' ', normalized, flags=re.IGNORECASE)
+    loose = re.sub(r'\s+', ' ', loose).strip()
+    compact = loose.replace(' ', '')
+
+    variants = []
+    for variant in (normalized, loose, compact):
+        if variant and variant not in variants:
+            variants.append(variant)
+    return variants
+
+
+def _score_hint_against_pattern(hint, pattern):
+    best_score = 0
+    for hint_variant in _match_text_variants(hint):
+        for pattern_variant in _match_text_variants(pattern):
+            if hint_variant == pattern_variant:
+                best_score = max(best_score, 1000 + len(pattern_variant))
+            elif hint_variant.endswith(f' {pattern_variant}') or hint_variant.startswith(f'{pattern_variant} '):
+                best_score = max(best_score, 900 + len(pattern_variant))
+            elif pattern_variant in hint_variant:
+                best_score = max(best_score, 700 + len(pattern_variant))
+            elif hint_variant in pattern_variant:
+                best_score = max(best_score, 500 + len(hint_variant))
+    return best_score
 
 
 def _extract_json_object(raw_text):
@@ -181,6 +213,26 @@ def _serialize_decimal(value):
     return f'{value.quantize(Decimal("0.01")):.2f}'
 
 
+def _is_affirmative_confirmation(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    return normalized in {
+        'да',
+        'ага',
+        'ок',
+        'okay',
+        'ok',
+        'yes',
+        'подтверждаю',
+        'подтвердить',
+        'создать',
+        'создавай',
+        'подтверди',
+        '1',
+    }
+
+
 def _parse_datetime_value(value):
     if not value:
         return None
@@ -277,25 +329,17 @@ def _wallet_candidates_by_hint(hint, limit=5):
     if not hint:
         return []
 
-    normalized_hint = _normalize_text(hint)
     candidates = list(Wallet.objects.filter(deleted=False).prefetch_related('aliases'))
-    exact_matches = []
-    partial_matches = []
+    scored_candidates = []
     for wallet in candidates:
-        patterns = {_normalize_text(wallet.name), _normalize_text(wallet.code)}
-        patterns.update(_normalize_text(alias.alias) for alias in wallet.aliases.all())
-        patterns.discard('')
-        if normalized_hint in patterns:
-            exact_matches.append(wallet)
-        elif normalized_hint and any(
-            normalized_hint in pattern or pattern in normalized_hint
-            for pattern in patterns
-        ):
-            partial_matches.append(wallet)
+        patterns = [wallet.name, wallet.code]
+        patterns.extend(alias.alias for alias in wallet.aliases.all())
+        score = max((_score_hint_against_pattern(hint, pattern) for pattern in patterns if pattern), default=0)
+        if score > 0:
+            scored_candidates.append((score, wallet.name, wallet))
 
-    if exact_matches:
-        return exact_matches[:limit]
-    return partial_matches[:limit]
+    scored_candidates.sort(key=lambda item: (-item[0], item[1]))
+    return [wallet for _, _, wallet in scored_candidates[:limit]]
 
 
 def _match_wallet_by_hint(hint):
@@ -304,7 +348,18 @@ def _match_wallet_by_hint(hint):
         return None
     if len(candidates) == 1:
         return candidates[0]
+    top_score = max((_score_hint_against_pattern(hint, pattern) for pattern in [candidates[0].name, candidates[0].code, *[alias.alias for alias in candidates[0].aliases.all()]] if pattern), default=0)
+    second_score = max((_score_hint_against_pattern(hint, pattern) for pattern in [candidates[1].name, candidates[1].code, *[alias.alias for alias in candidates[1].aliases.all()]] if pattern), default=0)
+    if top_score > second_score:
+        return candidates[0]
     return None
+
+
+def _wallet_confirmation_candidates(hint, limit=6):
+    candidates = _wallet_candidates_by_hint(hint, limit=limit)
+    if candidates:
+        return candidates
+    return list(Wallet.objects.filter(deleted=False).order_by('name')[:limit])
 
 
 def _cash_flow_item_candidates_by_hint(hint, limit=5):
@@ -339,6 +394,13 @@ def _match_cash_flow_item_by_hint(hint):
     if len(candidates) == 1:
         return candidates[0]
     return None
+
+
+def _cash_flow_item_confirmation_candidates(hint, limit=6):
+    candidates = _cash_flow_item_candidates_by_hint(hint, limit=limit)
+    if candidates:
+        return candidates
+    return list(CashFlowItem.objects.filter(deleted=False).order_by('name')[:limit])
 
 
 def _wallet_mentions(text, wallets):
@@ -401,6 +463,29 @@ class OpenRouterIntentProvider:
                 }
             })
 
+        return self._request_json(content)
+
+    def resolve_confirmation(
+        self,
+        *,
+        current_payload,
+        missing_fields,
+        answer_text,
+        context=None,
+        options_payload=None,
+        confirmation_history=None,
+    ):
+        prompt = self._build_confirmation_prompt(
+            current_payload=current_payload,
+            missing_fields=missing_fields,
+            answer_text=answer_text,
+            context=context or {},
+            options_payload=options_payload or {},
+            confirmation_history=confirmation_history or [],
+        )
+        return self._request_json([{'type': 'text', 'text': prompt}])
+
+    def _request_json(self, content):
         payload = {
             'model': self.model_name,
             'messages': [
@@ -513,6 +598,39 @@ class OpenRouterIntentProvider:
             f'Доступные кошельки: {json.dumps(context.get("wallets", []), ensure_ascii=False)}. '
             f'Доступные статьи: {json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}. '
             f'Текст пользователя: {text or ""}'
+        )
+
+    def _build_confirmation_prompt(
+        self,
+        *,
+        current_payload,
+        missing_fields,
+        answer_text,
+        context,
+        options_payload,
+        confirmation_history,
+    ):
+        return (
+            'Ты уточняешь недостающие поля уже распознанной финансовой операции. '
+            'Верни только JSON без пояснений. '
+            'Не создавай новую операцию и не переписывай уже заполненные поля без необходимости. '
+            'Используй ответ пользователя, историю предыдущих ответов и текущую структуру операции. '
+            'Если нужно выбрать кошелек или статью, выбирай только из переданных справочников. '
+            'Если уверен в выборе сущности, возвращай именно *_id. '
+            'Если уверенности нет, оставляй поле null. '
+            'Схема JSON: '
+            '{"intent": null, "amount": null, "wallet_id": null, "wallet_from_id": null, '
+            '"wallet_to_id": null, "cash_flow_item_id": null, "wallet_hint": null, '
+            '"wallet_from_hint": null, "wallet_to_hint": null, "cash_flow_item_hint": null, "comment": null}. '
+            'Для ответов с опечатками или лишними словами всё равно попытайся выбрать наиболее вероятный кошелек/статью '
+            'из справочника. '
+            f'Текущая структура: {json.dumps(current_payload or {}, ensure_ascii=False)}. '
+            f'Не хватает полей: {json.dumps(missing_fields or [], ensure_ascii=False)}. '
+            f'История ответов пользователя: {json.dumps(confirmation_history or [], ensure_ascii=False)}. '
+            f'Текущий ответ пользователя: {answer_text or ""}. '
+            f'Подсказки-варианты: {json.dumps(options_payload or {}, ensure_ascii=False)}. '
+            f'Доступные кошельки: {json.dumps(context.get("wallets", []), ensure_ascii=False)}. '
+            f'Доступные статьи: {json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}.'
         )
 
 
@@ -669,13 +787,25 @@ class RuleBasedIntentProvider:
             'comment': text,
         }
 
+    def resolve_confirmation(
+        self,
+        *,
+        current_payload,
+        missing_fields,
+        answer_text,
+        context=None,
+        options_payload=None,
+        confirmation_history=None,
+    ):
+        return {}
 
-def _get_intent_provider():
-    provider_name = getattr(settings, 'AI_DEFAULT_PROVIDER', 'openrouter')
+
+def _get_intent_provider(provider_name=None):
+    provider_name = provider_name or getattr(settings, 'AI_DEFAULT_PROVIDER', 'openrouter')
     if provider_name == 'rule_based':
         return RuleBasedIntentProvider(), provider_name
 
-    if provider_name == 'openrouter':
+    if provider_name in {'openrouter', 'gemini'}:
         api_key = getattr(settings, 'AI_OPENROUTER_API_KEY', '')
         model_name = getattr(settings, 'AI_OPENROUTER_MODEL', 'google/gemini-2.5-flash')
         if api_key:
@@ -857,6 +987,7 @@ class AiOperationService:
             'batch': True,
             'intent': self._batch_intent(normalized_items),
             'confidence': float(parsed.get('confidence') or 0.0),
+            'image_based': bool(image_based),
             'items': normalized_items,
             'raw': parsed,
         }
@@ -866,6 +997,7 @@ class AiOperationService:
             'batch': True,
             'intent': normalized.get('intent', INTENT_CREATE_MULTIPLE_OPERATIONS),
             'confidence': float(normalized.get('confidence') or 0.0),
+            'image_based': bool(normalized.get('image_based')),
             'items': [
                 self.serialize_normalized(item)
                 for item in normalized.get('items', [])
@@ -874,11 +1006,178 @@ class AiOperationService:
             'raw': normalized.get('raw', {}),
         }
 
+    def _resolve_confirmation_with_provider(
+        self,
+        *,
+        normalized_payload,
+        missing_fields,
+        answer_text,
+        provider_name,
+        options_payload=None,
+        confirmation_history=None,
+    ):
+        provider, actual_provider_name = _get_intent_provider(
+            provider_name if provider_name in {'openrouter', 'gemini', 'rule_based'} else None
+        )
+        if actual_provider_name == 'rule_based':
+            return {}
+
+        try:
+            patch = provider.resolve_confirmation(
+                current_payload=normalized_payload,
+                missing_fields=missing_fields,
+                answer_text=answer_text,
+                context=self.build_context(),
+                options_payload=options_payload or {},
+                confirmation_history=confirmation_history or [],
+            )
+        except Exception:
+            return {}
+
+        return patch if isinstance(patch, dict) else {}
+
+    def apply_confirmation_patch(self, *, normalized, patch):
+        updated = dict(normalized)
+        raw = dict(updated.get('raw') or {})
+
+        if patch.get('intent'):
+            updated['intent'] = patch.get('intent')
+            raw['intent'] = patch.get('intent')
+
+        patch_amount = _parse_amount(patch.get('amount'))
+        if patch_amount is not None:
+            updated['amount'] = patch_amount
+
+        wallet = None
+        if patch.get('wallet_id'):
+            wallet = Wallet.objects.filter(pk=patch.get('wallet_id')).first()
+        elif patch.get('wallet_hint'):
+            wallet = _match_wallet_by_hint(patch.get('wallet_hint'))
+            raw['wallet_hint'] = patch.get('wallet_hint')
+        if wallet is not None:
+            updated['wallet'] = wallet
+
+        wallet_from = None
+        if patch.get('wallet_from_id'):
+            wallet_from = Wallet.objects.filter(pk=patch.get('wallet_from_id')).first()
+        elif patch.get('wallet_from_hint'):
+            wallet_from = _match_wallet_by_hint(patch.get('wallet_from_hint'))
+            raw['wallet_from_hint'] = patch.get('wallet_from_hint')
+        if wallet_from is not None:
+            updated['wallet_from'] = wallet_from
+
+        wallet_to = None
+        if patch.get('wallet_to_id'):
+            wallet_to = Wallet.objects.filter(pk=patch.get('wallet_to_id')).first()
+        elif patch.get('wallet_to_hint'):
+            wallet_to = _match_wallet_by_hint(patch.get('wallet_to_hint'))
+            raw['wallet_to_hint'] = patch.get('wallet_to_hint')
+        if wallet_to is not None:
+            updated['wallet_to'] = wallet_to
+
+        cash_flow_item = None
+        if patch.get('cash_flow_item_id'):
+            cash_flow_item = CashFlowItem.objects.filter(pk=patch.get('cash_flow_item_id')).first()
+        elif patch.get('cash_flow_item_hint'):
+            cash_flow_item = _match_cash_flow_item_by_hint(patch.get('cash_flow_item_hint'))
+            raw['cash_flow_item_hint'] = patch.get('cash_flow_item_hint')
+        if cash_flow_item is not None:
+            updated['cash_flow_item'] = cash_flow_item
+
+        if patch.get('comment'):
+            updated['comment'] = patch.get('comment')
+
+        updated['raw'] = raw
+        return updated
+
+    def apply_confirmation_patch_to_batch(self, *, normalized, patch):
+        return {
+            'batch': True,
+            'intent': normalized.get('intent', INTENT_CREATE_MULTIPLE_OPERATIONS),
+            'confidence': float(normalized.get('confidence') or 0.0),
+            'image_based': bool(normalized.get('image_based')),
+            'items': [
+                self.apply_confirmation_patch(normalized=item, patch=patch)
+                for item in normalized.get('items', [])
+                if isinstance(item, dict)
+            ],
+            'raw': normalized.get('raw', {}),
+        }
+
+    def _build_preview_for_item(self, normalized):
+        intent = normalized.get('intent')
+        amount = normalized.get('amount')
+        preview = {
+            'model': {
+                INTENT_CREATE_RECEIPT: 'Receipt',
+                INTENT_CREATE_EXPENDITURE: 'Expenditure',
+                INTENT_CREATE_TRANSFER: 'Transfer',
+            }.get(intent, 'Document'),
+            'amount': _serialize_decimal(amount),
+            'comment': normalized.get('comment', ''),
+            'date': normalized.get('occurred_at').isoformat() if normalized.get('occurred_at') else None,
+        }
+        if normalized.get('wallet'):
+            preview['wallet_name'] = normalized['wallet'].name
+        if normalized.get('wallet_from'):
+            preview['wallet_out_name'] = normalized['wallet_from'].name
+        if normalized.get('wallet_to'):
+            preview['wallet_in_name'] = normalized['wallet_to'].name
+        if normalized.get('cash_flow_item'):
+            preview['cash_flow_item_name'] = normalized['cash_flow_item'].name
+        return preview
+
+    def _build_final_confirmation_reply(self, preview):
+        lines = ['Проверь, что будет создано:']
+        if preview.get('count') and isinstance(preview.get('items'), list):
+            for index, item in enumerate(preview.get('items') or [], start=1):
+                lines.append(self._build_final_confirmation_line(item, index=index))
+        else:
+            lines.append(self._build_final_confirmation_line(preview))
+        lines.append('Если всё верно, ответь: да или создать.')
+        lines.append('Если нужно исправить данные, напиши уточнение или /cancel.')
+        return '\n'.join(lines)
+
+    def _build_final_confirmation_line(self, item, *, index=None):
+        parts = []
+        model_name = (item or {}).get('model') or 'Document'
+        amount = (item or {}).get('amount') or '0.00'
+        label = {
+            'Receipt': 'Приход',
+            'Expenditure': 'Расход',
+            'Transfer': 'Перевод',
+        }.get(model_name, model_name)
+        parts.append(f'{label}: {amount}')
+        if item.get('wallet_name'):
+            parts.append(f'кошелек {item["wallet_name"]}')
+        if item.get('wallet_out_name') and item.get('wallet_in_name'):
+            parts.append(f'{item["wallet_out_name"]} -> {item["wallet_in_name"]}')
+        if item.get('cash_flow_item_name'):
+            parts.append(f'статья {item["cash_flow_item_name"]}')
+        if item.get('comment'):
+            parts.append(f'комм. {item["comment"]}')
+        prefix = f'{index}. ' if index is not None else '- '
+        return prefix + ' | '.join(parts)
+
+    def _final_confirmation_result(self, *, parsed, provider_name, preview, confidence):
+        return {
+            'status': 'needs_confirmation',
+            'intent': parsed.get('intent', INTENT_UNKNOWN),
+            'provider': provider_name,
+            'confidence': confidence,
+            'reply_text': self._build_final_confirmation_reply(preview or {}),
+            'missing_fields': [FINAL_CONFIRMATION_FIELD],
+            'options': {},
+            'preview': preview or {},
+            'parsed': parsed,
+        }
+
     def deserialize_normalized_batch(self, payload):
         return {
             'batch': True,
             'intent': payload.get('intent', INTENT_CREATE_MULTIPLE_OPERATIONS),
             'confidence': float(payload.get('confidence') or 0.0),
+            'image_based': bool(payload.get('image_based')),
             'items': [
                 self.deserialize_normalized(item)
                 for item in payload.get('items', [])
@@ -905,6 +1204,7 @@ class AiOperationService:
             'batch': True,
             'intent': self._batch_intent(updated_items),
             'confidence': float(normalized.get('confidence') or 0.0),
+            'image_based': bool(normalized.get('image_based')),
             'items': updated_items,
             'raw': normalized.get('raw', {}),
         }
@@ -946,6 +1246,7 @@ class AiOperationService:
             'batch': True,
             'intent': self._batch_intent(normalized_items),
             'confidence': float(normalized.get('confidence') or 0.0),
+            'image_based': bool(normalized.get('image_based')),
             'items': normalized_items,
             'raw': normalized.get('raw', {}),
         }
@@ -1053,11 +1354,19 @@ class AiOperationService:
                 context=context,
                 image_based=bool(image_bytes),
             )
-            return self._create_multiple_financial_documents(
+            result = self._create_multiple_financial_documents(
                 normalized_batch,
                 provider_name=provider_name,
                 dry_run=dry_run,
             )
+            if source == 'telegram' and bool(image_bytes) and dry_run and result.get('status') == 'preview':
+                return self._final_confirmation_result(
+                    parsed=result['parsed'],
+                    provider_name=provider_name,
+                    preview=result.get('preview') or {},
+                    confidence=float(result.get('confidence') or 0.0),
+                )
+            return result
         normalized = self._normalize_parsed(
             parsed,
             explicit_wallet_id=wallet_id,
@@ -1116,7 +1425,15 @@ class AiOperationService:
                 reply_text='Не удалось уверенно определить команду. Нужна формулировка точнее.',
             )
 
-        return self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
+        result = self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
+        if source == 'telegram' and bool(image_bytes) and dry_run and result.get('status') == 'preview':
+            return self._final_confirmation_result(
+                parsed=result['parsed'],
+                provider_name=provider_name,
+                preview=result.get('preview') or {},
+                confidence=float(result.get('confidence') or 0.0),
+            )
+        return result
 
     def create_from_normalized(self, *, normalized, provider_name):
         if self._is_batch_normalized(normalized):
@@ -1132,25 +1449,112 @@ class AiOperationService:
         provider_name='confirmation',
         dry_run=False,
         options_payload=None,
+        confirmation_history=None,
+        source='web',
     ):
+        if missing_fields == [FINAL_CONFIRMATION_FIELD]:
+            if _is_affirmative_confirmation(answer_text):
+                if self._is_batch_normalized(normalized_payload):
+                    normalized = self.deserialize_normalized_batch(normalized_payload)
+                    return {
+                        'status': 'preview',
+                        'intent': normalized.get('intent', INTENT_CREATE_MULTIPLE_OPERATIONS),
+                        'provider': provider_name,
+                        'confidence': float(normalized.get('confidence') or 0.0),
+                        'reply_text': 'Подтверждение получено. Создаю документы.',
+                        'preview': self._build_batch_preview([
+                            {'preview': self._build_preview_for_item(item)}
+                            for item in normalized.get('items', [])
+                            if isinstance(item, dict)
+                        ]),
+                        'parsed': normalized,
+                    }
+                normalized = self.deserialize_normalized(normalized_payload)
+                return {
+                    'status': 'preview',
+                    'intent': normalized.get('intent', INTENT_UNKNOWN),
+                    'provider': provider_name,
+                    'confidence': float(normalized.get('confidence') or 0.0),
+                    'reply_text': 'Подтверждение получено. Создаю документ.',
+                    'preview': self._build_preview_for_item(normalized),
+                    'parsed': normalized,
+                }
+
+            if self._is_batch_normalized(normalized_payload):
+                normalized = self.deserialize_normalized_batch(normalized_payload)
+                return self._final_confirmation_result(
+                    parsed=normalized,
+                    provider_name=provider_name,
+                    preview=self._build_batch_preview([
+                        {'preview': self._build_preview_for_item(item)}
+                        for item in normalized.get('items', [])
+                        if isinstance(item, dict)
+                    ]),
+                    confidence=float(normalized.get('confidence') or 0.0),
+                )
+
+            normalized = self.deserialize_normalized(normalized_payload)
+            return self._final_confirmation_result(
+                parsed=normalized,
+                provider_name=provider_name,
+                preview=self._build_preview_for_item(normalized),
+                confidence=float(normalized.get('confidence') or 0.0),
+            )
+
         if self._is_batch_normalized(normalized_payload):
             normalized = self.deserialize_normalized_batch(normalized_payload)
+            patch = self._resolve_confirmation_with_provider(
+                normalized_payload=normalized_payload,
+                missing_fields=missing_fields,
+                answer_text=answer_text,
+                provider_name=provider_name,
+                options_payload=options_payload,
+                confirmation_history=confirmation_history,
+            )
+            if patch:
+                normalized = self.apply_confirmation_patch_to_batch(normalized=normalized, patch=patch)
             normalized = self.apply_confirmation_answer_to_batch(
                 normalized=normalized,
                 answer_text=answer_text,
                 missing_fields=missing_fields,
                 options_payload=options_payload,
             )
-            return self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=dry_run)
+            result = self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=dry_run)
+            if source == 'telegram' and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
+                return self._final_confirmation_result(
+                    parsed=result['parsed'],
+                    provider_name=provider_name,
+                    preview=result.get('preview') or {},
+                    confidence=float(result.get('confidence') or 0.0),
+                )
+            return result
 
         normalized = self.deserialize_normalized(normalized_payload)
+        patch = self._resolve_confirmation_with_provider(
+            normalized_payload=normalized_payload,
+            missing_fields=missing_fields,
+            answer_text=answer_text,
+            provider_name=provider_name,
+            options_payload=options_payload,
+            confirmation_history=confirmation_history,
+        )
+        if patch:
+            normalized = self.apply_confirmation_patch(normalized=normalized, patch=patch)
         normalized = self.apply_confirmation_answer(
             normalized=normalized,
             answer_text=answer_text,
             missing_fields=missing_fields,
             options_payload=options_payload,
         )
-        return self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
+        result = self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
+        if source == 'telegram' and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
+            return self._final_confirmation_result(
+                parsed=result['parsed'],
+                provider_name=provider_name,
+                preview=result.get('preview') or {},
+                confidence=float(result.get('confidence') or 0.0),
+            )
+        return result
 
     def _normalize_parsed(self, parsed, explicit_wallet_id=None, source_text=None, context=None, image_based=False):
         context = context or self.build_context()
@@ -1226,6 +1630,7 @@ class AiOperationService:
         return {
             'intent': intent,
             'confidence': float(parsed.get('confidence') or 0.0),
+            'image_based': bool(image_based),
             'amount': amount,
             'wallet': wallet,
             'wallet_from': _match_wallet_by_hint(parsed.get('wallet_from_hint') or parsed.get('bank_name')),
@@ -1249,6 +1654,7 @@ class AiOperationService:
         return {
             'intent': normalized.get('intent', INTENT_UNKNOWN),
             'confidence': float(normalized.get('confidence') or 0.0),
+            'image_based': bool(normalized.get('image_based')),
             'amount': _serialize_decimal(normalized.get('amount')),
             'wallet_id': str(normalized['wallet'].id) if normalized.get('wallet') else None,
             'wallet_from_id': str(normalized['wallet_from'].id) if normalized.get('wallet_from') else None,
@@ -1267,6 +1673,7 @@ class AiOperationService:
         return {
             'intent': payload.get('intent', INTENT_UNKNOWN),
             'confidence': float(payload.get('confidence') or 0.0),
+            'image_based': bool(payload.get('image_based')),
             'amount': _parse_amount(payload.get('amount')),
             'wallet': Wallet.objects.filter(pk=payload.get('wallet_id')).first(),
             'wallet_from': Wallet.objects.filter(pk=payload.get('wallet_from_id')).first(),
@@ -1303,6 +1710,8 @@ class AiOperationService:
         if 'wallet' in missing_fields and updated.get('wallet') is None:
             if selected_option and selected_option.get('kind') == 'wallet':
                 updated['wallet'] = Wallet.objects.filter(pk=selected_option.get('id')).first()
+            elif wallet_mentions:
+                updated['wallet'] = _match_wallet_by_hint(wallet_mentions[0])
             else:
                 updated['wallet'] = _match_wallet_by_hint(answer_text)
 
@@ -1354,13 +1763,13 @@ class AiOperationService:
             if normalized['wallet'] is None:
                 missing_fields.append('wallet')
                 options['wallet'] = _serialize_options(
-                    _wallet_candidates_by_hint(normalized['raw'].get('wallet_hint') or normalized['raw'].get('bank_name')),
+                    _wallet_confirmation_candidates(normalized['raw'].get('wallet_hint') or normalized['raw'].get('bank_name')),
                     kind='wallet',
                 )
             if normalized['cash_flow_item'] is None:
                 missing_fields.append('cash_flow_item')
                 options['cash_flow_item'] = _serialize_options(
-                    _cash_flow_item_candidates_by_hint(
+                    _cash_flow_item_confirmation_candidates(
                         normalized['raw'].get('cash_flow_item_hint')
                         or normalized['raw'].get('merchant')
                         or normalized['raw'].get('description')
@@ -1379,13 +1788,13 @@ class AiOperationService:
             if normalized['wallet'] is None:
                 missing_fields.append('wallet')
                 options['wallet'] = _serialize_options(
-                    _wallet_candidates_by_hint(normalized['raw'].get('wallet_hint') or normalized['raw'].get('bank_name')),
+                    _wallet_confirmation_candidates(normalized['raw'].get('wallet_hint') or normalized['raw'].get('bank_name')),
                     kind='wallet',
                 )
             if normalized['cash_flow_item'] is None:
                 missing_fields.append('cash_flow_item')
                 options['cash_flow_item'] = _serialize_options(
-                    _cash_flow_item_candidates_by_hint(
+                    _cash_flow_item_confirmation_candidates(
                         normalized['raw'].get('cash_flow_item_hint')
                         or normalized['raw'].get('merchant')
                         or normalized['raw'].get('description')
@@ -1404,13 +1813,13 @@ class AiOperationService:
             if normalized['wallet_from'] is None:
                 missing_fields.append('wallet_from')
                 options['wallet_from'] = _serialize_options(
-                    _wallet_candidates_by_hint(normalized['raw'].get('wallet_from_hint') or normalized['raw'].get('bank_name')),
+                    _wallet_confirmation_candidates(normalized['raw'].get('wallet_from_hint') or normalized['raw'].get('bank_name')),
                     kind='wallet',
                 )
             if normalized['wallet_to'] is None:
                 missing_fields.append('wallet_to')
                 options['wallet_to'] = _serialize_options(
-                    _wallet_candidates_by_hint(normalized['raw'].get('wallet_to_hint')),
+                    _wallet_confirmation_candidates(normalized['raw'].get('wallet_to_hint')),
                     kind='wallet',
                 )
             create_kwargs = {
@@ -1510,6 +1919,7 @@ class AiOperationService:
             'cash_flow_item': 'статья движения',
             'wallet_from': 'кошелек списания',
             'wallet_to': 'кошелек зачисления',
+            FINAL_CONFIRMATION_FIELD: 'подтверждение создания',
             'binding': 'привязка Telegram',
             'intent': 'тип команды',
         }

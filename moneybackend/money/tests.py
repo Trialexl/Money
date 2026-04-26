@@ -2866,9 +2866,34 @@ class AiAssistantApiTests(TestCase):
                         HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
                     )
 
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['status'], 'created')
-        expenditure = Expenditure.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'needs_confirmation')
+        self.assertEqual(response.data['missing_fields'], ['final_confirmation'])
+        self.assertIn('Проверь, что будет создано:', response.data['reply_text'])
+        send_request = mocked_urlopen.call_args_list[2].args[0]
+        send_payload = json.loads(send_request.data.decode('utf-8'))
+        self.assertEqual(send_payload['reply_markup']['keyboard'][0][0]['text'], 'Создать')
+
+        with patch('money.views.urlrequest.urlopen', side_effect=[send_message_response]):
+            with patch('money.ai_service.timezone.now', return_value=current_image_dt):
+                confirm_response = client.post(
+                    '/api/v1/ai/telegram-webhook/',
+                    {
+                        'update_id': 89,
+                        'message': {
+                            'message_id': 99,
+                            'text': 'Создать',
+                            'chat': {'id': 808},
+                            'from': {'id': 908, 'username': 'trialex'},
+                        },
+                    },
+                    format='json',
+                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                )
+
+        self.assertEqual(confirm_response.status_code, 201)
+        self.assertEqual(confirm_response.data['status'], 'created')
+        expenditure = Expenditure.objects.get(id=confirm_response.data['created_object']['id'])
         self.assertEqual(expenditure.wallet, self.wallet_sber)
         self.assertEqual(expenditure.cash_flow_item, self.expense_item)
         self.assertEqual(expenditure.amount, Decimal('515.00'))
@@ -2929,8 +2954,9 @@ class AiAssistantApiTests(TestCase):
                 image_response,
                 send_message_response,
                 send_message_response,
+                send_message_response,
             ],
-        ):
+        ) as mocked_urlopen:
             with patch(
                 'money.ai_service._get_intent_provider',
                 return_value=(type('MockProvider', (), {'parse': lambda self, **kwargs: mock_provider_result})(), 'openrouter'),
@@ -2960,7 +2986,22 @@ class AiAssistantApiTests(TestCase):
                         'update_id': 334,
                         'message': {
                             'message_id': 434,
-                            'text': 'это альфа',
+                            'text': 'Альфа банк',
+                            'chat': {'id': 909},
+                            'from': {'id': 910, 'username': 'trialex'},
+                        },
+                    },
+                    format='json',
+                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                )
+
+                third_response = client.post(
+                    '/api/v1/ai/telegram-webhook/',
+                    {
+                        'update_id': 335,
+                        'message': {
+                            'message_id': 435,
+                            'text': 'Создать',
                             'chat': {'id': 909},
                             'from': {'id': 910, 'username': 'trialex'},
                         },
@@ -2975,10 +3016,23 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('Не хватает: кошелек.', first_response.data['reply_text'])
         self.assertEqual(pending.missing_fields, ['wallet'])
         self.assertEqual(pending.normalized_payload['amount'], '342.00')
+        first_send_payload = json.loads(mocked_urlopen.call_args_list[2].args[0].data.decode('utf-8'))
+        first_keyboard_labels = [
+            button['text']
+            for row in first_send_payload['reply_markup']['keyboard']
+            for button in row
+        ]
+        self.assertIn('Альфа', first_keyboard_labels)
+        self.assertIn('/cancel', first_keyboard_labels)
 
-        self.assertEqual(second_response.status_code, 201)
-        self.assertEqual(second_response.data['status'], 'created')
-        expenditure = Expenditure.objects.get(id=second_response.data['created_object']['id'])
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data['status'], 'needs_confirmation')
+        self.assertEqual(second_response.data['missing_fields'], ['final_confirmation'])
+        self.assertIn('Проверь, что будет создано:', second_response.data['reply_text'])
+
+        self.assertEqual(third_response.status_code, 201)
+        self.assertEqual(third_response.data['status'], 'created')
+        expenditure = Expenditure.objects.get(id=third_response.data['created_object']['id'])
         self.assertEqual(expenditure.wallet, self.wallet_alpha)
         self.assertEqual(expenditure.cash_flow_item, self.expense_item)
         self.assertEqual(expenditure.amount, Decimal('342.00'))
@@ -3054,6 +3108,7 @@ class AiAssistantApiTests(TestCase):
                 image_response,
                 send_message_response,
                 send_message_response,
+                send_message_response,
             ],
         ):
             with patch(
@@ -3093,7 +3148,22 @@ class AiAssistantApiTests(TestCase):
                             'update_id': 336,
                             'message': {
                                 'message_id': 436,
-                                'text': 'это альфа',
+                                'text': 'Кошелек альфа банк',
+                                'chat': {'id': 911},
+                                'from': {'id': 912, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+                    third_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 337,
+                            'message': {
+                                'message_id': 437,
+                                'text': 'Создать',
                                 'chat': {'id': 911},
                                 'from': {'id': 912, 'username': 'trialex'},
                             },
@@ -3108,9 +3178,14 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(len(pending.normalized_payload['items']), 2)
         self.assertEqual([item['amount'] for item in pending.normalized_payload['items']], ['465.75', '342.00'])
 
-        self.assertEqual(second_response.status_code, 201)
-        self.assertEqual(second_response.data['status'], 'created')
-        self.assertEqual(len(second_response.data['created_objects']), 2)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data['status'], 'needs_confirmation')
+        self.assertEqual(second_response.data['missing_fields'], ['final_confirmation'])
+        self.assertIn('Проверь, что будет создано:', second_response.data['reply_text'])
+
+        self.assertEqual(third_response.status_code, 201)
+        self.assertEqual(third_response.data['status'], 'created')
+        self.assertEqual(len(third_response.data['created_objects']), 2)
         expenditures = list(
             Expenditure.objects.filter(wallet=self.wallet_alpha, comment__icontains='₽').order_by('amount')
         )

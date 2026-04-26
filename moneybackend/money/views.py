@@ -25,7 +25,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from drf_spectacular.utils import extend_schema
 
-from .ai_service import AiOperationService
+from .ai_service import AiOperationService, FINAL_CONFIRMATION_FIELD
 from .models import *
 from .onec_context import is_onec_sync_request
 from .serializers import *
@@ -2078,6 +2078,9 @@ class AiAssistantViewSet(viewsets.ViewSet):
             'chat_id': chat_id,
             'text': reply_text,
         }
+        reply_markup = self._telegram_reply_markup(result)
+        if reply_markup is not None:
+            payload['reply_markup'] = reply_markup
         message_id = (message or {}).get('message_id')
         if message_id is not None:
             payload['reply_to_message_id'] = message_id
@@ -2099,6 +2102,46 @@ class AiAssistantViewSet(viewsets.ViewSet):
 
         if not raw.get('ok', False):
             raise ValueError('Telegram sendMessage response is not ok.')
+
+    def _telegram_reply_markup(self, result):
+        if not result:
+            return None
+
+        status_name = result.get('status')
+        if status_name in {'created', 'duplicate', 'balance', 'info'}:
+            return {'remove_keyboard': True}
+
+        if status_name != 'needs_confirmation':
+            return None
+
+        missing_fields = result.get('missing_fields') or []
+        if missing_fields == [FINAL_CONFIRMATION_FIELD]:
+            return {
+                'keyboard': [
+                    [{'text': 'Создать'}],
+                    [{'text': '/cancel'}],
+                ],
+                'resize_keyboard': True,
+                'one_time_keyboard': False,
+            }
+
+        option_labels = []
+        for option_list in (result.get('options') or {}).values():
+            for option in option_list or []:
+                label = (option or {}).get('label')
+                if label and label not in option_labels:
+                    option_labels.append(label)
+
+        rows = []
+        for index in range(0, min(len(option_labels), 8), 2):
+            rows.append([{'text': label} for label in option_labels[index:index + 2]])
+
+        rows.append([{'text': '/cancel'}])
+        return {
+            'keyboard': rows,
+            'resize_keyboard': True,
+            'one_time_keyboard': False,
+        }
 
     def _telegram_response(self, *, binding=None, message=None, result=None, http_status=status.HTTP_200_OK):
         self._send_telegram_reply(binding=binding, message=message, result=result)
@@ -2241,7 +2284,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             normalized_payload=self._serialize_result_parsed_payload(result['parsed']),
             missing_fields=missing_fields,
             options_payload=result.get('options') or {},
-            prompt_text=result.get('reply_text', ''),
+            prompt_text=(result.get('reply_text', '') or '')[:255],
         )
 
     def _close_pending_confirmation(self, pending):
@@ -2548,13 +2591,15 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 provider_name=pending.provider or 'telegram-confirmation',
                 dry_run=True,
                 options_payload=pending.options_payload,
+                confirmation_history=pending.confirmation_history,
+                source='telegram',
             )
             pending.confirmation_history = list(pending.confirmation_history) + [{'answer_text': effective_text}]
             if result.get('status') == 'needs_confirmation':
                 pending.normalized_payload = self._serialize_result_parsed_payload(result['parsed'])
                 pending.missing_fields = result.get('missing_fields') or []
                 pending.options_payload = result.get('options') or {}
-                pending.prompt_text = result.get('reply_text', '')
+                pending.prompt_text = (result.get('reply_text', '') or '')[:255]
                 pending.save(update_fields=['normalized_payload', 'missing_fields', 'options_payload', 'prompt_text', 'confirmation_history', 'updated_at'])
             else:
                 semantic_duplicate = self._recent_semantic_duplicate(
