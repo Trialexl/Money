@@ -210,7 +210,10 @@ def _detect_assistant_meta_intent(text):
 def _serialize_decimal(value):
     if value is None:
         return None
-    return f'{value.quantize(Decimal("0.01")):.2f}'
+    parsed_value = _parse_amount(value)
+    if parsed_value is None:
+        return None
+    return f'{parsed_value.quantize(Decimal("0.01")):.2f}'
 
 
 def _is_affirmative_confirmation(text):
@@ -2185,20 +2188,41 @@ class AiOperationService:
             and not any(key in normalized for key in ('wallet', 'wallet_from', 'wallet_to', 'cash_flow_item'))
         ):
             fallback_raw = normalized
+
+        occurred_at = normalized.get('occurred_at')
+        if occurred_at and hasattr(occurred_at, 'isoformat'):
+            occurred_at_value = occurred_at.isoformat()
+        else:
+            occurred_at_value = occurred_at
+
         return {
             'intent': normalized.get('intent', INTENT_UNKNOWN),
             'confidence': float(normalized.get('confidence') or 0.0),
             'image_based': bool(normalized.get('image_based')),
             'amount': _serialize_decimal(normalized.get('amount')),
-            'wallet_id': str(normalized['wallet'].id) if normalized.get('wallet') else None,
-            'wallet_from_id': str(normalized['wallet_from'].id) if normalized.get('wallet_from') else None,
-            'wallet_to_id': str(normalized['wallet_to'].id) if normalized.get('wallet_to') else None,
+            'wallet_id': (
+                str(normalized['wallet'].id)
+                if normalized.get('wallet')
+                else normalized.get('wallet_id')
+            ),
+            'wallet_from_id': (
+                str(normalized['wallet_from'].id)
+                if normalized.get('wallet_from')
+                else normalized.get('wallet_from_id')
+            ),
+            'wallet_to_id': (
+                str(normalized['wallet_to'].id)
+                if normalized.get('wallet_to')
+                else normalized.get('wallet_to_id')
+            ),
             'cash_flow_item_id': (
-                str(normalized['cash_flow_item'].id) if normalized.get('cash_flow_item') else None
+                str(normalized['cash_flow_item'].id)
+                if normalized.get('cash_flow_item')
+                else normalized.get('cash_flow_item_id')
             ),
             'comment': normalized.get('comment', ''),
             'include_in_budget': bool(normalized.get('include_in_budget', False)),
-            'occurred_at': normalized.get('occurred_at').isoformat() if normalized.get('occurred_at') else None,
+            'occurred_at': occurred_at_value,
             'operation_sign': normalized.get('operation_sign'),
             'source_index': normalized.get('source_index'),
             'raw': normalized.get('raw', fallback_raw),

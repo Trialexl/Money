@@ -2351,7 +2351,9 @@ class AiAssistantViewSet(viewsets.ViewSet):
             '/unlink',
             '/cancel',
         )
-        return normalized_text.startswith(command_prefixes)
+        if normalized_text.startswith(command_prefixes):
+            return True
+        return bool(re.search(r'\b(?:остаток|остатки|баланс|балансы)\b', normalized_text))
 
     def _upsert_pending_confirmation(self, *, binding, result, input_context=None):
         if result.get('status') != 'needs_confirmation':

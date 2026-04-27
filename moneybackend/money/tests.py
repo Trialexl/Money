@@ -2305,6 +2305,41 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'balance')
 
+    def test_ai_service_serialize_normalized_batch_accepts_serialized_items(self):
+        service = ai_service.AiOperationService()
+        occurred_at = timezone.make_aware(datetime(2026, 4, 27, 16, 13, 0))
+
+        serialized = service.serialize_normalized_batch(
+            {
+                'batch': True,
+                'intent': 'create_multiple_operations',
+                'confidence': 0.95,
+                'image_based': True,
+                'items': [
+                    {
+                        'intent': 'create_expenditure',
+                        'confidence': 0.9,
+                        'image_based': True,
+                        'amount': '342.00',
+                        'wallet_id': str(self.wallet_alpha.id),
+                        'cash_flow_item_id': str(self.expense_item.id),
+                        'comment': 'Дикий океан',
+                        'include_in_budget': False,
+                        'occurred_at': occurred_at.isoformat(),
+                        'operation_sign': 'outgoing',
+                        'source_index': 1,
+                        'raw': {'amount': '342.00'},
+                    }
+                ],
+                'raw': {'source': 'telegram'},
+            }
+        )
+
+        self.assertEqual(serialized['items'][0]['amount'], '342.00')
+        self.assertEqual(serialized['items'][0]['wallet_id'], str(self.wallet_alpha.id))
+        self.assertEqual(serialized['items'][0]['cash_flow_item_id'], str(self.expense_item.id))
+        self.assertEqual(serialized['items'][0]['occurred_at'], occurred_at.isoformat())
+
     def test_ai_execute_returns_help_for_capabilities_question(self):
         response = self.client.post(
             '/api/v1/ai/execute/',
@@ -3991,6 +4026,54 @@ class AiAssistantApiTests(TestCase):
         receipt = Receipt.objects.get(id=second_response.data['created_object']['id'])
         self.assertEqual(receipt.wallet, self.wallet_sber)
         self.assertEqual(receipt.cash_flow_item, self.income_item)
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
+
+    def test_ai_telegram_webhook_balance_request_bypasses_active_pending_confirmation(self):
+        client = APIClient()
+        Receipt.objects.create(
+            amount=Decimal('500.00'),
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.income_item,
+            date=timezone.make_aware(datetime(2026, 4, 27, 12, 0, 0)),
+        )
+
+        first_response = client.post(
+            '/api/v1/ai/telegram-webhook/',
+            {
+                'update_id': 4301,
+                'message': {
+                    'message_id': 4302,
+                    'text': 'приход сбербанк 10000',
+                    'chat': {'id': 4303},
+                    'from': {'id': 4304, 'username': 'trialex'},
+                },
+            },
+            format='json',
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        pending = AiPendingConfirmation.objects.get(telegram_binding__telegram_user_id=4304, is_active=True)
+
+        second_response = client.post(
+            '/api/v1/ai/telegram-webhook/',
+            {
+                'update_id': 4305,
+                'message': {
+                    'message_id': 4306,
+                    'text': 'Какой остаток на альфа',
+                    'chat': {'id': 4303},
+                    'from': {'id': 4304, 'username': 'trialex'},
+                },
+            },
+            format='json',
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+        )
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data['status'], 'balance')
+        self.assertIn('Альфа', second_response.data['reply_text'])
         pending.refresh_from_db()
         self.assertFalse(pending.is_active)
 
