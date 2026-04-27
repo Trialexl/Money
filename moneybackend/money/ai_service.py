@@ -246,6 +246,37 @@ def _contains_batch_exclusion_instruction(text):
     return any(re.search(pattern, normalized) for pattern in patterns)
 
 
+def _extract_batch_target_indexes(text):
+    normalized = _normalize_text(text)
+    if not normalized or not re.search(r'\b(?:строк|операц|пункт|запис)\w*', normalized):
+        return []
+
+    indexes = []
+    for match in re.finditer(r'(?<!\d)(\d{1,2})(?!\d)', normalized):
+        index = int(match.group(1))
+        if index not in indexes:
+            indexes.append(index)
+    return indexes
+
+
+def _strip_batch_target_instruction(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return ''
+
+    cleaned = re.sub(r'\b(?:строк[ауеи]?|операци[яюи]|пункт(?:а|у)?|запис[ьи])\b', ' ', normalized)
+    cleaned = re.sub(r'(?<!\d)\d{1,2}(?:[- ]?(?:я|й|ю))?(?!\d)', ' ', cleaned)
+    cleaned = re.sub(
+        r'\b(?:сделай|сделать|измени|изменить|поменяй|поменять|замени|заменить|'
+        r'поставь|поставить|укажи|указать|пусть|будет|это|как)\b',
+        ' ',
+        cleaned,
+    )
+    cleaned = re.sub(r'\b(?:в|на|по|статью|статья|категорию|категория)\b', ' ', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+
 def _parse_datetime_value(value):
     if not value:
         return None
@@ -1117,6 +1148,79 @@ class AiOperationService:
             'raw': normalized.get('raw', {}),
         }
 
+    def _extract_batch_item_patch_directives(self, *, answer_text, wallets):
+        segments = [segment.strip() for segment in re.split(r'[\r\n]+', answer_text or '') if segment.strip()]
+        if not segments:
+            return [], answer_text or ''
+
+        directives = []
+        remaining_segments = []
+        for segment in segments:
+            indexes = _extract_batch_target_indexes(segment)
+            if not indexes or _contains_batch_exclusion_instruction(segment):
+                remaining_segments.append(segment)
+                continue
+
+            hint = _strip_batch_target_instruction(segment)
+            if not hint:
+                remaining_segments.append(segment)
+                continue
+
+            cash_flow_item = _match_cash_flow_item_by_hint(hint)
+            if cash_flow_item is None:
+                extracted_hint = _extract_cash_flow_item_hint(hint, wallets)
+                if extracted_hint:
+                    cash_flow_item = _match_cash_flow_item_by_hint(extracted_hint)
+                    if cash_flow_item is not None:
+                        hint = extracted_hint
+
+            if cash_flow_item is None:
+                remaining_segments.append(segment)
+                continue
+
+            directives.append({
+                'indexes': indexes,
+                'patch': {
+                    'cash_flow_item_id': str(cash_flow_item.id),
+                    'cash_flow_item_hint': hint,
+                },
+            })
+
+            preserved_tokens = []
+            for wallet_name in _wallet_mentions(segment, wallets):
+                if wallet_name not in preserved_tokens:
+                    preserved_tokens.append(wallet_name)
+            if preserved_tokens:
+                remaining_segments.append(' '.join(preserved_tokens))
+
+        return directives, '\n'.join(remaining_segments)
+
+    def apply_batch_item_patch_directives(self, *, normalized, directives):
+        if not directives:
+            return normalized
+
+        updated_items = []
+        for index, item in enumerate(normalized.get('items', []), start=1):
+            if not isinstance(item, dict):
+                continue
+            updated_item = item
+            for directive in directives:
+                if index in directive.get('indexes', []):
+                    updated_item = self.apply_confirmation_patch(
+                        normalized=updated_item,
+                        patch=directive.get('patch') or {},
+                    )
+            updated_items.append(updated_item)
+
+        return {
+            'batch': True,
+            'intent': self._batch_intent(updated_items),
+            'confidence': float(normalized.get('confidence') or 0.0),
+            'image_based': bool(normalized.get('image_based')),
+            'items': updated_items,
+            'raw': normalized.get('raw', {}),
+        }
+
     def _batch_exclusion_score(self, *, answer_text, item, index):
         normalized_answer = _normalize_text(answer_text)
         if not normalized_answer:
@@ -1256,8 +1360,8 @@ class AiOperationService:
         model_name = (item or {}).get('model') or 'Document'
         amount = (item or {}).get('amount') or '0.00'
         operation_icon = {
-            'Receipt': '➕',
-            'Expenditure': '➖',
+            'Receipt': '🟢',
+            'Expenditure': '🔴',
             'Transfer': '🔄',
         }.get(model_name, '•')
         parts.append(f'{operation_icon} {amount}')
@@ -1464,9 +1568,17 @@ class AiOperationService:
                 context=context,
                 image_based=bool(image_bytes),
             )
+            batch_directives, batch_answer_text = self._extract_batch_item_patch_directives(
+                answer_text=text,
+                wallets=context.get('wallets', []),
+            )
+            normalized_batch = self.apply_batch_item_patch_directives(
+                normalized=normalized_batch,
+                directives=batch_directives,
+            )
             normalized_batch, excluded_indexes = self.apply_batch_answer_directives(
                 normalized=normalized_batch,
-                answer_text=text,
+                answer_text=batch_answer_text,
             )
             if not normalized_batch.get('items'):
                 return self._build_empty_batch_result(
@@ -1575,11 +1687,19 @@ class AiOperationService:
         if missing_fields == [FINAL_CONFIRMATION_FIELD]:
             if self._is_batch_normalized(normalized_payload):
                 normalized = self.deserialize_normalized_batch(normalized_payload)
+                batch_directives, batch_answer_text = self._extract_batch_item_patch_directives(
+                    answer_text=answer_text,
+                    wallets=self.build_context()['wallets'],
+                )
+                normalized = self.apply_batch_item_patch_directives(
+                    normalized=normalized,
+                    directives=batch_directives,
+                )
                 normalized, excluded_indexes = self.apply_batch_answer_directives(
                     normalized=normalized,
-                    answer_text=answer_text,
+                    answer_text=batch_answer_text,
                 )
-                if excluded_indexes:
+                if batch_directives or excluded_indexes:
                     if not normalized.get('items'):
                         return self._build_empty_batch_result(
                             provider_name=provider_name,
@@ -1647,9 +1767,17 @@ class AiOperationService:
 
         if self._is_batch_normalized(normalized_payload):
             normalized = self.deserialize_normalized_batch(normalized_payload)
+            batch_directives, batch_answer_text = self._extract_batch_item_patch_directives(
+                answer_text=answer_text,
+                wallets=self.build_context()['wallets'],
+            )
+            normalized = self.apply_batch_item_patch_directives(
+                normalized=normalized,
+                directives=batch_directives,
+            )
             normalized, excluded_indexes = self.apply_batch_answer_directives(
                 normalized=normalized,
-                answer_text=answer_text,
+                answer_text=batch_answer_text,
             )
             if not normalized.get('items'):
                 return self._build_empty_batch_result(
@@ -1660,7 +1788,7 @@ class AiOperationService:
             patch = self._resolve_confirmation_with_provider(
                 normalized_payload=self.serialize_normalized_batch(normalized),
                 missing_fields=missing_fields,
-                answer_text=answer_text,
+                answer_text=batch_answer_text,
                 provider_name=provider_name,
                 options_payload=options_payload,
                 confirmation_history=confirmation_history,
@@ -1669,7 +1797,7 @@ class AiOperationService:
                 normalized = self.apply_confirmation_patch_to_batch(normalized=normalized, patch=patch)
             normalized = self.apply_confirmation_answer_to_batch(
                 normalized=normalized,
-                answer_text=answer_text,
+                answer_text=batch_answer_text,
                 missing_fields=missing_fields,
                 options_payload=options_payload,
             )

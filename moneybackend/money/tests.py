@@ -3210,7 +3210,7 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(second_response.data['status'], 'needs_confirmation')
         self.assertEqual(second_response.data['missing_fields'], ['final_confirmation'])
         self.assertIn('Проверь, что будет создано:', second_response.data['reply_text'])
-        self.assertIn('➖ 342.00', second_response.data['reply_text'])
+        self.assertIn('🔴 342.00', second_response.data['reply_text'])
         self.assertIn('👛 Альфа', second_response.data['reply_text'])
         self.assertIn('🏷 Продукты', second_response.data['reply_text'])
         self.assertNotIn('комм.', second_response.data['reply_text'])
@@ -3219,8 +3219,8 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(third_response.data['status'], 'created')
         self.assertEqual(len(third_response.data['created_objects']), 2)
         self.assertIn('Создано документов: 2.', third_response.data['reply_text'])
-        self.assertIn('➖ 342.00', third_response.data['reply_text'])
-        self.assertIn('➖ 465.75', third_response.data['reply_text'])
+        self.assertIn('🔴 342.00', third_response.data['reply_text'])
+        self.assertIn('🔴 465.75', third_response.data['reply_text'])
         self.assertIn('👛 Альфа', third_response.data['reply_text'])
         self.assertIn('🏷 Продукты', third_response.data['reply_text'])
         self.assertNotIn('0.00 | Без комментария', third_response.data['reply_text'])
@@ -3377,7 +3377,7 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(second_response.data['status'], 'needs_confirmation')
         self.assertEqual(second_response.data['missing_fields'], ['final_confirmation'])
         self.assertIn('Проверь, что будет создано:', second_response.data['reply_text'])
-        self.assertIn('➖ 157.97', second_response.data['reply_text'])
+        self.assertIn('🔴 157.97', second_response.data['reply_text'])
         self.assertNotIn('100000.00', second_response.data['reply_text'])
 
         self.assertEqual(third_response.status_code, 201)
@@ -3392,6 +3392,179 @@ class AiAssistantApiTests(TestCase):
             1,
         )
         self.assertEqual(Transfer.objects.filter(amount=Decimal('100000.00')).count(), 0)
+
+    @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
+    def test_ai_telegram_webhook_photo_caption_can_override_single_batch_item_category(self):
+        client = APIClient()
+        current_image_dt = timezone.make_aware(datetime(2026, 4, 26, 11, 35, 0))
+        transport_item = CashFlowItem.objects.create(name='Транспорт', include_in_budget=True)
+        CashFlowItem.objects.create(name='Фастфуд', include_in_budget=True)
+
+        class _FakeHeaders:
+            def get_content_type(self):
+                return 'image/jpeg'
+
+        class _FakeResponse:
+            def __init__(self, body, headers=None):
+                self._body = body
+                self.headers = headers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return self._body
+
+        get_file_response = _FakeResponse(
+            json.dumps({'ok': True, 'result': {'file_path': 'photos/history-override.jpg'}}).encode('utf-8')
+        )
+        image_response = _FakeResponse(b'fake-telegram-history-override-image', headers=_FakeHeaders())
+        send_message_response = _FakeResponse(json.dumps({'ok': True, 'result': {'message_id': 1004}}).encode('utf-8'))
+        first_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.9,
+            'amount': '704.34',
+            'merchant': 'Магнит',
+            'description': 'Продукты',
+            'comment': 'Магнит',
+            'operation_sign': 'outgoing',
+        }
+        second_provider_result = {
+            'intent': 'create_expenditure',
+            'confidence': 0.98,
+            'operations': [
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-704,34 ₽',
+                    'merchant': 'Магнит',
+                    'description': 'Продукты',
+                    'comment': 'Магнит -704,34 ₽',
+                    'occurred_at': '2024-04-22T17:35:00+03:00',
+                    'operation_sign': 'outgoing',
+                },
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-70 ₽',
+                    'merchant': 'Осетинские Пироги',
+                    'description': 'Фастфуд',
+                    'comment': 'Осетинские Пироги -70 ₽',
+                    'occurred_at': '2024-04-22T17:36:00+03:00',
+                    'operation_sign': 'outgoing',
+                },
+                {
+                    'intent': 'create_expenditure',
+                    'amount': '-48 ₽',
+                    'merchant': 'Транспорт',
+                    'description': 'Транспорт',
+                    'comment': 'Транспорт -48 ₽',
+                    'occurred_at': '2024-04-22T17:37:00+03:00',
+                    'operation_sign': 'outgoing',
+                },
+            ],
+        }
+
+        with patch(
+            'money.views.urlrequest.urlopen',
+            side_effect=[
+                get_file_response,
+                image_response,
+                send_message_response,
+                send_message_response,
+                send_message_response,
+            ],
+        ):
+            with patch(
+                'money.ai_service._get_intent_provider',
+                return_value=(
+                    type(
+                        'MockProvider',
+                        (),
+                        {'parse': Mock(side_effect=[first_provider_result, second_provider_result])},
+                    )(),
+                    'openrouter',
+                ),
+            ):
+                with patch('money.ai_service.timezone.now', return_value=current_image_dt):
+                    first_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 341,
+                            'message': {
+                                'message_id': 441,
+                                'photo': [
+                                    {'file_id': 'history-override-photo', 'file_size': 9000, 'width': 900, 'height': 1600},
+                                ],
+                                'chat': {'id': 915},
+                                'from': {'id': 916, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+                    pending = AiPendingConfirmation.objects.get(telegram_binding__telegram_user_id=916, is_active=True)
+
+                    second_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 342,
+                            'message': {
+                                'message_id': 442,
+                                'text': 'Альфа\n3 строку сделай в продукты',
+                                'chat': {'id': 915},
+                                'from': {'id': 916, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+                    third_response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 343,
+                            'message': {
+                                'message_id': 443,
+                                'text': 'Создать',
+                                'chat': {'id': 915},
+                                'from': {'id': 916, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.data['status'], 'needs_confirmation')
+        self.assertEqual(first_response.data['missing_fields'], ['wallet'])
+        self.assertEqual(len(pending.normalized_payload['items']), 3)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data['status'], 'needs_confirmation')
+        self.assertEqual(second_response.data['missing_fields'], ['final_confirmation'])
+        self.assertIn('3. 🔴 48.00 | 👛 Альфа | 🏷 Продукты', second_response.data['reply_text'])
+        self.assertNotIn('🏷 Транспорт', second_response.data['reply_text'])
+
+        self.assertEqual(third_response.status_code, 201)
+        self.assertEqual(third_response.data['status'], 'created')
+        self.assertEqual(len(third_response.data['created_objects']), 3)
+        overridden_expenditure = Expenditure.objects.get(
+            wallet=self.wallet_alpha,
+            amount=Decimal('48.00'),
+            comment__icontains='Транспорт',
+        )
+        self.assertEqual(overridden_expenditure.cash_flow_item, self.expense_item)
+        self.assertFalse(
+            Expenditure.objects.filter(
+                wallet=self.wallet_alpha,
+                amount=Decimal('48.00'),
+                cash_flow_item=transport_item,
+            ).exists()
+        )
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
 
     def test_ai_telegram_webhook_transcribes_voice_and_creates_expenditure(self):
         client = APIClient()
