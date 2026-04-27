@@ -529,6 +529,37 @@ class OpenRouterIntentProvider:
         )
         return self._request_json([{'type': 'text', 'text': prompt}])
 
+    def revise_batch_confirmation(
+        self,
+        *,
+        current_payload,
+        answer_text,
+        context=None,
+        options_payload=None,
+        confirmation_history=None,
+        image_bytes=None,
+        image_mime_type=None,
+    ):
+        prompt = self._build_batch_confirmation_prompt(
+            current_payload=current_payload,
+            answer_text=answer_text,
+            context=context or {},
+            options_payload=options_payload or {},
+            confirmation_history=confirmation_history or [],
+        )
+        content = [{'type': 'text', 'text': prompt}]
+        if image_bytes:
+            content.append({
+                'type': 'image_url',
+                'image_url': {
+                    'url': (
+                        f'data:{image_mime_type or "image/png"};base64,'
+                        f'{base64.b64encode(image_bytes).decode("ascii")}'
+                    ),
+                }
+            })
+        return self._request_json(content)
+
     def _request_json(self, content):
         payload = {
             'model': self.model_name,
@@ -612,6 +643,10 @@ class OpenRouterIntentProvider:
             'Категорию операции вроде "Продукты", "Транспорт", "Фастфуд" используй как description или cash_flow_item_hint. '
             'Если на изображении видно несколько денежных операций, верни их все в массиве operations. '
             'Каждый элемент operations должен описывать одну денежную операцию. '
+            'Если текст пользователя содержит указания по строкам списка, например "3 пропусти", "2 продукты", '
+            '"1 не заноси", примени их сразу при формировании итогового массива operations. '
+            'Для каждой операции из списка укажи source_index: номер строки на исходном скриншоте сверху вниз, начиная с 1. '
+            'Если строка была исключена по указанию пользователя, просто не включай ее в operations. '
             'Игнорируй бонусные баллы, кешбэк в баллах, награды, счетчики и нефинансовые элементы. '
             f'{force_note}'
             'Используй только доступные кошельки и статьи. '
@@ -632,7 +667,7 @@ class OpenRouterIntentProvider:
             '"cash_flow_item_hint": null, "merchant": null, "bank_name": null, '
             '"description": null, "occurred_at": null, "operation_sign": null, '
             '"comment": null, "include_in_budget": false, '
-            '"operations": [{"intent": "...", "amount": "0.00", "merchant": "..."}] | null}. '
+            '"operations": [{"source_index": 1, "intent": "...", "amount": "0.00", "merchant": "..."}] | null}. '
             'operation_sign может быть incoming, outgoing, transfer или null. '
             'amount возвращай числом без знака валюты и без символа ₽, а направление отражай в operation_sign. '
             'occurred_at возвращай в ISO 8601. '
@@ -675,6 +710,53 @@ class OpenRouterIntentProvider:
             f'Подсказки-варианты: {json.dumps(options_payload or {}, ensure_ascii=False)}. '
             f'Доступные кошельки: {json.dumps(context.get("wallets", []), ensure_ascii=False)}. '
             f'Доступные статьи: {json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}.'
+        )
+
+    def _build_batch_confirmation_prompt(
+        self,
+        *,
+        current_payload,
+        answer_text,
+        context,
+        options_payload,
+        confirmation_history,
+    ):
+        return (
+            'Ты уточняешь список финансовых операций, ранее распознанных с одного скриншота. '
+            'Верни только JSON без пояснений. '
+            'Перечитай изображение и текстовые указания пользователя, затем верни полный актуальный список операций, '
+            'которые нужно создать после этого ответа пользователя. '
+            'Не возвращай patch, команды update/exclude или diff. Возвращай только итоговый список операций целиком. '
+            'Если пользователь просит пропустить строку, просто не включай ее в operations. '
+            'Если пользователь уточняет статью или кошелек для конкретной строки, примени это только к нужной строке. '
+            'Если пользователь уточняет кошелек или статью без номера строки, примени уточнение ко всем строкам, '
+            'для которых это подходит и которые еще не заполнены. '
+            'Сохраняй исходные номера строк source_index из текущего черновика. Не перенумеровывай. '
+            'Используй только доступные кошельки и статьи из справочников. '
+            'Если уверен, возвращай wallet_id / wallet_from_id / wallet_to_id / cash_flow_item_id. '
+            'Если id определить нельзя, верни соответствующий hint по точному имени из справочника. '
+            'Если какое-то поле после ответа пользователя все еще неизвестно, оставь его null. '
+            'Схема JSON: '
+            '{"intent":"create_multiple_operations","confidence":0.0,"operations":['
+            '{"source_index":1,"intent":"create_expenditure","amount":"0.00","wallet_id":null,'
+            '"wallet_hint":null,"wallet_from_id":null,"wallet_from_hint":null,'
+            '"wallet_to_id":null,"wallet_to_hint":null,"cash_flow_item_id":null,'
+            '"cash_flow_item_hint":null,"merchant":null,"bank_name":null,"description":null,'
+            '"occurred_at":null,"operation_sign":null,"comment":null,"include_in_budget":false}'
+            ']}. '
+            'Не добавляй новых строк, которых нет на скриншоте. '
+            'Текущий черновик операций: '
+            f'{json.dumps(current_payload or {}, ensure_ascii=False)}. '
+            'История ответов пользователя: '
+            f'{json.dumps(confirmation_history or [], ensure_ascii=False)}. '
+            'Текущий ответ пользователя: '
+            f'{answer_text or ""}. '
+            'Подсказки-варианты: '
+            f'{json.dumps(options_payload or {}, ensure_ascii=False)}. '
+            'Доступные кошельки: '
+            f'{json.dumps(context.get("wallets", []), ensure_ascii=False)}. '
+            'Доступные статьи: '
+            f'{json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}.'
         )
 
 
@@ -843,6 +925,19 @@ class RuleBasedIntentProvider:
     ):
         return {}
 
+    def revise_batch_confirmation(
+        self,
+        *,
+        current_payload,
+        answer_text,
+        context=None,
+        options_payload=None,
+        confirmation_history=None,
+        image_bytes=None,
+        image_mime_type=None,
+    ):
+        return None
+
 
 def _get_intent_provider(provider_name=None):
     provider_name = provider_name or getattr(settings, 'AI_DEFAULT_PROVIDER', 'openrouter')
@@ -1002,7 +1097,7 @@ class AiOperationService:
         operations = batch_raw.pop('operations', []) or []
         normalized_items = []
 
-        for item_raw in operations:
+        for fallback_index, item_raw in enumerate(operations, start=1):
             if not isinstance(item_raw, dict):
                 continue
             merged_raw = dict(batch_raw)
@@ -1026,6 +1121,7 @@ class AiOperationService:
                     image_based=image_based,
                 )
             )
+            normalized_items[-1]['source_index'] = int(item_raw.get('source_index') or fallback_index)
 
         return {
             'batch': True,
@@ -1079,6 +1175,72 @@ class AiOperationService:
             return {}
 
         return patch if isinstance(patch, dict) else {}
+
+    def _decode_pending_image_context(self, pending_context):
+        if not isinstance(pending_context, dict):
+            return None, None, ''
+
+        image_base64 = pending_context.get('image_base64') or ''
+        if not image_base64:
+            return None, None, pending_context.get('source_text', '') or ''
+
+        try:
+            image_bytes = base64.b64decode(image_base64)
+        except Exception:
+            return None, None, pending_context.get('source_text', '') or ''
+
+        return (
+            image_bytes,
+            pending_context.get('image_mime_type') or 'image/jpeg',
+            pending_context.get('source_text', '') or '',
+        )
+
+    def _resolve_batch_confirmation_with_provider(
+        self,
+        *,
+        normalized_payload,
+        answer_text,
+        provider_name,
+        options_payload=None,
+        confirmation_history=None,
+        pending_context=None,
+    ):
+        image_bytes, image_mime_type, source_text = self._decode_pending_image_context(pending_context)
+        if not image_bytes:
+            return None
+
+        provider, actual_provider_name = _get_intent_provider(
+            provider_name if provider_name in {'openrouter', 'gemini', 'rule_based'} else None
+        )
+        if actual_provider_name == 'rule_based':
+            return None
+
+        try:
+            revised = provider.revise_batch_confirmation(
+                current_payload=normalized_payload,
+                answer_text=answer_text,
+                context=self.build_context(),
+                options_payload=options_payload or {},
+                confirmation_history=confirmation_history or [],
+                image_bytes=image_bytes,
+                image_mime_type=image_mime_type,
+            )
+        except Exception:
+            return None
+
+        if not isinstance(revised, dict) or not isinstance(revised.get('operations'), list):
+            return None
+
+        normalized = self._normalize_parsed_batch(
+            revised,
+            source_text=source_text,
+            context=self.build_context(),
+            image_based=True,
+        )
+        return {
+            'provider_name': actual_provider_name,
+            'normalized': normalized,
+        }
 
     def apply_confirmation_patch(self, *, normalized, patch):
         updated = dict(normalized)
@@ -1333,6 +1495,7 @@ class AiOperationService:
             'amount': _serialize_decimal(amount),
             'comment': normalized.get('comment', ''),
             'date': normalized.get('occurred_at').isoformat() if normalized.get('occurred_at') else None,
+            'source_index': normalized.get('source_index'),
         }
         if normalized.get('wallet'):
             preview['wallet_name'] = normalized['wallet'].name
@@ -1347,8 +1510,13 @@ class AiOperationService:
     def _build_final_confirmation_reply(self, preview):
         lines = ['Проверь, что будет создано:']
         if preview.get('count') and isinstance(preview.get('items'), list):
-            for index, item in enumerate(preview.get('items') or [], start=1):
-                lines.append(self._build_final_confirmation_line(item, index=index))
+            for fallback_index, item in enumerate(preview.get('items') or [], start=1):
+                lines.append(
+                    self._build_final_confirmation_line(
+                        item,
+                        index=item.get('source_index') or fallback_index,
+                    )
+                )
         else:
             lines.append(self._build_final_confirmation_line(preview))
         lines.append('Если всё верно, ответь: да или создать.')
@@ -1448,6 +1616,33 @@ class AiOperationService:
     def _build_batch_confirmation_reply(self, count):
         return f'Недостаточно данных для автоматического создания {count} документов.'
 
+    def _humanize_missing_field(self, field_name):
+        return {
+            'amount': 'сумма',
+            'wallet': 'кошелек',
+            'cash_flow_item': 'статья движения',
+            'wallet_from': 'кошелек списания',
+            'wallet_to': 'кошелек зачисления',
+            FINAL_CONFIRMATION_FIELD: 'подтверждение создания',
+            'binding': 'привязка Telegram',
+            'intent': 'тип команды',
+        }.get(field_name, field_name)
+
+    def _build_batch_missing_fields_by_item(self, item_results):
+        details = []
+        for fallback_index, result in enumerate(item_results, start=1):
+            if result.get('status') != 'needs_confirmation':
+                continue
+            item_missing_fields = result.get('missing_fields') or []
+            if not item_missing_fields:
+                continue
+            parsed = result.get('parsed') or {}
+            details.append({
+                'index': parsed.get('source_index') or fallback_index,
+                'missing_fields': item_missing_fields,
+            })
+        return details
+
     def _create_multiple_financial_documents(self, normalized, *, provider_name, dry_run):
         item_results = [
             self._create_financial_document(item, provider_name=provider_name, dry_run=True)
@@ -1475,6 +1670,7 @@ class AiOperationService:
                     missing_fields.append(field_name)
             options.append(result.get('options') or {})
 
+        missing_fields_by_item = self._build_batch_missing_fields_by_item(item_results)
         merged_options = self._merge_batch_options(options)
         preview = self._build_batch_preview(item_results)
 
@@ -1488,8 +1684,10 @@ class AiOperationService:
                     self._build_batch_confirmation_reply(len(item_results)),
                     merged_options,
                     missing_fields,
+                    missing_fields_by_item=missing_fields_by_item,
                 ),
                 'missing_fields': missing_fields,
+                'missing_fields_by_item': missing_fields_by_item,
                 'options': merged_options,
                 'preview': preview,
                 'parsed': batch_parsed,
@@ -1682,10 +1880,35 @@ class AiOperationService:
         dry_run=False,
         options_payload=None,
         confirmation_history=None,
+        pending_context=None,
         source='web',
     ):
         if missing_fields == [FINAL_CONFIRMATION_FIELD]:
             if self._is_batch_normalized(normalized_payload):
+                if not _is_affirmative_confirmation(answer_text):
+                    revised = self._resolve_batch_confirmation_with_provider(
+                        normalized_payload=normalized_payload,
+                        answer_text=answer_text,
+                        provider_name=provider_name,
+                        options_payload=options_payload,
+                        confirmation_history=confirmation_history,
+                        pending_context=pending_context,
+                    )
+                    if revised:
+                        result = self._create_multiple_financial_documents(
+                            revised['normalized'],
+                            provider_name=revised['provider_name'],
+                            dry_run=dry_run,
+                        )
+                        if source == 'telegram' and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
+                            return self._final_confirmation_result(
+                                parsed=result['parsed'],
+                                provider_name=revised['provider_name'],
+                                preview=result.get('preview') or {},
+                                confidence=float(result.get('confidence') or 0.0),
+                            )
+                        return result
+
                 normalized = self.deserialize_normalized_batch(normalized_payload)
                 batch_directives, batch_answer_text = self._extract_batch_item_patch_directives(
                     answer_text=answer_text,
@@ -1766,6 +1989,29 @@ class AiOperationService:
             )
 
         if self._is_batch_normalized(normalized_payload):
+            revised = self._resolve_batch_confirmation_with_provider(
+                normalized_payload=normalized_payload,
+                answer_text=answer_text,
+                provider_name=provider_name,
+                options_payload=options_payload,
+                confirmation_history=confirmation_history,
+                pending_context=pending_context,
+            )
+            if revised:
+                result = self._create_multiple_financial_documents(
+                    revised['normalized'],
+                    provider_name=revised['provider_name'],
+                    dry_run=dry_run,
+                )
+                if source == 'telegram' and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
+                    return self._final_confirmation_result(
+                        parsed=result['parsed'],
+                        provider_name=revised['provider_name'],
+                        preview=result.get('preview') or {},
+                        confidence=float(result.get('confidence') or 0.0),
+                    )
+                return result
+
             normalized = self.deserialize_normalized_batch(normalized_payload)
             batch_directives, batch_answer_text = self._extract_batch_item_patch_directives(
                 answer_text=answer_text,
@@ -1865,7 +2111,9 @@ class AiOperationService:
             parsed.get('comment'),
         )
 
-        cash_flow_item = _match_cash_flow_item_by_hint(parsed.get('cash_flow_item_hint'))
+        cash_flow_item = CashFlowItem.objects.filter(pk=parsed.get('cash_flow_item_id')).first()
+        if cash_flow_item is None:
+            cash_flow_item = _match_cash_flow_item_by_hint(parsed.get('cash_flow_item_hint'))
         if cash_flow_item is None:
             for fallback_hint in (parsed.get('merchant'), parsed.get('description'), parsed.get('comment')):
                 cash_flow_item = _match_cash_flow_item_by_hint(fallback_hint)
@@ -1914,14 +2162,18 @@ class AiOperationService:
             'confidence': float(parsed.get('confidence') or 0.0),
             'image_based': bool(image_based),
             'amount': amount,
-            'wallet': wallet,
-            'wallet_from': _match_wallet_by_hint(parsed.get('wallet_from_hint') or parsed.get('bank_name')),
-            'wallet_to': _match_wallet_by_hint(parsed.get('wallet_to_hint')),
+            'wallet': Wallet.objects.filter(pk=parsed.get('wallet_id')).first() or wallet,
+            'wallet_from': (
+                Wallet.objects.filter(pk=parsed.get('wallet_from_id')).first()
+                or _match_wallet_by_hint(parsed.get('wallet_from_hint') or parsed.get('bank_name'))
+            ),
+            'wallet_to': Wallet.objects.filter(pk=parsed.get('wallet_to_id')).first() or _match_wallet_by_hint(parsed.get('wallet_to_hint')),
             'cash_flow_item': cash_flow_item,
             'comment': comment,
             'include_in_budget': bool(parsed.get('include_in_budget', False)),
             'occurred_at': occurred_at,
             'operation_sign': operation_sign,
+            'source_index': parsed.get('source_index'),
             'raw': parsed,
         }
 
@@ -1948,6 +2200,7 @@ class AiOperationService:
             'include_in_budget': bool(normalized.get('include_in_budget', False)),
             'occurred_at': normalized.get('occurred_at').isoformat() if normalized.get('occurred_at') else None,
             'operation_sign': normalized.get('operation_sign'),
+            'source_index': normalized.get('source_index'),
             'raw': normalized.get('raw', fallback_raw),
         }
 
@@ -1965,6 +2218,7 @@ class AiOperationService:
             'include_in_budget': bool(payload.get('include_in_budget', False)),
             'occurred_at': _parse_datetime_value(payload.get('occurred_at')),
             'operation_sign': payload.get('operation_sign'),
+            'source_index': payload.get('source_index'),
             'raw': payload.get('raw', {}),
         }
 
@@ -2190,23 +2444,21 @@ class AiOperationService:
             lines.append(f'- {row["wallet_name"]}: {row["balance"]}')
         return '\n'.join(lines)
 
-    def _build_confirmation_reply(self, reply_text, options, missing_fields=None):
+    def _build_confirmation_reply(self, reply_text, options, missing_fields=None, missing_fields_by_item=None):
         missing_fields = missing_fields or []
+        missing_fields_by_item = missing_fields_by_item or []
         if not options and not missing_fields:
             return reply_text
         lines = [reply_text]
-        humanized_missing_fields = {
-            'amount': 'сумма',
-            'wallet': 'кошелек',
-            'cash_flow_item': 'статья движения',
-            'wallet_from': 'кошелек списания',
-            'wallet_to': 'кошелек зачисления',
-            FINAL_CONFIRMATION_FIELD: 'подтверждение создания',
-            'binding': 'привязка Telegram',
-            'intent': 'тип команды',
-        }
-        if missing_fields:
-            labels = [humanized_missing_fields.get(field, field) for field in missing_fields]
+        if missing_fields_by_item:
+            lines.append('Не хватает по строкам:')
+            for item in missing_fields_by_item:
+                labels = [self._humanize_missing_field(field) for field in item.get('missing_fields') or []]
+                if not labels:
+                    continue
+                lines.append(f'Строка {item["index"]}: {", ".join(labels)}.')
+        elif missing_fields:
+            labels = [self._humanize_missing_field(field) for field in missing_fields]
             lines.append(f'Не хватает: {", ".join(labels)}.')
         for field_name, option_list in options.items():
             if not option_list:

@@ -1071,6 +1071,7 @@ class AiPendingConfirmation(models.Model):
     normalized_payload = models.JSONField(default=dict)
     missing_fields = models.JSONField(default=list)
     options_payload = models.JSONField(default=dict)
+    context_payload = models.JSONField(default=dict)
     confirmation_history = models.JSONField(default=list)
     prompt_text = models.CharField(max_length=255, blank=True, default='')
     is_active = models.BooleanField(default=True)

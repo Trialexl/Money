@@ -643,6 +643,11 @@ class AiAssistantOptionSerializer(serializers.Serializer):
     label = serializers.CharField()
 
 
+class AiAssistantMissingFieldByItemSerializer(serializers.Serializer):
+    index = serializers.IntegerField()
+    missing_fields = serializers.ListField(child=serializers.CharField())
+
+
 class TelegramLinkTokenResponseSerializer(serializers.Serializer):
     code = serializers.CharField()
     expires_at = serializers.DateTimeField()
@@ -655,6 +660,7 @@ class AiAssistantResponseSerializer(serializers.Serializer):
     confidence = serializers.FloatField()
     reply_text = serializers.CharField()
     missing_fields = serializers.ListField(child=serializers.CharField(), required=False)
+    missing_fields_by_item = AiAssistantMissingFieldByItemSerializer(many=True, required=False)
     created_object = AiAssistantCreatedObjectSerializer(required=False)
     created_objects = AiAssistantCreatedObjectSerializer(many=True, required=False)
     preview = serializers.DictField(required=False)

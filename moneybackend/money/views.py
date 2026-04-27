@@ -1,4 +1,5 @@
 from calendar import monthrange
+import base64
 from datetime import timedelta
 from decimal import Decimal
 import hashlib
@@ -1817,6 +1818,22 @@ class AiAssistantViewSet(viewsets.ViewSet):
     def _build_response_payload(self, result):
         return self._serialize_ai_result_for_storage(result)
 
+    def _build_pending_context(self, *, result, input_text='', image_bytes=None, image_mime_type=None):
+        parsed = result.get('parsed') or {}
+        if not (
+            isinstance(parsed, dict)
+            and parsed.get('batch')
+            and parsed.get('image_based')
+            and image_bytes
+        ):
+            return {}
+
+        return {
+            'source_text': input_text or '',
+            'image_mime_type': image_mime_type or 'image/jpeg',
+            'image_base64': base64.b64encode(image_bytes).decode('ascii'),
+        }
+
     def _load_duplicate_result(self, processed_input):
         return self._load_processed_result(processed_input, annotate_duplicate=True)
 
@@ -2336,7 +2353,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
         )
         return normalized_text.startswith(command_prefixes)
 
-    def _upsert_pending_confirmation(self, *, binding, result):
+    def _upsert_pending_confirmation(self, *, binding, result, input_context=None):
         if result.get('status') != 'needs_confirmation':
             return
 
@@ -2358,6 +2375,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             normalized_payload=self._serialize_result_parsed_payload(result['parsed']),
             missing_fields=missing_fields,
             options_payload=result.get('options') or {},
+            context_payload=input_context or {},
             prompt_text=(result.get('reply_text', '') or '')[:255],
         )
 
@@ -2666,6 +2684,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 dry_run=True,
                 options_payload=pending.options_payload,
                 confirmation_history=pending.confirmation_history,
+                pending_context=pending.context_payload,
                 source='telegram',
             )
             pending.confirmation_history = list(pending.confirmation_history) + [{'answer_text': effective_text}]
@@ -2820,7 +2839,16 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 normalized=result['parsed'],
                 provider_name=result['provider'],
             )
-        self._upsert_pending_confirmation(binding=binding, result=result)
+        self._upsert_pending_confirmation(
+            binding=binding,
+            result=result,
+            input_context=self._build_pending_context(
+                result=result,
+                input_text=effective_text,
+                image_bytes=image_bytes,
+                image_mime_type=image_mime_type,
+            ),
+        )
         self._store_processed_input(
             source='telegram',
             fingerprint=fingerprint,
