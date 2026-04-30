@@ -1,8 +1,12 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from drf_spectacular.utils import extend_schema_field
 from rest_framework.authentication import TokenAuthentication
 from rest_framework import serializers
-from . import models 
+from . import models
+from .onec_context import is_onec_sync_request
+from .sync import get_outbox_payload
  
 
 def _build_validation_candidate(serializer, attrs):
@@ -36,6 +40,47 @@ def _raise_expenditure_distribution_error(amount, include_in_budget, graphic_amo
     )
     if error:
         raise serializers.ValidationError(error)
+
+
+class OneCSyncDateTimeField(serializers.DateTimeField):
+    """Для 1С сохраняем локальную календарную дату/время как есть, без timezone-сдвига."""
+
+    def _is_onec_sync(self):
+        root = getattr(self, 'root', None)
+        context = getattr(root, 'context', {}) if root is not None else {}
+        request = context.get('request')
+        return bool(request and is_onec_sync_request(request))
+
+    def to_internal_value(self, value):
+        if not self._is_onec_sync():
+            return super().to_internal_value(value)
+
+        if isinstance(value, str):
+            parsed = parse_datetime(value)
+        else:
+            parsed = super().to_internal_value(value)
+
+        if parsed is None:
+            parsed = super().to_internal_value(value)
+
+        if parsed is None:
+            return parsed
+
+        if timezone.is_aware(parsed):
+            parsed = parsed.replace(tzinfo=None)
+
+        if timezone.is_naive(parsed):
+            return timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    def to_representation(self, value):
+        if value is None or not self._is_onec_sync():
+            return super().to_representation(value)
+
+        rendered = value
+        if timezone.is_aware(rendered):
+            rendered = timezone.make_naive(rendered, timezone.get_current_timezone())
+        return rendered.isoformat(timespec='seconds')
 
 
 class GraphicContractModelSerializer(serializers.ModelSerializer):
@@ -105,6 +150,7 @@ class ReceiptSerializer(BackendManagedIdentityMixin, serializers.ModelSerializer
     sync_writable_fields = ('id', 'number')
     id = serializers.UUIDField(read_only=True)
     number = serializers.CharField(read_only=True)  # Автогенерация
+    date = OneCSyncDateTimeField(required=False)
     
     class Meta:
         model = models.Receipt
@@ -119,6 +165,7 @@ class ExpenditureSerializer(BackendManagedIdentityMixin, GraphicContractModelSer
     sync_writable_fields = ('id', 'number')
     id = serializers.UUIDField(read_only=True)
     number = serializers.CharField(read_only=True)  # Автогенерация
+    date = OneCSyncDateTimeField(required=False)
     
     class Meta:
         model = models.Expenditure
@@ -137,6 +184,8 @@ class ExpenditureSerializer(BackendManagedIdentityMixin, GraphicContractModelSer
 
 
 class ExpenditureGraphicSerializer(serializers.ModelSerializer):
+    date_start = OneCSyncDateTimeField(required=False)
+
     class Meta:
         model = models.ExpenditureGraphic
         fields = '__all__'
@@ -170,7 +219,7 @@ class ExpenditureGraphicSerializer(serializers.ModelSerializer):
 
 
 class GraphicReplaceRowSerializer(serializers.Serializer):
-    date_start = serializers.DateTimeField()
+    date_start = OneCSyncDateTimeField()
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
@@ -181,7 +230,7 @@ class GraphicReplaceSerializer(serializers.Serializer):
 class PlanningGraphicGenerationSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     amount_month = serializers.IntegerField(required=False, min_value=1)
-    date_start = serializers.DateTimeField(required=False)
+    date_start = OneCSyncDateTimeField(required=False)
     monthly_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     without_rounding = serializers.BooleanField(required=False, default=False)
 
@@ -449,6 +498,7 @@ class TransferSerializer(BackendManagedIdentityMixin, GraphicContractModelSerial
     sync_writable_fields = ('id', 'number')
     id = serializers.UUIDField(read_only=True)
     number = serializers.CharField(read_only=True)  # Автогенерация
+    date = OneCSyncDateTimeField(required=False)
     
     class Meta:
         model = models.Transfer
@@ -461,6 +511,8 @@ class TransferSerializer(BackendManagedIdentityMixin, GraphicContractModelSerial
 
 
 class TransferGraphicSerializer(serializers.ModelSerializer):
+    date_start = OneCSyncDateTimeField(required=False)
+
     class Meta:
         model = models.TransferGraphic
         fields = '__all__'
@@ -469,6 +521,8 @@ class BudgetSerializer(BackendManagedIdentityMixin, GraphicContractModelSerializ
     sync_writable_fields = ('id', 'number')
     id = serializers.UUIDField(read_only=True)
     number = serializers.CharField(read_only=True)  # Автогенерация
+    date = OneCSyncDateTimeField(required=False)
+    date_start = OneCSyncDateTimeField(required=False)
     
     class Meta:
         model = models.Budget
@@ -481,7 +535,8 @@ class BudgetSerializer(BackendManagedIdentityMixin, GraphicContractModelSerializ
 
 
 class BudgetGraphicSerializer(serializers.ModelSerializer):
-    
+    date_start = OneCSyncDateTimeField(required=False)
+
     class Meta:
         model = models.BudgetGraphic
         fields = '__all__'
@@ -490,6 +545,8 @@ class AutoPaymentSerializer(BackendManagedIdentityMixin, GraphicContractModelSer
     sync_writable_fields = ('id', 'number')
     id = serializers.UUIDField(read_only=True)
     number = serializers.CharField(read_only=True)  # Автогенерация
+    date = OneCSyncDateTimeField(required=False)
+    date_start = OneCSyncDateTimeField(required=False)
     
     class Meta:
         model = models.AutoPayment
@@ -510,7 +567,8 @@ class AutoPaymentSerializer(BackendManagedIdentityMixin, GraphicContractModelSer
 
 
 class AutoPaymentGraphicSerializer(serializers.ModelSerializer):
-    
+    date_start = OneCSyncDateTimeField(required=False)
+
     class Meta:
         model = models.AutoPaymentGraphic
         fields = '__all__'
@@ -567,6 +625,8 @@ class OneCSyncOutboxQuerySerializer(serializers.Serializer):
 
 
 class OneCSyncOutboxSerializer(serializers.ModelSerializer):
+    payload = serializers.SerializerMethodField()
+
     class Meta:
         model = models.OneCSyncOutbox
         fields = [
@@ -581,6 +641,11 @@ class OneCSyncOutboxSerializer(serializers.ModelSerializer):
             'changed_at',
         ]
         read_only_fields = fields
+
+    @extend_schema_field(serializers.JSONField())
+    def get_payload(self, obj):
+        payload_map = self.context.get('payload_map', {})
+        return payload_map.get(obj.id, get_outbox_payload(obj))
 
 
 class OneCSyncOutboxListResponseSerializer(serializers.Serializer):

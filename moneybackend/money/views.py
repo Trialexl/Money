@@ -31,6 +31,7 @@ from .models import *
 from .onec_context import is_onec_sync_request
 from .serializers import *
 from .permissions import IsAdminOrReadOnly
+from .sync import get_outbox_payload_map
 
 
 PERCENT_QUANTIZER = Decimal('0.01')
@@ -1282,6 +1283,7 @@ class DocumentGraphicReplacementMixin:
     graphic_serializer_class = None
 
     def get_graphic_replace_serializer(self, *args, **kwargs):
+        kwargs.setdefault('context', self.get_serializer_context())
         return GraphicReplaceSerializer(*args, **kwargs)
 
     def validate_graphic_replacement(self, document, rows):
@@ -1310,7 +1312,11 @@ class DocumentGraphicReplacementMixin:
             sync_document_registers(document)
 
         return Response(
-            self.graphic_serializer_class(document.items.order_by('date_start'), many=True).data,
+            self.graphic_serializer_class(
+                document.items.order_by('date_start'),
+                many=True,
+                context=self.get_serializer_context(),
+            ).data,
             status=status.HTTP_200_OK,
         )
 
@@ -1468,6 +1474,7 @@ class PlanningGraphicGenerationMixin:
     graphic_serializer_class = None
 
     def get_graphic_generation_serializer(self, *args, **kwargs):
+        kwargs.setdefault('context', self.get_serializer_context())
         return PlanningGraphicGenerationSerializer(*args, **kwargs)
 
     @action(detail=True, methods=['post'], url_path='generate-graphics')
@@ -1514,7 +1521,11 @@ class PlanningGraphicGenerationMixin:
         return Response(
             {
                 'document': self.get_serializer(document).data,
-                'rows': self.graphic_serializer_class(document.items.order_by('date_start'), many=True).data,
+                'rows': self.graphic_serializer_class(
+                    document.items.order_by('date_start'),
+                    many=True,
+                    context=self.get_serializer_context(),
+                ).data,
             },
             status=status.HTTP_200_OK,
         )
@@ -1723,7 +1734,12 @@ class OneCSyncOutboxViewSet(viewsets.ViewSet):
     def list(self, request):
         validated_query = self._validated_query(request)
         queryset = self._build_queryset(validated_query)
-        serializer = OneCSyncOutboxSerializer(queryset[:validated_query['limit']], many=True)
+        queue_items = list(queryset[:validated_query['limit']])
+        serializer = OneCSyncOutboxSerializer(
+            queue_items,
+            many=True,
+            context={'payload_map': get_outbox_payload_map(queue_items)},
+        )
         return Response({
             'count': queryset.count(),
             'results': serializer.data,

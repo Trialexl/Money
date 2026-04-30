@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models.signals import post_save, pre_delete
@@ -227,6 +229,15 @@ SYNC_MODEL_CONFIG = {
 }
 
 
+SYNC_ENTITY_CONFIG = {
+    config['entity_type']: {
+        **config,
+        'model': model_class,
+    }
+    for model_class, config in SYNC_MODEL_CONFIG.items()
+}
+
+
 GRAPHIC_PARENT_MODELS = {
     ExpenditureGraphic: Expenditure,
     TransferGraphic: Transfer,
@@ -244,6 +255,61 @@ def _delete_payload(instance):
     return payload
 
 
+def _payload_queryset(config):
+    queryset = config['model'].objects.all()
+    if config.get('graphics_route'):
+        queryset = queryset.prefetch_related('items')
+    return queryset
+
+
+def get_outbox_payload(queue_item):
+    if queue_item.operation == OneCSyncOutbox.DELETE:
+        return queue_item.payload
+
+    config = SYNC_ENTITY_CONFIG.get(queue_item.entity_type)
+    if config is None:
+        return queue_item.payload
+
+    try:
+        instance = _payload_queryset(config).get(pk=queue_item.object_id)
+    except config['model'].DoesNotExist:
+        return queue_item.payload
+    return config['payload_builder'](instance)
+
+
+def get_outbox_payload_map(queue_items):
+    payload_map = {}
+    grouped_items = defaultdict(list)
+
+    for queue_item in queue_items:
+        if queue_item.operation == OneCSyncOutbox.DELETE:
+            payload_map[queue_item.id] = queue_item.payload
+            continue
+
+        config = SYNC_ENTITY_CONFIG.get(queue_item.entity_type)
+        if config is None:
+            payload_map[queue_item.id] = queue_item.payload
+            continue
+        grouped_items[queue_item.entity_type].append(queue_item)
+
+    for entity_type, items in grouped_items.items():
+        config = SYNC_ENTITY_CONFIG[entity_type]
+        instance_map = {
+            instance.pk: instance
+            for instance in _payload_queryset(config).filter(
+                pk__in=[queue_item.object_id for queue_item in items]
+            )
+        }
+        for queue_item in items:
+            instance = instance_map.get(queue_item.object_id)
+            if instance is None:
+                payload_map[queue_item.id] = queue_item.payload
+                continue
+            payload_map[queue_item.id] = config['payload_builder'](instance)
+
+    return payload_map
+
+
 def queue_instance_sync(instance, operation=OneCSyncOutbox.UPSERT):
     from django.utils import timezone
 
@@ -253,8 +319,7 @@ def queue_instance_sync(instance, operation=OneCSyncOutbox.UPSERT):
     if is_outbox_sync_suppressed():
         return
 
-    payload_builder = config['payload_builder']
-    payload = payload_builder(instance) if operation == OneCSyncOutbox.UPSERT else _delete_payload(instance)
+    payload = {} if operation == OneCSyncOutbox.UPSERT else _delete_payload(instance)
 
     OneCSyncOutbox.objects.update_or_create(
         entity_type=config['entity_type'],

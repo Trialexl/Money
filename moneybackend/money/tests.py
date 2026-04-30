@@ -402,6 +402,43 @@ class OneCSyncApiTests(TestCase):
             ],
         )
 
+    def test_onec_sync_replace_graphics_ignores_timezone_offset_for_periods(self):
+        expenditure = Expenditure.objects.create(
+            amount=Decimal('1000.00'),
+            wallet=self.wallet,
+            cash_flow_item=self.item,
+            include_in_budget=True,
+            date=self.make_dt(5),
+        )
+
+        replace_response = self.client.put(
+            f'/api/v1/expenditures/{expenditure.id}/replace-graphics/',
+            {
+                'rows': [
+                    {
+                        'date_start': '2024-05-01T00:00:00+03:00',
+                        'amount': '1000.00',
+                    },
+                ]
+            },
+            format='json',
+        )
+
+        self.assertEqual(replace_response.status_code, 200)
+        expenditure.refresh_from_db()
+        self.assertEqual(expenditure.items.count(), 1)
+        graphic = expenditure.items.get()
+        self.assertEqual(graphic.date_start, timezone.make_aware(datetime(2024, 5, 1, 0, 0, 0)))
+        self.assertEqual(replace_response.data[0]['date_start'], '2024-05-01T00:00:00')
+        self.assertEqual(
+            list(
+                BudgetExpense.objects.filter(document_id=expenditure.id)
+                .order_by('period')
+                .values_list('period', flat=True)
+            ),
+            [timezone.make_aware(datetime(2024, 5, 1, 0, 0, 0))],
+        )
+
     def test_onec_sync_can_clear_budget_graphics_via_empty_replace_payload(self):
         budget = Budget.objects.create(
             amount=Decimal('900.00'),
@@ -514,7 +551,7 @@ class OneCOutboundSyncTests(TransactionTestCase):
         queue_item = OneCSyncOutbox.objects.get(entity_type='wallet', object_id=wallet.id)
         self.assertEqual(queue_item.route, 'wallets')
         self.assertEqual(queue_item.operation, OneCSyncOutbox.UPSERT)
-        self.assertEqual(queue_item.payload['name'], 'Кошелек A')
+        self.assertEqual(queue_item.payload, {})
 
         first_changed_at = queue_item.changed_at
         wallet.name = 'Кошелек B'
@@ -522,8 +559,15 @@ class OneCOutboundSyncTests(TransactionTestCase):
 
         queue_item.refresh_from_db()
         self.assertEqual(OneCSyncOutbox.objects.filter(entity_type='wallet', object_id=wallet.id).count(), 1)
-        self.assertEqual(queue_item.payload['name'], 'Кошелек B')
+        self.assertEqual(queue_item.payload, {})
         self.assertGreaterEqual(queue_item.changed_at, first_changed_at)
+
+        queue_item.payload = {'name': 'Устаревшее имя'}
+        queue_item.save(update_fields=['payload'])
+
+        response = self.client.get('/api/v1/onec-sync/outbox/', {'entity_type': 'wallet'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['results'][0]['payload']['name'], 'Кошелек B')
 
     def test_graphic_change_queues_parent_document_with_nested_graphics(self):
         wallet = Wallet.objects.create(name='Основной кошелек')
@@ -547,8 +591,13 @@ class OneCOutboundSyncTests(TransactionTestCase):
         self.assertEqual(queue_item.route, 'expenditures')
         self.assertEqual(queue_item.clear_type, 'ExpenditureGraphics')
         self.assertEqual(queue_item.graphics_route, 'expenditure-graphics')
+        self.assertEqual(queue_item.payload, {})
+
+        response = self.client.get('/api/v1/onec-sync/outbox/', {'entity_type': 'expenditure'})
+        self.assertEqual(response.status_code, 200)
+        payload = response.data['results'][0]['payload']
         self.assertEqual(
-            queue_item.payload['graphics'],
+            payload['graphics'],
             [
                 {
                     'date_start': self.make_dt(10).isoformat(),
@@ -556,7 +605,7 @@ class OneCOutboundSyncTests(TransactionTestCase):
                 }
             ],
         )
-        self.assertTrue(queue_item.payload['posted'])
+        self.assertTrue(payload['posted'])
 
     def test_document_outbox_payload_reflects_posted_flag(self):
         receipt = Receipt.objects.create(
@@ -568,7 +617,11 @@ class OneCOutboundSyncTests(TransactionTestCase):
         )
 
         queue_item = OneCSyncOutbox.objects.get(entity_type='receipt', object_id=receipt.id)
-        self.assertFalse(queue_item.payload['posted'])
+        self.assertEqual(queue_item.payload, {})
+
+        response = self.client.get('/api/v1/onec-sync/outbox/', {'entity_type': 'receipt'})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['results'][0]['payload']['posted'])
 
     def test_outbox_ack_deletes_records_from_queue(self):
         project = Project.objects.create(name='Проект outbox')
