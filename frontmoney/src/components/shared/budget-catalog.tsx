@@ -143,7 +143,7 @@ export default function BudgetCatalog() {
 
   const incomeTotal = filteredBudgets.filter((budget) => budget.type === "income").reduce((sum, budget) => sum + budget.amount, 0)
   const expenseTotal = filteredBudgets.filter((budget) => budget.type === "expense").reduce((sum, budget) => sum + budget.amount, 0)
-  const monthlyTotal = filteredBudgets.reduce((sum, budget) => sum + (budget.amount_month || 0), 0)
+  const periodCountTotal = filteredBudgets.reduce((sum, budget) => sum + (budget.amount_month || 0), 0)
   const monthStart = getMonthStart()
   const recentCount = filteredBudgets.filter((budget) => new Date(budget.date) >= monthStart).length
   const hasActiveFilters =
@@ -182,7 +182,7 @@ export default function BudgetCatalog() {
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <StatCard label="План по доходам" value={formatCurrency(incomeTotal)} hint="Доходные бюджеты" icon={TrendingUp} tone={incomeTotal > 0 ? "positive" : "neutral"} variant="compact" />
         <StatCard label="План по расходам" value={formatCurrency(expenseTotal)} hint="Расходные бюджеты" icon={TrendingDown} tone={expenseTotal > 0 ? "danger" : "neutral"} variant="compact" />
-        <StatCard label="Сумма в месяц" value={formatCurrency(monthlyTotal)} hint="Текущая выборка" icon={Landmark} variant="compact" />
+        <StatCard label="Периодов в графике" value={String(periodCountTotal)} hint="Текущая выборка" icon={Landmark} variant="compact" />
         <StatCard label="Новых в этом месяце" value={String(recentCount)} hint="Текущий месяц" icon={PiggyBank} variant="compact" />
       </div>
 
@@ -398,7 +398,7 @@ export default function BudgetCatalog() {
 
                     <div className="mt-3 space-y-1 text-sm text-muted-foreground lg:mt-0">
                       <div>{budget.date_start ? formatDate(budget.date_start) : "Без периода"}</div>
-                      {budget.amount_month ? <div>В месяц {formatCurrency(budget.amount_month)}</div> : null}
+                      {budget.amount_month ? <div>{budget.amount_month} мес. в графике</div> : null}
                     </div>
 
                     <div className="mt-3 text-sm text-muted-foreground lg:mt-0">{formatDate(budget.date)}</div>

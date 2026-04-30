@@ -24,6 +24,13 @@ const basePathMap: Record<PlanningDocumentKind, string> = {
   "auto-payment": "/auto-payment-graphics/",
 }
 
+const documentPathMap: Record<PlanningDocumentKind, string> = {
+  expenditure: "/expenditures",
+  transfer: "/transfers",
+  budget: "/budgets",
+  "auto-payment": "/auto-payments",
+}
+
 const generatePathMap: Partial<Record<PlanningDocumentKind, string>> = {
   budget: "/budgets",
   "auto-payment": "/auto-payments",
@@ -79,21 +86,16 @@ export const PlanningService = {
   },
 
   replaceGraphicsRows: async (kind: PlanningDocumentKind, documentId: string, rows: PlanningGraphicDraft[]) => {
-    const currentRows = await PlanningService.getGraphics(kind, documentId)
-
-    await Promise.all(currentRows.map((row) => PlanningService.deleteGraphic(kind, row.id)))
-
     const normalizedRows = [...rows]
       .filter((row) => row.date_start && row.amount > 0)
       .sort((left, right) => left.date_start.localeCompare(right.date_start))
 
-    for (const row of normalizedRows) {
-      await PlanningService.createGraphic(kind, {
-        document: documentId,
-        date_start: row.date_start,
-        amount: row.amount,
-      })
-    }
+    await api.put(`${documentPathMap[kind]}/${documentId}/replace-graphics/`, {
+      rows: normalizedRows.map((row) => ({
+        date_start: toApiDateTime(row.date_start),
+        amount: toApiAmount(row.amount),
+      })),
+    })
   },
 
   buildDistributedRows: ({
@@ -126,6 +128,35 @@ export const PlanningService = {
         id: `draft-${index}-${date.getTime()}`,
         date_start: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
         amount: rowCents / 100,
+      }
+    })
+  },
+
+  buildMonthlyRows: ({
+    monthlyAmount,
+    startDate,
+    monthCount,
+  }: {
+    monthlyAmount: number
+    startDate: string
+    monthCount: number
+  }) => {
+    if (!startDate || Number.isNaN(monthlyAmount) || monthlyAmount <= 0 || !Number.isFinite(monthCount) || monthCount <= 0) {
+      return [] as PlanningGraphicDraft[]
+    }
+
+    const start = new Date(`${startDate}T12:00:00`)
+    if (Number.isNaN(start.getTime())) {
+      return [] as PlanningGraphicDraft[]
+    }
+
+    return Array.from({ length: monthCount }, (_, index) => {
+      const date = addMonths(start, index)
+
+      return {
+        id: `draft-monthly-${index}-${date.getTime()}`,
+        date_start: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
+        amount: Math.round(monthlyAmount * 100) / 100,
       }
     })
   },

@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CalendarRange, Loader2, Plus, Save, Sparkles, Trash2 } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { CalendarRange, Plus, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,6 +18,7 @@ interface PlanningGraphicsPanelProps {
   draftRows?: PlanningGraphicDraft[]
   draftStorageKey?: string
   onDraftRowsChange?: (rows: PlanningGraphicDraft[]) => void
+  onTotalAmountChange?: (amount: number) => void
   distributionSource?: {
     totalAmount?: number
     startDate?: string
@@ -47,24 +48,26 @@ export function PlanningGraphicsPanel({
   draftRows,
   draftStorageKey,
   onDraftRowsChange,
+  onTotalAmountChange,
   distributionSource,
 }: PlanningGraphicsPanelProps) {
-  const queryClient = useQueryClient()
   const [dateStart, setDateStart] = useState(formatDateForInput())
   const [amount, setAmount] = useState("")
   const [distributionStartDate, setDistributionStartDate] = useState(distributionSource?.startDate || formatDateForInput())
   const [distributionMonthCount, setDistributionMonthCount] = useState("1")
+  const [distributionMonthlyAmount, setDistributionMonthlyAmount] = useState("")
   const [rows, setRows] = useState<PlanningGraphicDraft[]>(draftRows ?? [])
+  const [rowsReady, setRowsReady] = useState(!documentId)
   const [validationError, setValidationError] = useState<string | null>(null)
-  const [saveFeedback, setSaveFeedback] = useState<string | null>(null)
 
   useEffect(() => {
     setDateStart(formatDateForInput())
     setAmount("")
     setDistributionStartDate(distributionSource?.startDate || formatDateForInput())
     setDistributionMonthCount("1")
+    setDistributionMonthlyAmount("")
+    setRowsReady(!documentId)
     setValidationError(null)
-    setSaveFeedback(null)
   }, [documentId, distributionSource?.startDate, kind])
 
   const graphicsQuery = useQuery({
@@ -83,53 +86,39 @@ export function PlanningGraphicsPanel({
             amount: row.amount,
           }))
         )
+        setRowsReady(true)
       }
       return
     }
 
     if (Array.isArray(draftRows)) {
       setRows(draftRows)
+      setRowsReady(true)
       return
     }
 
     if (draftStorageKey) {
       setRows(PlanningService.getDraftRows(draftStorageKey))
+      setRowsReady(true)
     }
   }, [documentId, draftRows, draftStorageKey, graphicsQuery.data])
 
   useEffect(() => {
-    if (documentId) {
+    if (!rowsReady) {
       return
     }
 
     onDraftRowsChange?.(rows)
-  }, [documentId, onDraftRowsChange, rows])
+  }, [onDraftRowsChange, rows, rowsReady])
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (documentId) {
-        await PlanningService.replaceGraphicsRows(kind, documentId, rows)
-        return
-      }
+  useEffect(() => {
+    if (!rowsReady || documentId || !draftStorageKey) {
+      return
+    }
 
-      if (!draftStorageKey) {
-        throw new Error("Не удалось сохранить черновик графика.")
-      }
+    PlanningService.saveDraftRows(draftStorageKey, rows)
+  }, [documentId, draftStorageKey, rows, rowsReady])
 
-      PlanningService.saveDraftRows(draftStorageKey, rows)
-    },
-    onSuccess: async () => {
-      if (documentId) {
-        await queryClient.invalidateQueries({ queryKey: ["planning-graphics", kind, documentId ?? "new"] })
-        setSaveFeedback("Расписание сохранено отдельно от документа.")
-        return
-      }
-
-      setSaveFeedback("Черновик расписания сохранен.")
-    },
-  })
-
-  const graphics = graphicsQuery.data ?? []
   const totalAmount = useMemo(
     () => rows.reduce((sum, row) => sum + row.amount, 0),
     [rows]
@@ -138,7 +127,6 @@ export function PlanningGraphicsPanel({
   const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setValidationError(null)
-    setSaveFeedback(null)
 
     const parsedAmount = Number.parseFloat(amount)
     if (Number.isNaN(parsedAmount) || parsedAmount <= 0 || !dateStart) {
@@ -156,63 +144,79 @@ export function PlanningGraphicsPanel({
 
   const handleDelete = (rowId: string) => {
     setRows((current) => current.filter((row) => row.id !== rowId))
-    setSaveFeedback(null)
+  }
+
+  const handleRowChange = (rowId: string, patch: Partial<Pick<PlanningGraphicDraft, "date_start" | "amount">>) => {
+    setRows((current) =>
+      current
+        .map((row) => (row.id === rowId ? { ...row, ...patch } : row))
+        .sort((left, right) => left.date_start.localeCompare(right.date_start))
+    )
   }
 
   const handleAutoFill = () => {
     setValidationError(null)
-    setSaveFeedback(null)
 
     const parsedMonths = Number.parseInt(distributionMonthCount, 10)
+    const parsedMonthlyAmount = Number.parseFloat(distributionMonthlyAmount)
     const totalFromDocument = distributionSource?.totalAmount ?? 0
-    const builtRows = PlanningService.buildDistributedRows({
-      totalAmount: totalFromDocument,
-      startDate: distributionStartDate,
-      monthCount: parsedMonths,
-    })
+    const builtRows =
+      !Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0
+        ? PlanningService.buildMonthlyRows({
+            monthlyAmount: parsedMonthlyAmount,
+            startDate: distributionStartDate,
+            monthCount: parsedMonths,
+          })
+        : PlanningService.buildDistributedRows({
+            totalAmount: totalFromDocument,
+            startDate: distributionStartDate,
+            monthCount: parsedMonths,
+          })
 
     if (builtRows.length === 0) {
-      setValidationError("Для автозаполнения укажи дату начала, число месяцев и общую сумму документа больше нуля.")
+      setValidationError("Укажи дату начала, число месяцев и сумму: ежемесячную или итоговую в документе.")
       return
     }
 
     setRows(builtRows)
+    if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0) {
+      onTotalAmountChange?.(Math.round(parsedMonthlyAmount * parsedMonths * 100) / 100)
+    }
   }
 
   const hasContract = Object.keys(graphicContract ?? {}).length > 0
-  const canAutoFill = Boolean(distributionSource?.totalAmount && distributionSource.totalAmount > 0)
-  const canSaveDraft = documentId ? rows.length >= 0 : Boolean(draftStorageKey)
+  const canAutoFill = Boolean(distributionSource?.totalAmount && distributionSource.totalAmount > 0) || Number.parseFloat(distributionMonthlyAmount) > 0
 
   return (
     <Card>
-      <CardHeader className="pb-4">
+      <CardHeader className="pb-3">
         <CardTitle>Расписание исполнения</CardTitle>
         <CardDescription>{contractDescription(kind)}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
+      <CardContent className="space-y-3">
+        <div className="grid gap-2 md:grid-cols-2">
+          <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2.5">
             <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Периодов</div>
             <div className="mt-1 text-xl font-semibold tracking-[-0.04em]">{rows.length}</div>
           </div>
-          <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
+          <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2.5">
             <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Сумма по расписанию</div>
             <div className="mt-1 text-xl font-semibold tracking-[-0.04em]">{formatCurrency(totalAmount)}</div>
           </div>
         </div>
 
         {hasContract ? (
-          <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
-            Изменения в расписании учитываются отдельно от шапки документа.
+          <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-sm text-muted-foreground">
+            Расписание сохраняется вместе с документом.
           </div>
         ) : null}
 
-        <div className="space-y-3 rounded-[20px] border border-border/70 bg-background/70 p-4">
+        <div className="space-y-3 rounded-xl border border-border/70 bg-background/70 p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Sparkles className="h-4 w-4 text-primary" />
             Автозаполнение графика
           </div>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_auto] md:items-end">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_130px_minmax(0,1fr)_auto] md:items-end">
             <div className="space-y-2">
               <Label htmlFor={`${kind}-distribution-date`}>Дата начала</Label>
               <Input
@@ -233,6 +237,18 @@ export function PlanningGraphicsPanel({
                 onChange={(event) => setDistributionMonthCount(event.target.value)}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor={`${kind}-distribution-monthly`}>Ежемесячная сумма</Label>
+              <Input
+                id={`${kind}-distribution-monthly`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={distributionMonthlyAmount}
+                onChange={(event) => setDistributionMonthlyAmount(event.target.value)}
+                placeholder="0.00"
+              />
+            </div>
             <Button type="button" variant="outline" onClick={handleAutoFill} disabled={!canAutoFill}>
               <Sparkles className="h-4 w-4" />
               Заполнить
@@ -240,13 +256,13 @@ export function PlanningGraphicsPanel({
           </div>
         </div>
 
-        <form onSubmit={handleCreate} className="space-y-3 rounded-[20px] border border-border/70 bg-background/70 p-4">
+        <form onSubmit={handleCreate} className="space-y-3 rounded-xl border border-border/70 bg-background/70 p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <CalendarRange className="h-4 w-4 text-primary" />
             Добавить период
           </div>
           {validationError ? (
-            <div className="rounded-[18px] border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {validationError}
             </div>
           ) : null}
@@ -278,46 +294,55 @@ export function PlanningGraphicsPanel({
               <Plus className="h-4 w-4" />
               Добавить период
             </Button>
-            <Button type="button" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !canSaveDraft}>
-              {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Сохранить расписание
-            </Button>
           </div>
-          {saveFeedback ? <div className="text-xs leading-5 text-emerald-600 dark:text-emerald-300">{saveFeedback}</div> : null}
-          {!documentId ? (
-            <div className="text-xs text-muted-foreground">
-              Можно сохранить черновик отдельно.
-            </div>
-          ) : null}
         </form>
 
         {graphicsQuery.isLoading ? (
-          <div className="rounded-[24px] border border-border/70 bg-background/70 px-4 py-12 text-center text-sm text-muted-foreground">
+          <div className="rounded-xl border border-border/70 bg-background/70 px-4 py-8 text-center text-sm text-muted-foreground">
             Загружаем расписание...
           </div>
         ) : graphicsQuery.isError ? (
-          <div className="rounded-[24px] border border-destructive/20 bg-destructive/10 px-4 py-12 text-center text-sm text-destructive">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-8 text-center text-sm text-destructive">
             Не удалось загрузить расписание. Проверь backend API и попробуй снова.
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[20px] border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-center text-sm text-muted-foreground">
             Для этого документа пока не задано ни одного периода.
           </div>
         ) : (
           <div className="space-y-2">
             {rows.map((graphic, index) => (
-              <div key={graphic.id} className="flex items-center justify-between gap-3 rounded-[18px] border border-border/70 bg-background/70 px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium text-foreground">{formatDate(graphic.date_start)}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">Период #{index + 1}</div>
+              <div key={graphic.id} className="grid gap-2 rounded-xl border border-border/70 bg-background/70 px-3 py-2 md:grid-cols-[90px_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+                <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">#{index + 1}</div>
+                <div className="space-y-1">
+                  <Label htmlFor={`${kind}-row-${graphic.id}-date`} className="text-xs">Дата</Label>
+                  <Input
+                    id={`${kind}-row-${graphic.id}-date`}
+                    type="date"
+                    value={graphic.date_start}
+                    onChange={(event) => handleRowChange(graphic.id, { date_start: event.target.value })}
+                  />
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-sm font-semibold">{formatCurrency(graphic.amount)}</div>
+                <div className="space-y-1">
+                  <Label htmlFor={`${kind}-row-${graphic.id}-amount`} className="text-xs">Сумма</Label>
+                  <Input
+                    id={`${kind}-row-${graphic.id}-amount`}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={Number.isFinite(graphic.amount) ? graphic.amount : ""}
+                    onChange={(event) => handleRowChange(graphic.id, { amount: Number.parseFloat(event.target.value) })}
+                  />
+                </div>
+                <div className="flex items-end gap-2 md:justify-end">
+                  <div className="hidden min-w-28 text-right text-sm font-semibold md:block">{formatCurrency(graphic.amount)}</div>
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => handleDelete(graphic.id)}
+                    aria-label={`Удалить период ${formatDate(graphic.date_start)}`}
+                    title="Удалить период"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

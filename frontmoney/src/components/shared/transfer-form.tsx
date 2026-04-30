@@ -39,7 +39,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   const [description, setDescription] = useState("")
   const [walletFromId, setWalletFromId] = useState<string | undefined>(undefined)
   const [walletToId, setWalletToId] = useState<string | undefined>(undefined)
-  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[]>([])
+  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[] | null>(isEdit ? null : [])
   const [validationError, setValidationError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -53,12 +53,12 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
 
   useEffect(() => {
     if (!planningDraftStorageKey) {
-      setPlanningDraftRows([])
+      setPlanningDraftRows(isEdit ? null : [])
       return
     }
 
     setPlanningDraftRows(PlanningService.getDraftRows(planningDraftStorageKey))
-  }, [planningDraftStorageKey])
+  }, [isEdit, planningDraftStorageKey])
 
   const walletsQuery = useActiveWalletsQuery()
   const baseWalletFromId = transfer?.wallet_from || defaultWalletFromId || ""
@@ -85,8 +85,10 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
       return TransferService.createTransfer(payload)
     },
     onSuccess: async (savedTransfer) => {
-      if (!isEdit && planningDraftRows.length > 0) {
-        await PlanningService.replaceGraphicsRows("transfer", savedTransfer.id, planningDraftRows)
+      const shouldReplacePlanningRows = isEdit ? planningDraftRows !== null : Boolean(planningDraftRows?.length)
+
+      if (shouldReplacePlanningRows) {
+        await PlanningService.replaceGraphicsRows("transfer", savedTransfer.id, planningDraftRows ?? [])
         if (planningDraftStorageKey) {
           PlanningService.clearDraftRows(planningDraftStorageKey)
         }
@@ -306,7 +308,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" disabled={transferMutation.isPending || walletsQuery.isLoading || walletsQuery.isError}>
                     <Save className="h-4 w-4" />
-                    {transferMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить изменения" : "Создать перевод"}
+                    {transferMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать перевод и выйти"}
                   </Button>
                   <Button asChild variant="outline" size="icon">
                     <Link href="/transfers" aria-label="Отмена" title="Отмена">
@@ -324,9 +326,10 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
         kind="transfer"
         documentId={isEdit ? transfer?.id : undefined}
         graphicContract={transfer?.graphic_contract}
-        draftRows={planningDraftRows}
+        draftRows={planningDraftRows ?? undefined}
         draftStorageKey={planningDraftStorageKey}
         onDraftRowsChange={setPlanningDraftRows}
+        onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
         distributionSource={{
           totalAmount: !Number.isNaN(parsedAmount) && parsedAmount > 0 ? parsedAmount : 0,
           startDate: date,

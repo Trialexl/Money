@@ -110,7 +110,7 @@ export default function FinancialOperationForm({
   const [walletId, setWalletId] = useState<string | undefined>(undefined)
   const [cashFlowItemId, setCashFlowItemId] = useState<string | undefined>(undefined)
   const [includeInBudget, setIncludeInBudget] = useState(false)
-  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[]>([])
+  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[] | null>(isEdit ? null : [])
   const [validationError, setValidationError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -125,12 +125,12 @@ export default function FinancialOperationForm({
 
   useEffect(() => {
     if (!planningDraftStorageKey) {
-      setPlanningDraftRows([])
+      setPlanningDraftRows(isEdit ? null : [])
       return
     }
 
     setPlanningDraftRows(PlanningService.getDraftRows(planningDraftStorageKey))
-  }, [planningDraftStorageKey])
+  }, [isEdit, planningDraftStorageKey])
 
   const referencesQuery = useOperationReferenceDataQuery()
   const sortedWallets = referencesQuery.wallets
@@ -312,8 +312,11 @@ export default function FinancialOperationForm({
       return ExpenditureService.createExpenditure(payload)
     },
     onSuccess: async (savedOperation) => {
-      if (!isEdit && mode === "expenditure" && planningDraftRows.length > 0) {
-        await PlanningService.replaceGraphicsRows("expenditure", savedOperation.id, planningDraftRows)
+      const shouldReplacePlanningRows =
+        mode === "expenditure" && savedOperation.id && (isEdit ? planningDraftRows !== null : Boolean(planningDraftRows?.length))
+
+      if (shouldReplacePlanningRows) {
+        await PlanningService.replaceGraphicsRows("expenditure", savedOperation.id, planningDraftRows ?? [])
         if (planningDraftStorageKey) {
           PlanningService.clearDraftRows(planningDraftStorageKey)
         }
@@ -520,8 +523,10 @@ export default function FinancialOperationForm({
                     {operationMutation.isPending
                       ? "Сохраняем..."
                       : isEdit
-                        ? config.editActionLabel
-                        : config.createActionLabel}
+                        ? "Сохранить и выйти"
+                        : mode === "receipt"
+                          ? "Создать приход и выйти"
+                          : "Создать расход и выйти"}
                   </Button>
                   <Button asChild variant="outline" size="icon">
                     <Link href={config.cancelHref} aria-label="Отмена" title="Отмена">
@@ -540,9 +545,10 @@ export default function FinancialOperationForm({
           kind="expenditure"
           documentId={isEdit ? operation?.id : undefined}
           graphicContract={operation?.graphic_contract}
-          draftRows={planningDraftRows}
+          draftRows={planningDraftRows ?? undefined}
           draftStorageKey={planningDraftStorageKey}
           onDraftRowsChange={setPlanningDraftRows}
+          onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
           distributionSource={{
             totalAmount: hasAmount ? numericAmount : 0,
             startDate: date,

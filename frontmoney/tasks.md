@@ -49,3 +49,11 @@
 - [x] Add duplicate actions to every document list; duplicated documents should open prefilled with today as the date
 - [x] Decouple planning graphics save from document save so the schedule can be saved independently
 - [x] Add automatic planning distribution: take document total, start date, and month count, then spread the amount across the period and prefill the graphics rows
+
+## Backlog: Document + Graphics UX Reset
+- [x] Rework every document form with graphics so the user edits one document, not a document plus a separate mini-workflow for schedule rows
+- [x] Replace the separate graphics save action with a single document-level save flow; `Save and exit` should also be available on every document form
+- [x] Persist graphics in one bulk document save request instead of saving rows one-by-one, so save latency does not grow with the row count
+- [x] Add a form-only `monthly amount` helper field: if it is filled, generate graphics from monthly amount × month count and derive the total automatically while still allowing manual total override
+- [x] Keep graphics attached to the document contractually and visually; the UI should not imply that schedule rows are a standalone object
+- [x] Compress the document + graphics layout so the screen is denser and faster to scan on notebook and desktop widths

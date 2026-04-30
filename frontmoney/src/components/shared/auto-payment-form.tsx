@@ -56,12 +56,12 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
   const [amount, setAmount] = useState("")
   const [dateStart, setDateStart] = useState(formatDateForInput())
   const [description, setDescription] = useState("")
-  const [amountMonth, setAmountMonth] = useState("30")
+  const [amountMonth, setAmountMonth] = useState("12")
   const [isTransfer, setIsTransfer] = useState(false)
   const [walletFromId, setWalletFromId] = useState<string | undefined>(undefined)
   const [walletToId, setWalletToId] = useState<string | undefined>(undefined)
   const [cashFlowItemId, setCashFlowItemId] = useState<string | undefined>(undefined)
-  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[]>([])
+  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[] | null>(isEdit ? null : [])
   const [validationError, setValidationError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
           : formatDateForInput()
     )
     setDescription(autoPayment?.description || "")
-    setAmountMonth(autoPayment?.amount_month != null ? String(autoPayment.amount_month) : "30")
+    setAmountMonth(autoPayment?.amount_month != null ? String(autoPayment.amount_month) : "12")
     setIsTransfer(autoPayment?.is_transfer ?? false)
     setWalletFromId(undefined)
     setWalletToId(undefined)
@@ -84,12 +84,12 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
 
   useEffect(() => {
     if (!planningDraftStorageKey) {
-      setPlanningDraftRows([])
+      setPlanningDraftRows(isEdit ? null : [])
       return
     }
 
     setPlanningDraftRows(PlanningService.getDraftRows(planningDraftStorageKey))
-  }, [planningDraftStorageKey])
+  }, [isEdit, planningDraftStorageKey])
 
   const referencesQuery = useOperationReferenceDataQuery()
   const baseWalletFromId = autoPayment?.wallet_from || defaultWalletFromId || ""
@@ -122,8 +122,10 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
       return AutoPaymentService.createAutoPayment(payload)
     },
     onSuccess: async (savedAutoPayment) => {
-      if (!isEdit && planningDraftRows.length > 0) {
-        await PlanningService.replaceGraphicsRows("auto-payment", savedAutoPayment.id, planningDraftRows)
+      const shouldReplacePlanningRows = isEdit ? planningDraftRows !== null : Boolean(planningDraftRows?.length)
+
+      if (shouldReplacePlanningRows) {
+        await PlanningService.replaceGraphicsRows("auto-payment", savedAutoPayment.id, planningDraftRows ?? [])
         if (planningDraftStorageKey) {
           PlanningService.clearDraftRows(planningDraftStorageKey)
         }
@@ -150,7 +152,7 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
     }
 
     if (Number.isNaN(parsedAmountMonth) || parsedAmountMonth <= 0) {
-      setValidationError("Интервал повторения должен быть положительным числом дней.")
+      setValidationError("Количество месяцев должно быть положительным числом.")
       return
     }
 
@@ -320,7 +322,7 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
                     </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="autopayment-period">Интервал повторения (дней)</Label>
+                    <Label htmlFor="autopayment-period">Месяцев в графике</Label>
                       <Input
                         id="autopayment-period"
                         type="number"
@@ -328,7 +330,7 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
                         step="1"
                         value={amountMonth}
                         onChange={(event) => setAmountMonth(event.target.value)}
-                        placeholder="30"
+                        placeholder="12"
                         required
                       />
                   </div>
@@ -435,7 +437,7 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" disabled={autoPaymentMutation.isPending || referencesQuery.isLoading || referencesQuery.isError}>
                     <Save className="h-4 w-4" />
-                    {autoPaymentMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить изменения" : "Создать автоплатеж"}
+                    {autoPaymentMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать автоплатеж и выйти"}
                   </Button>
                   <Button asChild variant="outline" size="icon">
                     <Link href="/auto-payments" aria-label="Отмена" title="Отмена">
@@ -453,9 +455,10 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
         kind="auto-payment"
         documentId={isEdit ? autoPayment?.id : undefined}
         graphicContract={autoPayment?.graphic_contract}
-        draftRows={planningDraftRows}
+        draftRows={planningDraftRows ?? undefined}
         draftStorageKey={planningDraftStorageKey}
         onDraftRowsChange={setPlanningDraftRows}
+        onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
         distributionSource={{
           totalAmount: hasAmount ? parsedAmount : 0,
           startDate: dateStart,

@@ -41,7 +41,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
   const [amountMonth, setAmountMonth] = useState("")
   const [cashFlowItemId, setCashFlowItemId] = useState<string | undefined>(undefined)
   const [description, setDescription] = useState("")
-  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[]>([])
+  const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[] | null>(isEdit ? null : [])
   const [validationError, setValidationError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -63,12 +63,12 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
 
   useEffect(() => {
     if (!planningDraftStorageKey) {
-      setPlanningDraftRows([])
+      setPlanningDraftRows(isEdit ? null : [])
       return
     }
 
     setPlanningDraftRows(PlanningService.getDraftRows(planningDraftStorageKey))
-  }, [planningDraftStorageKey])
+  }, [isEdit, planningDraftStorageKey])
 
   const itemsQuery = useActiveCashFlowItemsQuery()
   const baseCashFlowItemId = budget?.cash_flow_item || defaultCashFlowItemId || ""
@@ -77,7 +77,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
   const budgetMutation = useMutation({
     mutationFn: async () => {
       const parsedAmount = Number.parseFloat(amount)
-      const parsedAmountMonth = amountMonth ? Number.parseFloat(amountMonth) : undefined
+      const parsedAmountMonth = amountMonth ? Number.parseInt(amountMonth, 10) : undefined
       const payload: Partial<Budget> = {
         type,
         amount: parsedAmount,
@@ -95,8 +95,10 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
       return BudgetService.createBudget(payload)
     },
     onSuccess: async (savedBudget) => {
-      if (!isEdit && planningDraftRows.length > 0) {
-        await PlanningService.replaceGraphicsRows("budget", savedBudget.id, planningDraftRows)
+      const shouldReplacePlanningRows = isEdit ? planningDraftRows !== null : Boolean(planningDraftRows?.length)
+
+      if (shouldReplacePlanningRows) {
+        await PlanningService.replaceGraphicsRows("budget", savedBudget.id, planningDraftRows ?? [])
         if (planningDraftStorageKey) {
           PlanningService.clearDraftRows(planningDraftStorageKey)
         }
@@ -115,15 +117,15 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
     setValidationError(null)
 
     const parsedAmount = Number.parseFloat(amount)
-    const parsedAmountMonth = amountMonth ? Number.parseFloat(amountMonth) : null
+    const parsedAmountMonth = amountMonth ? Number.parseInt(amountMonth, 10) : null
 
     if (!effectiveCashFlowItemId || !date || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
       setValidationError("Укажи тип, дату, статью и сумму бюджета. Сумма должна быть больше нуля.")
       return
     }
 
-    if (parsedAmountMonth !== null && (Number.isNaN(parsedAmountMonth) || parsedAmountMonth < 0)) {
-      setValidationError("Сумма в месяц должна быть положительной или пустой.")
+    if (parsedAmountMonth !== null && (Number.isNaN(parsedAmountMonth) || parsedAmountMonth <= 0)) {
+      setValidationError("Количество месяцев должно быть положительным числом.")
       return
     }
 
@@ -154,9 +156,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
     ? itemOptions.find((item) => item.id === effectiveCashFlowItemId)?.name || "Загружаем статью"
     : "Выбери статью бюджета"
   const parsedAmount = Number.parseFloat(amount)
-  const parsedAmountMonth = amountMonth ? Number.parseFloat(amountMonth) : NaN
   const hasAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0
-  const hasAmountMonth = !Number.isNaN(parsedAmountMonth) && parsedAmountMonth >= 0
   const errorMessage =
     validationError ||
     (budgetMutation.error as any)?.response?.data?.detail ||
@@ -258,17 +258,16 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="budget-amount-month">Сумма в месяц</Label>
+                    <Label htmlFor="budget-amount-month">Месяцев в графике</Label>
                     <Input
                       id="budget-amount-month"
                       type="number"
-                      min="0"
-                      step="0.01"
+                      min="1"
+                      step="1"
                       value={amountMonth}
                       onChange={(event) => setAmountMonth(event.target.value)}
-                      placeholder="0.00"
+                      placeholder="12"
                     />
-                    <p className="text-xs leading-4 text-muted-foreground">Если оставить поле пустым, фронт отправит `0`, потому что backend-контракт ожидает integer.</p>
                   </div>
                 </div>
 
@@ -311,7 +310,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" disabled={budgetMutation.isPending || itemsQuery.isLoading || itemsQuery.isError}>
                     <Save className="h-4 w-4" />
-                    {budgetMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить изменения" : "Создать бюджет"}
+                    {budgetMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать бюджет и выйти"}
                   </Button>
                   <Button asChild variant="outline" size="icon">
                     <Link href="/budgets" aria-label="Отмена" title="Отмена">
@@ -329,9 +328,10 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
         kind="budget"
         documentId={isEdit ? budget?.id : undefined}
         graphicContract={budget?.graphic_contract}
-        draftRows={planningDraftRows}
+        draftRows={planningDraftRows ?? undefined}
         draftStorageKey={planningDraftStorageKey}
         onDraftRowsChange={setPlanningDraftRows}
+        onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
         distributionSource={{
           totalAmount: hasAmount ? parsedAmount : 0,
           startDate: dateStart || date,

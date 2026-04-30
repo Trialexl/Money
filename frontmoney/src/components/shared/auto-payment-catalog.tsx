@@ -470,7 +470,7 @@ export default function AutoPaymentCatalog() {
                     </div>
 
                     <div className="mt-3 text-sm text-muted-foreground lg:mt-0">
-                      {autoPayment.amount_month != null ? `Каждые ${autoPayment.amount_month} дн.` : "Не задан"}
+                      {autoPayment.amount_month != null ? `${autoPayment.amount_month} мес. в графике` : "Не задан"}
                     </div>
 
                     <div className="mt-3 space-y-1 text-sm text-muted-foreground lg:mt-0">
