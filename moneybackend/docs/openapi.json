@@ -137,13 +137,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     },
                     {}
                 ],
@@ -211,13 +211,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -276,13 +276,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -302,7 +302,7 @@
         "/api/v1/ai/telegram-webhook/": {
             "post": {
                 "operationId": "v1_ai_telegram_webhook_create",
-                "description": "Webhook для Telegram-бота. Принимает text, caption или photo из update и возвращает нормализованный reply.",
+                "description": "Webhook для Telegram-бота. Принимает text, caption, photo, voice или audio из update и возвращает нормализованный reply.",
                 "tags": [
                     "v1"
                 ],
@@ -330,13 +330,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     },
                     {}
                 ],
@@ -386,13 +386,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -513,13 +513,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -569,13 +569,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -615,13 +615,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -679,13 +679,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -742,13 +742,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -786,13 +786,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -823,13 +823,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -879,13 +879,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -926,13 +926,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -991,13 +991,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1055,13 +1055,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1100,13 +1100,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1160,13 +1160,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1227,13 +1227,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1262,13 +1262,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1312,13 +1312,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1347,13 +1347,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1382,13 +1382,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1438,13 +1438,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1484,13 +1484,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1548,13 +1548,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1611,13 +1611,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1655,13 +1655,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1683,13 +1683,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1733,13 +1733,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1768,13 +1768,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1818,13 +1818,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1874,13 +1874,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1921,13 +1921,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -1986,13 +1986,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2050,13 +2050,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2095,13 +2095,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2155,13 +2155,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2222,13 +2222,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2257,13 +2257,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2312,13 +2312,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2359,13 +2359,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2423,13 +2423,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2487,13 +2487,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2532,13 +2532,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2560,13 +2560,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2595,13 +2595,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2610,6 +2610,60 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/CashFlowItem"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/dashboard/budget-expense-breakdown/": {
+            "get": {
+                "operationId": "v1_dashboard_budget_expense_breakdown_retrieve",
+                "description": "Расшифровка перерасхода по статье бюджета для dashboard.",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "cash_flow_item",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "query",
+                        "name": "date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    }
+                ],
+                "tags": [
+                    "v1"
+                ],
+                "security": [
+                    {
+                        "basicAuth": []
+                    },
+                    {
+                        "jwtAuth": []
+                    },
+                    {
+                        "tokenAuth": []
+                    },
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DashboardBudgetExpenseBreakdownResponse"
                                 }
                             }
                         },
@@ -2648,13 +2702,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2663,6 +2717,69 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/DashboardOverviewResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/dashboard/recent-activity/": {
+            "get": {
+                "operationId": "v1_dashboard_recent_activity_retrieve",
+                "description": "Последние документы для dashboard с учетом даты среза.",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "hide_hidden_wallets",
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 50,
+                            "minimum": 1,
+                            "default": 20
+                        }
+                    }
+                ],
+                "tags": [
+                    "v1"
+                ],
+                "security": [
+                    {
+                        "basicAuth": []
+                    },
+                    {
+                        "jwtAuth": []
+                    },
+                    {
+                        "tokenAuth": []
+                    },
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DashboardRecentActivityResponse"
                                 }
                             }
                         },
@@ -2683,13 +2800,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2739,13 +2856,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2785,13 +2902,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2849,13 +2966,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2912,13 +3029,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2956,13 +3073,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -2979,9 +3096,85 @@
                 "parameters": [
                     {
                         "in": "query",
+                        "name": "amount_max",
+                        "schema": {
+                            "type": "string",
+                            "format": "decimal",
+                            "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "amount_min",
+                        "schema": {
+                            "type": "string",
+                            "format": "decimal",
+                            "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "cash_flow_item",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "date_from",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "date_to",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "query",
                         "name": "include_in_budget",
                         "schema": {
                             "type": "boolean"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page_size",
+                        "required": false,
+                        "in": "query",
+                        "description": "Number of results to return per page.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "search",
+                        "schema": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "wallet",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
                         }
                     }
                 ],
@@ -2993,13 +3186,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3007,10 +3200,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "type": "array",
-                                    "items": {
-                                        "$ref": "#/components/schemas/Expenditure"
-                                    }
+                                    "$ref": "#/components/schemas/PaginatedExpenditureList"
                                 }
                             }
                         },
@@ -3049,13 +3239,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3096,13 +3286,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3161,13 +3351,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3225,13 +3415,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3270,13 +3460,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3330,13 +3520,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3365,13 +3555,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3415,13 +3605,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3450,13 +3640,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3504,13 +3694,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3561,13 +3751,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3596,13 +3786,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3652,13 +3842,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3699,13 +3889,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3764,13 +3954,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3828,13 +4018,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3873,13 +4063,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3901,13 +4091,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -3956,13 +4146,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4003,13 +4193,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4067,13 +4257,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4131,13 +4321,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4176,13 +4366,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4196,6 +4386,84 @@
             "get": {
                 "operationId": "v1_receipts_list",
                 "description": "API для управления приходами денежных средств\n\nПри создании/обновлении автоматически обновляются регистры.",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "amount_max",
+                        "schema": {
+                            "type": "string",
+                            "format": "decimal",
+                            "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "amount_min",
+                        "schema": {
+                            "type": "string",
+                            "format": "decimal",
+                            "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "cash_flow_item",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "date_from",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "date_to",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page_size",
+                        "required": false,
+                        "in": "query",
+                        "description": "Number of results to return per page.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "search",
+                        "schema": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "wallet",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
                 "tags": [
                     "v1"
                 ],
@@ -4204,13 +4472,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4218,10 +4486,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "type": "array",
-                                    "items": {
-                                        "$ref": "#/components/schemas/Receipt"
-                                    }
+                                    "$ref": "#/components/schemas/PaginatedReceiptList"
                                 }
                             }
                         },
@@ -4260,13 +4525,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4307,13 +4572,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4372,13 +4637,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4436,13 +4701,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4481,13 +4746,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4551,13 +4816,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4628,13 +4893,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4705,13 +4970,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4740,13 +5005,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4796,13 +5061,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4842,13 +5107,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4906,13 +5171,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -4969,13 +5234,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5013,13 +5278,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5033,6 +5298,84 @@
             "get": {
                 "operationId": "v1_transfers_list",
                 "description": "API для управления переводами между кошельками\n\nПоддерживает валидацию кошельков и автообновление регистров.\nВ ответе `graphic_contract` явно фиксирует роль шапки и строк графика.",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "amount_max",
+                        "schema": {
+                            "type": "string",
+                            "format": "decimal",
+                            "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "amount_min",
+                        "schema": {
+                            "type": "string",
+                            "format": "decimal",
+                            "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "date_from",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "date_to",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page_size",
+                        "required": false,
+                        "in": "query",
+                        "description": "Number of results to return per page.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "search",
+                        "schema": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "wallet_from",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "wallet_to",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
                 "tags": [
                     "v1"
                 ],
@@ -5041,13 +5384,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5055,10 +5398,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "type": "array",
-                                    "items": {
-                                        "$ref": "#/components/schemas/Transfer"
-                                    }
+                                    "$ref": "#/components/schemas/PaginatedTransferList"
                                 }
                             }
                         },
@@ -5097,13 +5437,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5144,13 +5484,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5209,13 +5549,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5273,13 +5613,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5318,13 +5658,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5378,13 +5718,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5412,13 +5752,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5467,13 +5807,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5513,13 +5853,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5577,13 +5917,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5640,13 +5980,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5684,13 +6024,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5712,13 +6052,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5767,13 +6107,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5814,13 +6154,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5878,13 +6218,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5942,13 +6282,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -5987,13 +6327,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -6027,13 +6367,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -6042,6 +6382,53 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/WalletBalanceResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/wallets/{id}/summary/": {
+            "get": {
+                "operationId": "v1_wallets_summary_retrieve",
+                "description": "Компактная сводка по кошельку для быстрой загрузки detail page.",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "id",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        },
+                        "description": "A UUID string identifying this Кошелек.",
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "v1"
+                ],
+                "security": [
+                    {
+                        "basicAuth": []
+                    },
+                    {
+                        "jwtAuth": []
+                    },
+                    {
+                        "tokenAuth": []
+                    },
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WalletSummaryResponse"
                                 }
                             }
                         },
@@ -6062,13 +6449,13 @@
                         "basicAuth": []
                     },
                     {
-                        "cookieAuth": []
+                        "jwtAuth": []
                     },
                     {
                         "tokenAuth": []
                     },
                     {
-                        "jwtAuth": []
+                        "cookieAuth": []
                     }
                 ],
                 "responses": {
@@ -6150,11 +6537,29 @@
                     }
                 }
             },
+            "AiAssistantMissingFieldByItem": {
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer"
+                    },
+                    "missing_fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "index",
+                    "missing_fields"
+                ]
+            },
             "AiAssistantResponse": {
                 "type": "object",
                 "properties": {
                     "status": {
-                        "$ref": "#/components/schemas/AiAssistantStatusEnum"
+                        "$ref": "#/components/schemas/AiAssistantResponseStatusEnum"
                     },
                     "intent": {
                         "type": "string"
@@ -6175,8 +6580,20 @@
                             "type": "string"
                         }
                     },
+                    "missing_fields_by_item": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AiAssistantMissingFieldByItem"
+                        }
+                    },
                     "created_object": {
                         "$ref": "#/components/schemas/AiAssistantCreatedObject"
+                    },
+                    "created_objects": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AiAssistantCreatedObject"
+                        }
                     },
                     "preview": {
                         "type": "object",
@@ -6205,16 +6622,17 @@
                     "status"
                 ]
             },
-            "AiAssistantStatusEnum": {
+            "AiAssistantResponseStatusEnum": {
                 "enum": [
                     "created",
                     "preview",
                     "needs_confirmation",
                     "balance",
-                    "duplicate"
+                    "duplicate",
+                    "info"
                 ],
                 "type": "string",
-                "description": "* `created` - created\n* `preview` - preview\n* `needs_confirmation` - needs_confirmation\n* `balance` - balance\n* `duplicate` - duplicate"
+                "description": "* `created` - created\n* `preview` - preview\n* `needs_confirmation` - needs_confirmation\n* `balance` - balance\n* `duplicate` - duplicate\n* `info` - info"
             },
             "AiAssistantTelegramWebhookRequest": {
                 "type": "object",
@@ -6253,6 +6671,11 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "date_start": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Alias next_date не поддерживается."
+                    },
                     "deleted": {
                         "type": "boolean"
                     },
@@ -6266,7 +6689,7 @@
                         "type": "integer",
                         "maximum": 2147483647,
                         "minimum": -2147483648,
-                        "description": "Каноническое поле количества месяцев графика. Alias period_days не поддерживается."
+                        "description": "Alias period_days не поддерживается."
                     },
                     "amount": {
                         "type": "string",
@@ -6276,11 +6699,6 @@
                     "comment": {
                         "type": "string",
                         "maxLength": 200
-                    },
-                    "date_start": {
-                        "type": "string",
-                        "format": "date-time",
-                        "description": "Каноническое поле даты первого автоплатежа. Alias next_date не поддерживается."
                     },
                     "wallet_in": {
                         "type": "string",
@@ -6328,7 +6746,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document",
                     "id"
                 ]
@@ -6352,7 +6769,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document"
                 ]
             },
@@ -6362,6 +6778,11 @@
                     "date": {
                         "type": "string",
                         "format": "date-time"
+                    },
+                    "date_start": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Alias next_date не поддерживается."
                     },
                     "deleted": {
                         "type": "boolean"
@@ -6376,7 +6797,7 @@
                         "type": "integer",
                         "maximum": 2147483647,
                         "minimum": -2147483648,
-                        "description": "Каноническое поле количества месяцев графика. Alias period_days не поддерживается."
+                        "description": "Alias period_days не поддерживается."
                     },
                     "amount": {
                         "type": "string",
@@ -6386,11 +6807,6 @@
                     "comment": {
                         "type": "string",
                         "maxLength": 200
-                    },
-                    "date_start": {
-                        "type": "string",
-                        "format": "date-time",
-                        "description": "Каноническое поле даты первого автоплатежа. Alias next_date не поддерживается."
                     },
                     "wallet_in": {
                         "type": "string",
@@ -6433,15 +6849,15 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "date_start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
                     "deleted": {
                         "type": "boolean"
                     },
                     "posted": {
                         "type": "boolean"
-                    },
-                    "date_start": {
-                        "type": "string",
-                        "format": "date-time"
                     },
                     "amount": {
                         "type": "string",
@@ -6579,7 +6995,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document",
                     "id"
                 ]
@@ -6603,7 +7018,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document"
                 ]
             },
@@ -6852,15 +7266,15 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "date_start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
                     "deleted": {
                         "type": "boolean"
                     },
                     "posted": {
                         "type": "boolean"
-                    },
-                    "date_start": {
-                        "type": "string",
-                        "format": "date-time"
                     },
                     "amount": {
                         "type": "string",
@@ -7200,6 +7614,89 @@
                     "remaining_total"
                 ]
             },
+            "DashboardBudgetExpenseBreakdownDetail": {
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "document_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "document_type": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "entry_type": {
+                        "$ref": "#/components/schemas/EntryTypeEnum"
+                    },
+                    "amount": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    }
+                },
+                "required": [
+                    "amount",
+                    "entry_type",
+                    "period"
+                ]
+            },
+            "DashboardBudgetExpenseBreakdownResponse": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "cash_flow_item_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "cash_flow_item_name": {
+                        "type": "string"
+                    },
+                    "planned_total": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "actual_total": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "remaining": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "overrun": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "details": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DashboardBudgetExpenseBreakdownDetail"
+                        }
+                    }
+                },
+                "required": [
+                    "actual_total",
+                    "cash_flow_item_id",
+                    "cash_flow_item_name",
+                    "date",
+                    "details",
+                    "overrun",
+                    "planned_total",
+                    "remaining"
+                ]
+            },
             "DashboardBudgetExpenseItem": {
                 "type": "object",
                 "properties": {
@@ -7362,6 +7859,109 @@
                     "wallets"
                 ]
             },
+            "DashboardRecentActivityItem": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/DashboardRecentActivityItemKindEnum"
+                    },
+                    "date": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "amount": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "wallet": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "wallet_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "cash_flow_item": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "cash_flow_item_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "wallet_from": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "wallet_from_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "wallet_to": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "wallet_to_name": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "amount",
+                    "date",
+                    "id",
+                    "kind"
+                ]
+            },
+            "DashboardRecentActivityItemKindEnum": {
+                "enum": [
+                    "receipt",
+                    "expenditure",
+                    "transfer"
+                ],
+                "type": "string",
+                "description": "* `receipt` - receipt\n* `expenditure` - expenditure\n* `transfer` - transfer"
+            },
+            "DashboardRecentActivityResponse": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "hide_hidden_wallets": {
+                        "type": "boolean"
+                    },
+                    "limit": {
+                        "type": "integer"
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DashboardRecentActivityItem"
+                        }
+                    }
+                },
+                "required": [
+                    "date",
+                    "hide_hidden_wallets",
+                    "items",
+                    "limit"
+                ]
+            },
             "DashboardWallet": {
                 "type": "object",
                 "properties": {
@@ -7472,7 +8072,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document",
                     "id"
                 ]
@@ -7496,7 +8095,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document"
                 ]
             },
@@ -7770,6 +8368,87 @@
                 "type": "string",
                 "description": "* `upsert` - Upsert\n* `delete` - Delete"
             },
+            "PaginatedExpenditureList": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Expenditure"
+                        }
+                    }
+                }
+            },
+            "PaginatedReceiptList": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Receipt"
+                        }
+                    }
+                }
+            },
+            "PaginatedTransferList": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Transfer"
+                        }
+                    }
+                }
+            },
             "PatchedAutoPaymentGraphicRequest": {
                 "type": "object",
                 "properties": {
@@ -7795,6 +8474,11 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "date_start": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Alias next_date не поддерживается."
+                    },
                     "deleted": {
                         "type": "boolean"
                     },
@@ -7808,7 +8492,7 @@
                         "type": "integer",
                         "maximum": 2147483647,
                         "minimum": -2147483648,
-                        "description": "Каноническое поле количества месяцев графика. Alias period_days не поддерживается."
+                        "description": "Alias period_days не поддерживается."
                     },
                     "amount": {
                         "type": "string",
@@ -7818,11 +8502,6 @@
                     "comment": {
                         "type": "string",
                         "maxLength": 200
-                    },
-                    "date_start": {
-                        "type": "string",
-                        "format": "date-time",
-                        "description": "Каноническое поле даты первого автоплатежа. Alias next_date не поддерживается."
                     },
                     "wallet_in": {
                         "type": "string",
@@ -7866,15 +8545,15 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "date_start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
                     "deleted": {
                         "type": "boolean"
                     },
                     "posted": {
                         "type": "boolean"
-                    },
-                    "date_start": {
-                        "type": "string",
-                        "format": "date-time"
                     },
                     "amount": {
                         "type": "string",
@@ -8562,7 +9241,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document",
                     "id"
                 ]
@@ -8586,7 +9264,6 @@
                 },
                 "required": [
                     "amount",
-                    "date_start",
                     "document"
                 ]
             },
@@ -8748,6 +9425,86 @@
                         "type": "boolean"
                     }
                 }
+            },
+            "WalletSummaryOperation": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/WalletSummaryOperationKindEnum"
+                    },
+                    "date": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "amount": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "amount",
+                    "date",
+                    "id",
+                    "kind"
+                ]
+            },
+            "WalletSummaryOperationKindEnum": {
+                "enum": [
+                    "receipt",
+                    "expenditure"
+                ],
+                "type": "string",
+                "description": "* `receipt` - receipt\n* `expenditure` - expenditure"
+            },
+            "WalletSummaryResponse": {
+                "type": "object",
+                "properties": {
+                    "wallet_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "wallet_name": {
+                        "type": "string"
+                    },
+                    "balance": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "income_total": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "expense_total": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "recent_operations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/WalletSummaryOperation"
+                        }
+                    }
+                },
+                "required": [
+                    "balance",
+                    "expense_total",
+                    "income_total",
+                    "recent_operations",
+                    "wallet_id",
+                    "wallet_name"
+                ]
             }
         },
         "securitySchemes": {

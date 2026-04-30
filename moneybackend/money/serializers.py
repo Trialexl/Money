@@ -546,17 +546,20 @@ class AutoPaymentSerializer(BackendManagedIdentityMixin, GraphicContractModelSer
     id = serializers.UUIDField(read_only=True)
     number = serializers.CharField(read_only=True)  # Автогенерация
     date = OneCSyncDateTimeField(required=False)
-    date_start = OneCSyncDateTimeField(required=False)
+    date_start = OneCSyncDateTimeField(
+        required=False,
+        help_text='Alias next_date не поддерживается.',
+    )
     
     class Meta:
         model = models.AutoPayment
         fields = '__all__'
         extra_kwargs = {
             'date_start': {
-                'help_text': 'Каноническое поле даты первого автоплатежа. Alias next_date не поддерживается.',
+                'help_text': 'Alias next_date не поддерживается.',
             },
             'amount_month': {
-                'help_text': 'Каноническое поле количества месяцев графика. Alias period_days не поддерживается.',
+                'help_text': 'Alias period_days не поддерживается.',
             },
         }
 

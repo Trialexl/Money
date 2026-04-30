@@ -1885,7 +1885,6 @@ class AiAssistantViewSet(viewsets.ViewSet):
                         item['occurred_at'].replace(second=0, microsecond=0).isoformat()
                         if item.get('occurred_at') else ''
                     ),
-                    'comment': self._normalize_duplicate_text(item.get('comment', ''))[:120],
                 })
             if not items_payload:
                 return ''
@@ -1911,7 +1910,6 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 parsed['occurred_at'].replace(second=0, microsecond=0).isoformat()
                 if parsed.get('occurred_at') else ''
             ),
-            'comment': self._normalize_duplicate_text(parsed.get('comment', ''))[:120],
         }
         if not any(payload.values()):
             return ''
@@ -2604,7 +2602,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 telegram_update_id=update_id,
             ).order_by('-created_at').first()
             if existing_update:
-                duplicate_result = self._load_processed_result(existing_update, annotate_duplicate=False)
+                duplicate_result = self._load_duplicate_result(existing_update)
                 self._create_audit_log(
                     source='telegram',
                     result=duplicate_result,
