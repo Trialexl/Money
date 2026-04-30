@@ -58,6 +58,7 @@ export function PlanningGraphicsPanel({
   const [distributionMonthlyAmount, setDistributionMonthlyAmount] = useState("")
   const [rows, setRows] = useState<PlanningGraphicDraft[]>(draftRows ?? [])
   const [rowsReady, setRowsReady] = useState(!documentId)
+  const [rowsTouched, setRowsTouched] = useState(false)
   const [validationError, setValidationError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -66,6 +67,7 @@ export function PlanningGraphicsPanel({
     setDistributionStartDate(distributionSource?.startDate || formatDateForInput())
     setDistributionMonthCount("1")
     setDistributionMonthlyAmount("")
+    setRowsTouched(false)
     setRowsReady(!documentId)
     setValidationError(null)
   }, [documentId, distributionSource?.startDate, kind])
@@ -73,21 +75,27 @@ export function PlanningGraphicsPanel({
   const graphicsQuery = useQuery({
     queryKey: ["planning-graphics", kind, documentId ?? "new"],
     enabled: Boolean(documentId),
+    refetchOnWindowFocus: false,
     queryFn: () => PlanningService.getGraphics(kind, documentId!),
   })
 
   useEffect(() => {
+    if (!documentId || !graphicsQuery.data || rowsTouched) {
+      return
+    }
+
+    setRows(
+      graphicsQuery.data.map((row) => ({
+        id: `server-${row.id}`,
+        date_start: row.date_start,
+        amount: row.amount,
+      }))
+    )
+    setRowsReady(true)
+  }, [documentId, graphicsQuery.data, rowsTouched])
+
+  useEffect(() => {
     if (documentId) {
-      if (graphicsQuery.data) {
-        setRows(
-          graphicsQuery.data.map((row) => ({
-            id: `server-${row.id}`,
-            date_start: row.date_start,
-            amount: row.amount,
-          }))
-        )
-        setRowsReady(true)
-      }
       return
     }
 
@@ -101,15 +109,7 @@ export function PlanningGraphicsPanel({
       setRows(PlanningService.getDraftRows(draftStorageKey))
       setRowsReady(true)
     }
-  }, [documentId, draftRows, draftStorageKey, graphicsQuery.data])
-
-  useEffect(() => {
-    if (!rowsReady) {
-      return
-    }
-
-    onDraftRowsChange?.(rows)
-  }, [onDraftRowsChange, rows, rowsReady])
+  }, [documentId, draftRows, draftStorageKey])
 
   useEffect(() => {
     if (!rowsReady || documentId || !draftStorageKey) {
@@ -124,6 +124,12 @@ export function PlanningGraphicsPanel({
     [rows]
   )
 
+  const commitRows = (nextRows: PlanningGraphicDraft[]) => {
+    setRows(nextRows)
+    setRowsTouched(true)
+    onDraftRowsChange?.(nextRows)
+  }
+
   const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setValidationError(null)
@@ -134,8 +140,8 @@ export function PlanningGraphicsPanel({
       return
     }
 
-    setRows((current) =>
-      [...current, { id: `draft-${Date.now()}-${current.length}`, date_start: dateStart, amount: parsedAmount }].sort((left, right) =>
+    commitRows(
+      [...rows, { id: `draft-${Date.now()}-${rows.length}`, date_start: dateStart, amount: parsedAmount }].sort((left, right) =>
         left.date_start.localeCompare(right.date_start)
       )
     )
@@ -143,12 +149,12 @@ export function PlanningGraphicsPanel({
   }
 
   const handleDelete = (rowId: string) => {
-    setRows((current) => current.filter((row) => row.id !== rowId))
+    commitRows(rows.filter((row) => row.id !== rowId))
   }
 
   const handleRowChange = (rowId: string, patch: Partial<Pick<PlanningGraphicDraft, "date_start" | "amount">>) => {
-    setRows((current) =>
-      current
+    commitRows(
+      rows
         .map((row) => (row.id === rowId ? { ...row, ...patch } : row))
         .sort((left, right) => left.date_start.localeCompare(right.date_start))
     )
@@ -178,7 +184,7 @@ export function PlanningGraphicsPanel({
       return
     }
 
-    setRows(builtRows)
+    commitRows(builtRows)
     if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0) {
       onTotalAmountChange?.(Math.round(parsedMonthlyAmount * parsedMonths * 100) / 100)
     }

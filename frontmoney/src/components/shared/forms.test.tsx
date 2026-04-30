@@ -143,7 +143,7 @@ describe("shared forms", () => {
       })
     )
 
-    await user.click(screen.getByRole("button", { name: "Создать перевод" }))
+    await user.click(screen.getByRole("button", { name: /Создать перевод/ }))
 
     expect(await screen.findByText("Кошелек отправления и кошелек получения должны отличаться.")).toBeInTheDocument()
     expect(createTransferMock).not.toHaveBeenCalled()
@@ -164,7 +164,7 @@ describe("shared forms", () => {
       })
     )
 
-    await user.click(screen.getByRole("button", { name: "Создать перевод" }))
+    await user.click(screen.getByRole("button", { name: /Создать перевод/ }))
 
     expect(await screen.findByText("Недостаточно средств. Сейчас на кошельке доступно 100.")).toBeInTheDocument()
     expect(createTransferMock).not.toHaveBeenCalled()
