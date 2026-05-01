@@ -60,3 +60,8 @@
 
 ## Backlog: Search and Filters
 - [x] Add frontend search by cash flow item: operation lists and document forms should allow finding records and options by article name/alias, keep pagination stable, and preserve selected filters in the URL where the page already uses URL state
+
+## Backlog: Budget Forecasting
+- [ ] Add a dashboard/report date selector for future budget calculation: the user should be able to choose a future date or month and see balances, budget remaining, overruns, and month result calculated as of that selected date instead of always using today.
+- [ ] Extend the backend dashboard/report contract with an explicit calculation date parameter, so frontend and bot budget views use the same source of truth for current and future periods.
+- [ ] Preserve selected budget calculation date in the URL where applicable, so future budget views can be refreshed, shared, and revisited without losing context.
