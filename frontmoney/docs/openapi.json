@@ -2621,7 +2621,7 @@
         "/api/v1/dashboard/budget-expense-breakdown/": {
             "get": {
                 "operationId": "v1_dashboard_budget_expense_breakdown_retrieve",
-                "description": "Расшифровка перерасхода по статье бюджета для dashboard.",
+                "description": "Расшифровка план-факт и остатка по статье расходного бюджета для dashboard.",
                 "parameters": [
                     {
                         "in": "query",

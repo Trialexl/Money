@@ -897,7 +897,7 @@ class DashboardViewSet(viewsets.ViewSet):
     @extend_schema(
         parameters=[DashboardBudgetExpenseBreakdownQuerySerializer],
         responses=DashboardBudgetExpenseBreakdownResponseSerializer,
-        description='Расшифровка перерасхода по статье бюджета для dashboard.',
+        description='Расшифровка план-факт и остатка по статье расходного бюджета для dashboard.',
     )
     @action(detail=False, methods=['get'], url_path='budget-expense-breakdown')
     def budget_expense_breakdown(self, request):
