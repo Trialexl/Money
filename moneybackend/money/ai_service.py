@@ -13,7 +13,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import CashFlowItem, Expenditure, FlowOfFunds, Receipt, Transfer, Wallet, ZERO_AMOUNT
+from .models import BudgetExpense, CashFlowItem, Expenditure, FlowOfFunds, Receipt, Transfer, Wallet, ZERO_AMOUNT
 
 
 INTENT_CREATE_RECEIPT = 'create_receipt'
@@ -21,10 +21,13 @@ INTENT_CREATE_EXPENDITURE = 'create_expenditure'
 INTENT_CREATE_TRANSFER = 'create_transfer'
 INTENT_GET_WALLET_BALANCE = 'get_wallet_balance'
 INTENT_GET_ALL_WALLET_BALANCES = 'get_all_wallet_balances'
+INTENT_GET_MONTH_EXPENSES_BY_ITEM = 'get_month_expenses_by_item'
 INTENT_HELP_CAPABILITIES = 'help_capabilities'
 INTENT_UNKNOWN = 'unknown'
 INTENT_CREATE_MULTIPLE_OPERATIONS = 'create_multiple_operations'
 FINAL_CONFIRMATION_FIELD = 'final_confirmation'
+EXPENSE_ACTUAL_DOCUMENT_TYPES = (1, 2, 4)
+BUDGET_DOCUMENT_TYPE = 5
 
 SUPPORTED_INTENTS = {
     INTENT_CREATE_RECEIPT,
@@ -32,6 +35,7 @@ SUPPORTED_INTENTS = {
     INTENT_CREATE_TRANSFER,
     INTENT_GET_WALLET_BALANCE,
     INTENT_GET_ALL_WALLET_BALANCES,
+    INTENT_GET_MONTH_EXPENSES_BY_ITEM,
     INTENT_HELP_CAPABILITIES,
     INTENT_UNKNOWN,
 }
@@ -201,6 +205,45 @@ def _detect_assistant_meta_intent(text):
         return {
             'intent': INTENT_HELP_CAPABILITIES,
             'confidence': 0.8,
+            'comment': text,
+        }
+
+    return None
+
+
+def _detect_month_expenses_by_item_intent(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    has_expense_word = any(
+        token in normalized
+        for token in (
+            'расходы',
+            'траты',
+            'затраты',
+            'списания',
+            'потрачено',
+            'потратил',
+        )
+    )
+    has_item_grouping = any(
+        token in normalized
+        for token in (
+            'по статьям',
+            'по статья',
+            'по категориям',
+            'по категория',
+            'статьи расходов',
+            'категории расходов',
+        )
+    )
+    has_budget_context = 'бюджет' in normalized or 'отклонен' in normalized or 'перерасход' in normalized
+
+    if has_expense_word and (has_item_grouping or has_budget_context):
+        return {
+            'intent': INTENT_GET_MONTH_EXPENSES_BY_ITEM,
+            'confidence': 0.98,
             'comment': text,
         }
 
@@ -637,7 +680,8 @@ class OpenRouterIntentProvider:
             'Верни только JSON без пояснений. '
             'Определи intent из списка: '
             'create_receipt, create_expenditure, create_transfer, '
-            'get_wallet_balance, get_all_wallet_balances, help_capabilities, unknown. '
+            'get_wallet_balance, get_all_wallet_balances, get_month_expenses_by_item, '
+            'help_capabilities, unknown. '
             'Если передано изображение, считай, что это банковский скриншот операции или истории операций, '
             f'{image_instruction}'
             'Если на изображении список или история операций, выбери одну самую вероятную строку операции: '
@@ -663,6 +707,8 @@ class OpenRouterIntentProvider:
             'Для кошелька используй wallet_hint, для банка можешь дополнительно заполнить bank_name, но wallet_hint важнее. '
             'Если пользователь спрашивает о возможностях помощника, просит помощь, примеры команд или здоровается, '
             'верни intent=help_capabilities. '
+            'Если пользователь спрашивает расходы, траты или списания текущего месяца по статьям/категориям '
+            'или просит отклонение от бюджета, верни intent=get_month_expenses_by_item. '
             'Если уверенности нет, ставь intent=unknown или оставляй поля null. '
             'Схема JSON: '
             '{"intent": "...", "confidence": 0.0, "amount": "0.00" | null, '
@@ -861,6 +907,10 @@ class RuleBasedIntentProvider:
         if meta_intent is not None:
             return meta_intent
 
+        month_expenses_intent = _detect_month_expenses_by_item_intent(text)
+        if month_expenses_intent is not None:
+            return month_expenses_intent
+
         amount = _extract_amount_from_text(text)
         wallet_mentions = _wallet_mentions(normalized_text, wallets)
 
@@ -1004,6 +1054,94 @@ def _all_wallet_balances(*, at_time=None):
     return rows
 
 
+def _current_month_bounds(*, at_time=None):
+    selected_at = timezone.localtime(at_time or timezone.now())
+    month_start = selected_at.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if month_start.month == 12:
+        next_month_start = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month_start = month_start.replace(month=month_start.month + 1)
+    return month_start, next_month_start
+
+
+def _format_month_label(month_start):
+    month_names = {
+        1: 'январь',
+        2: 'февраль',
+        3: 'март',
+        4: 'апрель',
+        5: 'май',
+        6: 'июнь',
+        7: 'июль',
+        8: 'август',
+        9: 'сентябрь',
+        10: 'октябрь',
+        11: 'ноябрь',
+        12: 'декабрь',
+    }
+    return f'{month_names.get(month_start.month, month_start.strftime("%m"))} {month_start.year}'
+
+
+def _month_expenses_by_item(*, at_time=None):
+    month_start, next_month_start = _current_month_bounds(at_time=at_time)
+    base_queryset = BudgetExpense.objects.filter(
+        period__gte=month_start,
+        period__lt=next_month_start,
+        project__isnull=True,
+        cash_flow_item__isnull=False,
+    )
+    actual_totals = {
+        row['cash_flow_item_id']: {
+            'cash_flow_item_id': str(row['cash_flow_item_id']),
+            'cash_flow_item_name': row['cash_flow_item__name'] or 'Без статьи',
+            'actual': (row['actual'] or ZERO_AMOUNT).quantize(Decimal('0.01')),
+        }
+        for row in base_queryset.filter(type_of_document__in=EXPENSE_ACTUAL_DOCUMENT_TYPES)
+        .values('cash_flow_item_id', 'cash_flow_item__name')
+        .annotate(actual=Sum('amount'))
+    }
+    budget_totals = {
+        row['cash_flow_item_id']: (row['planned'] or ZERO_AMOUNT).quantize(Decimal('0.01'))
+        for row in base_queryset.filter(type_of_document=BUDGET_DOCUMENT_TYPE)
+        .values('cash_flow_item_id')
+        .annotate(planned=Sum('amount'))
+    }
+
+    rows = []
+    total_actual = ZERO_AMOUNT
+    total_budget = ZERO_AMOUNT
+    for item_id, row in actual_totals.items():
+        actual = row['actual']
+        planned = budget_totals.get(item_id)
+        total_actual += actual
+        if planned is not None:
+            total_budget += planned
+        deviation = actual - planned if planned is not None else None
+        rows.append({
+            'cash_flow_item_id': row['cash_flow_item_id'],
+            'cash_flow_item_name': row['cash_flow_item_name'],
+            'actual': _serialize_decimal(actual),
+            'budget': _serialize_decimal(planned) if planned is not None and planned > ZERO_AMOUNT else None,
+            'deviation': _serialize_decimal(deviation) if deviation is not None else None,
+            'overrun': _serialize_decimal(max(deviation, ZERO_AMOUNT)) if deviation is not None else None,
+            'remaining': _serialize_decimal(max(planned - actual, ZERO_AMOUNT)) if planned is not None else None,
+        })
+
+    rows.sort(key=lambda item: (-Decimal(item['actual']), item['cash_flow_item_name']))
+    total_deviation = total_actual - total_budget if total_budget > ZERO_AMOUNT else None
+    return {
+        'period_start': month_start.isoformat(),
+        'period_end': next_month_start.isoformat(),
+        'period_label': _format_month_label(month_start),
+        'items': rows,
+        'total_actual': _serialize_decimal(total_actual),
+        'total_budget': _serialize_decimal(total_budget) if total_budget > ZERO_AMOUNT else None,
+        'total_deviation': _serialize_decimal(total_deviation) if total_deviation is not None else None,
+        'total_overrun': _serialize_decimal(max(total_deviation, ZERO_AMOUNT)) if total_deviation is not None else None,
+        'total_remaining': _serialize_decimal(max(total_budget - total_actual, ZERO_AMOUNT)) if total_deviation is not None else None,
+    }
+
+
 class AiOperationService:
     def transcribe_audio(self, *, audio_bytes, audio_mime_type=None, file_name=None):
         transcription_service = _get_transcription_service()
@@ -1021,6 +1159,7 @@ class AiOperationService:
             'Я умею:',
             '- создавать приход, расход и перевод по тексту;',
             '- показывать остаток по одному кошельку или по всем кошелькам;',
+            '- показывать расходы текущего месяца по статьям и отклонение от бюджета;',
             '- разбирать банковские скриншоты и предлагать документ;',
             '- принимать голосовые сообщения в Telegram и распознавать их как обычный текст;',
             '- задавать уточняющие вопросы, если не хватает суммы, кошелька или статьи.',
@@ -1029,6 +1168,7 @@ class AiOperationService:
             'расход втб еда 2500',
             'перевод сбер альфа 12000',
             'остатки по кошелькам',
+            'расходы по статьям',
         ]
         if include_telegram_link_hint:
             lines.append('Если Telegram еще не привязан, сгенерируйте код в web API и отправьте команду /link CODE.')
@@ -1743,6 +1883,8 @@ class AiOperationService:
         provider_name = 'rule_based'
         if not image_bytes:
             parsed = self.detect_meta_intent(text)
+        if parsed is None and not image_bytes:
+            parsed = _detect_month_expenses_by_item_intent(text)
         if parsed is None:
             provider, provider_name = _get_intent_provider()
             parsed = provider.parse(
@@ -1844,6 +1986,18 @@ class AiOperationService:
                     'wallet_name': wallet.name,
                     'balance': _serialize_decimal(balance),
                 }],
+                'parsed': normalized,
+            }
+
+        if intent == INTENT_GET_MONTH_EXPENSES_BY_ITEM:
+            summary = _month_expenses_by_item(at_time=timezone.now())
+            return {
+                'status': 'info',
+                'intent': intent,
+                'provider': provider_name,
+                'confidence': normalized['confidence'],
+                'reply_text': self._build_month_expenses_by_item_reply(summary),
+                'expense_summary': summary,
                 'parsed': normalized,
             }
 
@@ -2466,6 +2620,41 @@ class AiOperationService:
         lines = ['Остатки по кошелькам:']
         for row in balances:
             lines.append(f'- {row["wallet_name"]}: {row["balance"]}')
+        return '\n'.join(lines)
+
+    def _build_month_expenses_by_item_reply(self, summary):
+        rows = summary.get('items') or []
+        if not rows:
+            return f'Расходов за {summary.get("period_label", "текущий месяц")} по статьям не найдено.'
+
+        lines = [f'Расходы за {summary["period_label"]} по статьям:']
+        visible_rows = rows[:15]
+        for row in visible_rows:
+            line = f'- {row["cash_flow_item_name"]}: {row["actual"]}'
+            if row.get('budget'):
+                line += f' | бюджет {row["budget"]}'
+                if Decimal(row.get('overrun') or '0.00') > ZERO_AMOUNT:
+                    line += f' | перерасход {row["overrun"]}'
+                elif Decimal(row.get('remaining') or '0.00') > ZERO_AMOUNT:
+                    line += f' | остаток {row["remaining"]}'
+                else:
+                    line += ' | в рамках бюджета'
+            else:
+                line += ' | бюджета нет'
+            lines.append(line)
+
+        if len(rows) > len(visible_rows):
+            lines.append(f'И еще {len(rows) - len(visible_rows)} статей.')
+
+        lines.append(f'Итого расход: {summary["total_actual"]}')
+        if summary.get('total_budget'):
+            total_deviation = Decimal(summary.get('total_deviation') or '0.00')
+            if total_deviation > ZERO_AMOUNT:
+                lines.append(f'Итого бюджет: {summary["total_budget"]} | перерасход {summary["total_overrun"]}')
+            elif total_deviation < ZERO_AMOUNT:
+                lines.append(f'Итого бюджет: {summary["total_budget"]} | остаток {summary["total_remaining"]}')
+            else:
+                lines.append(f'Итого бюджет: {summary["total_budget"]} | в рамках бюджета')
         return '\n'.join(lines)
 
     def _build_confirmation_reply(self, reply_text, options, missing_fields=None, missing_fields_by_item=None):

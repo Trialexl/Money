@@ -6605,6 +6605,10 @@
                             "$ref": "#/components/schemas/AiAssistantBalanceRow"
                         }
                     },
+                    "expense_summary": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    },
                     "options": {
                         "type": "object",
                         "additionalProperties": {}

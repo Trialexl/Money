@@ -4130,6 +4130,63 @@ class AiAssistantApiTests(TestCase):
         pending.refresh_from_db()
         self.assertFalse(pending.is_active)
 
+    def test_ai_telegram_webhook_reports_current_month_expenses_by_item_with_budget_deviation(self):
+        client = APIClient()
+        current_dt = timezone.make_aware(datetime(2026, 4, 25, 12, 0, 0))
+        month_start = timezone.make_aware(datetime(2026, 4, 1, 0, 0, 0))
+
+        Budget.objects.create(
+            amount=Decimal('1000.00'),
+            cash_flow_item=self.expense_item,
+            type_of_budget=False,
+            date=month_start,
+            date_start=month_start,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('342.00'),
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 10, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('200.00'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 20, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('999.00'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 3, 31, 12, 0, 0)),
+        )
+
+        with patch('money.ai_service.timezone.now', return_value=current_dt):
+            response = client.post(
+                '/api/v1/ai/telegram-webhook/',
+                {
+                    'update_id': 4310,
+                    'message': {
+                        'message_id': 4311,
+                        'text': 'Расходы в текущем месяце по статьям',
+                        'chat': {'id': 4312},
+                        'from': {'id': 4313, 'username': 'trialex'},
+                    },
+                },
+                format='json',
+                HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'info')
+        self.assertEqual(response.data['intent'], 'get_month_expenses_by_item')
+        self.assertIn('Расходы за апрель 2026 по статьям:', response.data['reply_text'])
+        self.assertIn('Продукты: 542.00', response.data['reply_text'])
+        self.assertIn('бюджет 1000.00', response.data['reply_text'])
+        self.assertIn('остаток 458.00', response.data['reply_text'])
+        self.assertIn('Итого расход: 542.00', response.data['reply_text'])
+        self.assertEqual(response.data['expense_summary']['total_actual'], '542.00')
+
     def test_ai_telegram_webhook_can_select_option_by_number(self):
         client = APIClient()
         first_response = client.post(

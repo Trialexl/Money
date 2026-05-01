@@ -733,5 +733,6 @@ class AiAssistantResponseSerializer(serializers.Serializer):
     created_objects = AiAssistantCreatedObjectSerializer(many=True, required=False)
     preview = serializers.DictField(required=False)
     balances = AiAssistantBalanceRowSerializer(many=True, required=False)
+    expense_summary = serializers.DictField(required=False)
     options = serializers.DictField(required=False)
     parsed = serializers.DictField(required=False)
