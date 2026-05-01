@@ -15,7 +15,7 @@ services:
       retries: 5
 
   backend:
-    image: trialexl/money-backend@sha256:8d3fa23c92b41c5e8267059cebd0cff23559142eb115f01f4720db631a88210c
+    image: trialexl/money-backend@sha256:529269de917ec4863a01d102c34cfbab1987428a814d4bfa86ff01b82301c8da
     restart: unless-stopped
     env_file:
       - ./.env
@@ -31,7 +31,7 @@ services:
       - django_static:/app/staticfiles
 
   frontend:
-    image: trialexl/money-frontend@sha256:05a717e44b1d1c25cd375ed06fdc09504c58447b43f138de24c0241c7388e581
+    image: trialexl/money-frontend@sha256:3b18a4562a1b8ff51cf02772d08410a88a8e7d41b592dd190d9e4ae4e68a25ae
     restart: unless-stopped
     depends_on:
       - backend
