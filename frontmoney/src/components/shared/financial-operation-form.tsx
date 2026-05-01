@@ -9,15 +9,15 @@ import { ArrowDownRight, ArrowLeft, ArrowUpRight, Save, X } from "lucide-react"
 import { useOperationReferenceDataQuery } from "@/hooks/use-reference-data"
 import { PageHeader } from "@/components/shared/page-header"
 import { PlanningGraphicsPanel } from "@/components/shared/planning-graphics-panel"
-import { Badge } from "@/components/ui/badge"
+import { SearchableSelect, type SearchableSelectGroup, type SearchableSelectOption } from "@/components/shared/searchable-select"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
+import { formatDateForInput } from "@/lib/formatters"
 import { CashFlowItemService } from "@/services/cash-flow-item-service"
 import {
   Expenditure,
@@ -86,6 +86,18 @@ function isExpenditureOperation(operation: OperationEntity | undefined): operati
 
 function normalizeLookupValue(value: string | null | undefined) {
   return (value ?? "").trim().toLocaleLowerCase("ru")
+}
+
+function toCashFlowItemOption(
+  item: { id: string; name?: string | null; code?: string | null },
+  description?: string
+): SearchableSelectOption {
+  return {
+    value: item.id,
+    label: item.name || "Без названия",
+    description: description || (item.code ? `Код ${item.code}` : undefined),
+    keywords: [item.code ?? ""],
+  }
 }
 
 export default function FinancialOperationForm({
@@ -272,9 +284,23 @@ export default function FinancialOperationForm({
   const selectedWalletLabel = effectiveWalletId
     ? walletOptions.find((wallet) => wallet.id === effectiveWalletId)?.name || operation?.wallet_name || "Загружаем кошелек"
     : operation?.wallet_name || "Выбери кошелек"
-  const selectedCashFlowItemLabel = effectiveCashFlowItemId
-    ? cashFlowItems.find((item) => item.id === effectiveCashFlowItemId)?.name || operation?.cash_flow_item_name || "Загружаем статью"
-    : operation?.cash_flow_item_name || "Выбери статью"
+  const cashFlowItemSelectGroups: SearchableSelectGroup[] = [
+    {
+      options: [{ value: "unselected", label: "Не выбрано" }],
+    },
+    popularCashFlowItems.length > 0
+      ? {
+          label: "Часто за 60 дней",
+          options: popularCashFlowItems.map((item) =>
+            toCashFlowItemOption(item, `${cashFlowItemUsage.get(item.id) ?? 0} операций`)
+          ),
+        }
+      : null,
+    {
+      label: popularCashFlowItems.length > 0 ? "Все статьи" : "Статьи",
+      options: regularCashFlowItems.map((item) => toCashFlowItemOption(item)),
+    },
+  ].filter(Boolean) as SearchableSelectGroup[]
 
   const operationMutation = useMutation({
     mutationFn: async () => {
@@ -447,40 +473,15 @@ export default function FinancialOperationForm({
                         {config.loadingReferenceLabel}
                       </div>
                     ) : (
-                    <Select
+                    <SearchableSelect
+                      id={`${mode}-category`}
                       value={effectiveCashFlowItemId || "unselected"}
                       onValueChange={(value) => setCashFlowItemId(value === "unselected" ? "" : value)}
-                    >
-                      <SelectTrigger id={`${mode}-category`} className="h-11 rounded-xl bg-background/80 px-3">
-                        <span className={effectiveCashFlowItemId ? "truncate" : "truncate text-muted-foreground"}>
-                          {selectedCashFlowItemLabel}
-                        </span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unselected">Не выбрано</SelectItem>
-                        {popularCashFlowItems.length > 0 ? (
-                          <>
-                            <SelectGroup>
-                              <SelectLabel>Часто за 60 дней</SelectLabel>
-                              {popularCashFlowItems.map((item) => (
-                                <SelectItem key={item.id} value={item.id}>
-                                  {item.name || "Без названия"} · {cashFlowItemUsage.get(item.id)}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                            <SelectSeparator />
-                          </>
-                        ) : null}
-                        <SelectGroup>
-                          <SelectLabel>{popularCashFlowItems.length > 0 ? "Все статьи" : "Статьи"}</SelectLabel>
-                          {regularCashFlowItems.map((item) => (
-                            <SelectItem key={item.id} value={item.id}>
-                              {item.name || "Без названия"}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
+                      groups={cashFlowItemSelectGroups}
+                      placeholder="Выбери статью"
+                      searchPlaceholder="Найти статью по названию или коду"
+                      emptyLabel="Статья не найдена"
+                    />
                   )}
                   {popularCashFlowItems.length > 0 ? (
                     <p className="text-xs leading-4 text-muted-foreground">Сверху показаны самые частые статьи за последние 60 дней.</p>

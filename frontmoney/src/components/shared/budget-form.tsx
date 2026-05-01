@@ -4,26 +4,34 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Landmark, Save, TrendingDown, TrendingUp, X } from "lucide-react"
+import { ArrowLeft, Save, X } from "lucide-react"
 
 import { useActiveCashFlowItemsQuery } from "@/hooks/use-reference-data"
 import { PageHeader } from "@/components/shared/page-header"
 import { PlanningGraphicsPanel } from "@/components/shared/planning-graphics-panel"
-import { Badge } from "@/components/ui/badge"
+import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/searchable-select"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
+import { formatDateForInput } from "@/lib/formatters"
 import { Budget, BudgetService } from "@/services/financial-operations-service"
 import { PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
 
 interface BudgetFormProps {
   budget?: Budget
   isEdit?: boolean
+}
+
+function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
+  return {
+    value: item.id,
+    label: item.name || "Без названия",
+    description: item.code ? `Код ${item.code}` : undefined,
+    keywords: [item.code ?? ""],
+  }
 }
 
 export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) {
@@ -152,9 +160,10 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
       },
     ]
   }, [effectiveCashFlowItemId, items])
-  const selectedItemLabel = effectiveCashFlowItemId
-    ? itemOptions.find((item) => item.id === effectiveCashFlowItemId)?.name || "Загружаем статью"
-    : "Выбери статью бюджета"
+  const cashFlowItemOptions: SearchableSelectOption[] = [
+    { value: "unselected", label: "Не выбрано" },
+    ...itemOptions.map(toCashFlowItemOption),
+  ]
   const parsedAmount = Number.parseFloat(amount)
   const hasAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0
   const errorMessage =
@@ -278,21 +287,15 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                       Загружаем статьи...
                     </div>
                   ) : (
-                    <Select value={effectiveCashFlowItemId || "unselected"} onValueChange={(value) => setCashFlowItemId(value === "unselected" ? "" : value)}>
-                      <SelectTrigger id="budget-item" className="h-11 rounded-xl bg-background/80 px-3">
-                        <span className={effectiveCashFlowItemId ? "truncate" : "truncate text-muted-foreground"}>
-                          {selectedItemLabel}
-                        </span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unselected">Не выбрано</SelectItem>
-                        {itemOptions.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.name || "Без названия"}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      id="budget-item"
+                      value={effectiveCashFlowItemId || "unselected"}
+                      onValueChange={(value) => setCashFlowItemId(value === "unselected" ? "" : value)}
+                      options={cashFlowItemOptions}
+                      placeholder="Выбери статью бюджета"
+                      searchPlaceholder="Найти статью по названию или коду"
+                      emptyLabel="Статья не найдена"
+                    />
                   )}
                 </div>
 

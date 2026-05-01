@@ -9,7 +9,7 @@ import { ArrowLeft, Save, X } from "lucide-react"
 import { useOperationReferenceDataQuery, useWalletBalanceQuery } from "@/hooks/use-reference-data"
 import { PageHeader } from "@/components/shared/page-header"
 import { PlanningGraphicsPanel } from "@/components/shared/planning-graphics-panel"
-import { Badge } from "@/components/ui/badge"
+import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/searchable-select"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -17,30 +17,22 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
+import { formatCurrency, formatDateForInput } from "@/lib/formatters"
 import { AutoPayment, AutoPaymentService } from "@/services/financial-operations-service"
 import { PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
-
-function getDaysUntil(dateString?: string) {
-  if (!dateString) {
-    return null
-  }
-
-  const target = new Date(dateString)
-  if (Number.isNaN(target.getTime())) {
-    return null
-  }
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  target.setHours(0, 0, 0, 0)
-
-  return Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-}
 
 interface AutoPaymentFormProps {
   autoPayment?: AutoPayment
   isEdit?: boolean
+}
+
+function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
+  return {
+    value: item.id,
+    label: item.name || "Без названия",
+    description: item.code ? `Код ${item.code}` : undefined,
+    keywords: [item.code ?? ""],
+  }
 }
 
 export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPaymentFormProps) {
@@ -215,7 +207,6 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
     ]
   }, [effectiveCashFlowItemId, cashFlowItems])
   const parsedAmount = Number.parseFloat(amount)
-  const parsedAmountMonth = Number.parseInt(amountMonth, 10)
   const hasAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0
   const destinationWallets = walletOptions.filter((wallet) => wallet.id !== effectiveWalletFromId)
   const selectedWalletFromLabel = effectiveWalletFromId
@@ -224,9 +215,10 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
   const selectedWalletToLabel = effectiveWalletToId
     ? walletOptions.find((wallet) => wallet.id === effectiveWalletToId)?.name || "Загружаем кошелек"
     : "Выбери назначение"
-  const selectedCashFlowItemLabel = effectiveCashFlowItemId
-    ? cashFlowItemOptions.find((item) => item.id === effectiveCashFlowItemId)?.name || "Загружаем статью"
-    : "Выбери статью расхода"
+  const searchableCashFlowItemOptions: SearchableSelectOption[] = [
+    { value: "unselected", label: "Не выбрано" },
+    ...cashFlowItemOptions.map(toCashFlowItemOption),
+  ]
   const errorMessage =
     validationError ||
     (autoPaymentMutation.error as any)?.response?.data?.detail ||
@@ -401,24 +393,16 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
                         Загружаем статьи...
                       </div>
                     ) : (
-                      <Select
+                      <SearchableSelect
+                        id="autopayment-cashflow-item"
                         value={effectiveCashFlowItemId || "unselected"}
                         onValueChange={(value) => setCashFlowItemId(value === "unselected" ? "" : value)}
-                      >
-                        <SelectTrigger id="autopayment-cashflow-item" className="h-12 rounded-2xl bg-background/80 px-4">
-                          <span className={effectiveCashFlowItemId ? "truncate" : "truncate text-muted-foreground"}>
-                            {selectedCashFlowItemLabel}
-                          </span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unselected">Не выбрано</SelectItem>
-                          {cashFlowItemOptions.map((item) => (
-                            <SelectItem key={item.id} value={item.id}>
-                              {item.name || "Без названия"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        options={searchableCashFlowItemOptions}
+                        placeholder="Выбери статью расхода"
+                        searchPlaceholder="Найти статью по названию или коду"
+                        emptyLabel="Статья не найдена"
+                        triggerClassName="h-12 rounded-2xl px-4"
+                      />
                     )}
                   </div>
                 )}

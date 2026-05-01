@@ -8,6 +8,7 @@ import { Copy, Landmark, PencilLine, PiggyBank, Search, SlidersHorizontal, Trash
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
+import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/searchable-select"
 import { StatCard } from "@/components/shared/stat-card"
 import { useActiveCashFlowItemsQuery } from "@/hooks/use-reference-data"
 import { Badge } from "@/components/ui/badge"
@@ -15,7 +16,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency, formatDate } from "@/lib/formatters"
 import { BudgetService } from "@/services/financial-operations-service"
 
@@ -31,6 +31,15 @@ function getBudgetDuplicateHref(budget: Awaited<ReturnType<typeof BudgetService.
   }
 
   return `/budgets/new?${params.toString()}`
+}
+
+function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
+  return {
+    value: item.id,
+    label: item.name || "Без названия",
+    description: item.code ? `Код ${item.code}` : undefined,
+    keywords: [item.code ?? ""],
+  }
 }
 
 export default function BudgetCatalog() {
@@ -94,6 +103,10 @@ export default function BudgetCatalog() {
   const budgets = budgetsQuery.data
   const cashFlowItems = itemsQuery.data || []
   const categoryMap = Object.fromEntries(cashFlowItems.map((item) => [item.id, item.name || "Без названия"]))
+  const categoryOptions: SearchableSelectOption[] = [
+    { value: "all-categories", label: "Все статьи" },
+    ...cashFlowItems.map(toCashFlowItemOption),
+  ]
   const normalizedSearch = deferredSearch.trim().toLowerCase()
   const parsedAmountMin = amountMin ? Number.parseFloat(amountMin) : null
   const parsedAmountMax = amountMax ? Number.parseFloat(amountMax) : null
@@ -247,19 +260,16 @@ export default function BudgetCatalog() {
               <Label htmlFor="budget-category-filter" className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 Статья бюджета
               </Label>
-              <Select value={categoryId} onValueChange={setCategoryId}>
-                <SelectTrigger id="budget-category-filter" className="h-11 rounded-xl bg-background/70 px-3.5">
-                  <SelectValue placeholder="Все статьи" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all-categories">Все статьи</SelectItem>
-                  {cashFlowItems.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name || "Без названия"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                id="budget-category-filter"
+                value={categoryId}
+                onValueChange={setCategoryId}
+                options={categoryOptions}
+                placeholder="Все статьи"
+                searchPlaceholder="Найти статью по названию или коду"
+                emptyLabel="Статья не найдена"
+                triggerClassName="bg-background/70 px-3.5"
+              />
             </div>
           </div>
 

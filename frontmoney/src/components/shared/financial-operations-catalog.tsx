@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useDeferredValue, useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useDeferredValue, useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDownRight, ArrowUpRight, Copy, PencilLine, Search, SlidersHorizontal, Trash2, Wallet2, X } from "lucide-react"
 
@@ -9,6 +10,7 @@ import { CatalogPaginationControls } from "@/components/shared/catalog-paginatio
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
+import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/searchable-select"
 import { StatCard } from "@/components/shared/stat-card"
 import { useOperationReferenceDataQuery } from "@/hooks/use-reference-data"
 import { Badge } from "@/components/ui/badge"
@@ -99,29 +101,131 @@ function getMonthStart(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), 1)
 }
 
+function parsePage(value: string | null) {
+  const parsed = Number.parseInt(value ?? "", 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
+}
+
+function parsePageSize(value: string | null): PageSizeOption {
+  if (value === "50") {
+    return 50
+  }
+
+  if (value === "100") {
+    return 100
+  }
+
+  return 20
+}
+
+function parseBudgetFilter(value: string | null): BudgetFilter {
+  return value === "included" || value === "excluded" ? value : "all"
+}
+
+function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
+  return {
+    value: item.id,
+    label: item.name || "Без названия",
+    description: item.code ? `Код ${item.code}` : undefined,
+    keywords: [item.code ?? ""],
+  }
+}
+
 export default function FinancialOperationsCatalog({ mode }: FinancialOperationsCatalogProps) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const queryClient = useQueryClient()
   const config = CATALOG_CONFIG[mode]
   const AccentIcon = config.accentIcon
-  const [searchTerm, setSearchTerm] = useState("")
-  const [dateFrom, setDateFrom] = useState("")
-  const [dateTo, setDateTo] = useState("")
-  const [selectedWalletId, setSelectedWalletId] = useState("all-wallets")
-  const [selectedCategoryId, setSelectedCategoryId] = useState("all-categories")
-  const [amountMin, setAmountMin] = useState("")
-  const [amountMax, setAmountMax] = useState("")
-  const [budgetFilter, setBudgetFilter] = useState<BudgetFilter>("all")
+  const didMountFilterReset = useRef(false)
+  const [searchTerm, setSearchTerm] = useState(() => searchParams.get("search") || "")
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get("date_from") || "")
+  const [dateTo, setDateTo] = useState(() => searchParams.get("date_to") || "")
+  const [selectedWalletId, setSelectedWalletId] = useState(() => searchParams.get("wallet") || "all-wallets")
+  const [selectedCategoryId, setSelectedCategoryId] = useState(() => searchParams.get("cash_flow_item") || "all-categories")
+  const [amountMin, setAmountMin] = useState(() => searchParams.get("amount_min") || "")
+  const [amountMax, setAmountMax] = useState(() => searchParams.get("amount_max") || "")
+  const [budgetFilter, setBudgetFilter] = useState<BudgetFilter>(() => parseBudgetFilter(searchParams.get("budget")))
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<PageSizeOption>(20)
+  const [page, setPage] = useState(() => parsePage(searchParams.get("page")))
+  const [pageSize, setPageSize] = useState<PageSizeOption>(() => parsePageSize(searchParams.get("page_size")))
   const deferredSearch = useDeferredValue(searchTerm)
   const referencesQuery = useOperationReferenceDataQuery()
   const normalizedSearch = deferredSearch.trim()
 
   useEffect(() => {
+    if (!didMountFilterReset.current) {
+      didMountFilterReset.current = true
+      return
+    }
+
     setPage(1)
   }, [normalizedSearch, dateFrom, dateTo, selectedWalletId, selectedCategoryId, amountMin, amountMax, budgetFilter])
+
+  useEffect(() => {
+    const params = new URLSearchParams()
+
+    if (normalizedSearch) {
+      params.set("search", normalizedSearch)
+    }
+
+    if (dateFrom) {
+      params.set("date_from", dateFrom)
+    }
+
+    if (dateTo) {
+      params.set("date_to", dateTo)
+    }
+
+    if (selectedWalletId !== "all-wallets") {
+      params.set("wallet", selectedWalletId)
+    }
+
+    if (selectedCategoryId !== "all-categories") {
+      params.set("cash_flow_item", selectedCategoryId)
+    }
+
+    if (amountMin) {
+      params.set("amount_min", amountMin)
+    }
+
+    if (amountMax) {
+      params.set("amount_max", amountMax)
+    }
+
+    if (mode === "expenditure" && budgetFilter !== "all") {
+      params.set("budget", budgetFilter)
+    }
+
+    if (page > 1) {
+      params.set("page", String(page))
+    }
+
+    if (pageSize !== 20) {
+      params.set("page_size", String(pageSize))
+    }
+
+    const nextSearch = params.toString()
+    if (searchParams.toString() !== nextSearch) {
+      router.replace(nextSearch ? `${config.routeHref}?${nextSearch}` : config.routeHref, { scroll: false })
+    }
+  }, [
+    amountMax,
+    amountMin,
+    budgetFilter,
+    config.routeHref,
+    dateFrom,
+    dateTo,
+    mode,
+    normalizedSearch,
+    page,
+    pageSize,
+    router,
+    searchParams,
+    selectedCategoryId,
+    selectedWalletId,
+  ])
 
   const operationsQuery = useQuery({
     queryKey: [
@@ -230,6 +334,10 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
   const cashFlowItems = referencesQuery.cashFlowItems
   const walletMap = Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))
   const categoryMap = Object.fromEntries(cashFlowItems.map((item) => [item.id, item.name || "Без названия"]))
+  const categoryOptions: SearchableSelectOption[] = [
+    { value: "all-categories", label: "Все статьи" },
+    ...cashFlowItems.map(toCashFlowItemOption),
+  ]
 
   const totalAmount = operations.reduce((sum, operation) => sum + operation.amount, 0)
   const uniqueWalletsCount = new Set(operations.map((operation) => operation.wallet)).size
@@ -378,19 +486,16 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
               <Label htmlFor={`${mode}-category-filter`} className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 {config.categoryLabel}
               </Label>
-              <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
-                <SelectTrigger id={`${mode}-category-filter`} className="h-11 rounded-xl bg-background/70 px-3.5">
-                  <SelectValue placeholder="Все статьи" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all-categories">Все статьи</SelectItem>
-                  {cashFlowItems.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name || "Без названия"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                id={`${mode}-category-filter`}
+                value={selectedCategoryId}
+                onValueChange={setSelectedCategoryId}
+                options={categoryOptions}
+                placeholder="Все статьи"
+                searchPlaceholder="Найти статью по названию или коду"
+                emptyLabel="Статья не найдена"
+                triggerClassName="bg-background/70 px-3.5"
+              />
             </div>
           </div>
 

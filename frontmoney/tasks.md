@@ -59,4 +59,4 @@
 - [x] Compress the document + graphics layout so the screen is denser and faster to scan on notebook and desktop widths
 
 ## Backlog: Search and Filters
-- [ ] Add frontend search by cash flow item: operation lists and document forms should allow finding records and options by article name/alias, keep pagination stable, and preserve selected filters in the URL where the page already uses URL state
+- [x] Add frontend search by cash flow item: operation lists and document forms should allow finding records and options by article name/alias, keep pagination stable, and preserve selected filters in the URL where the page already uses URL state

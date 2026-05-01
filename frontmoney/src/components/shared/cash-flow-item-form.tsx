@@ -8,19 +8,28 @@ import { Save } from "lucide-react"
 
 import { useCashFlowParentOptionsQuery } from "@/hooks/use-reference-data"
 import { PageHeader } from "@/components/shared/page-header"
+import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/searchable-select"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { CashFlowItem, CashFlowItemService } from "@/services/cash-flow-item-service"
 
 interface CashFlowItemFormProps {
   item?: CashFlowItem
   parentId?: string
   isEdit?: boolean
+}
+
+function toParentOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
+  return {
+    value: item.id,
+    label: item.name || "Без названия",
+    description: item.code ? `Код ${item.code}` : undefined,
+    keywords: [item.code ?? ""],
+  }
 }
 
 export default function CashFlowItemForm({ item, parentId, isEdit = false }: CashFlowItemFormProps) {
@@ -38,6 +47,10 @@ export default function CashFlowItemForm({ item, parentId, isEdit = false }: Cas
 
   const parentOptionsQuery = useCashFlowParentOptionsQuery(item?.id)
   const sortedParentOptions = parentOptionsQuery.data || []
+  const searchableParentOptions: SearchableSelectOption[] = [
+    { value: "root", label: "Нет, это корневая статья" },
+    ...sortedParentOptions.map(toParentOption),
+  ]
 
   const itemMutation = useMutation({
     mutationFn: async () => {
@@ -119,19 +132,15 @@ export default function CashFlowItemForm({ item, parentId, isEdit = false }: Cas
                     Загружаем доступные узлы...
                   </div>
                 ) : (
-                  <Select value={parent || "root"} onValueChange={(value) => setParent(value === "root" ? "" : value)}>
-                    <SelectTrigger id="cashflow-parent">
-                      <SelectValue placeholder="Выбери родительскую статью" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="root">Нет, это корневая статья</SelectItem>
-                      {sortedParentOptions.map((entry) => (
-                        <SelectItem key={entry.id} value={entry.id}>
-                          {entry.name || "Без названия"}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    id="cashflow-parent"
+                    value={parent || "root"}
+                    onValueChange={(value) => setParent(value === "root" ? "" : value)}
+                    options={searchableParentOptions}
+                    placeholder="Выбери родительскую статью"
+                    searchPlaceholder="Найти статью по названию или коду"
+                    emptyLabel="Статья не найдена"
+                  />
                 )}
               </div>
 
