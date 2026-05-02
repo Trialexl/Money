@@ -440,6 +440,107 @@ export default function DashboardPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader className="pb-4">
+                  <CardTitle>Последние документы</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant={activityFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("all")}>
+                      Все
+                    </Button>
+                    <Button variant={activityFilter === "receipt" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("receipt")}>
+                      Приходы
+                    </Button>
+                    <Button variant={activityFilter === "expenditure" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("expenditure")}>
+                      Расходы
+                    </Button>
+                    <Button variant={activityFilter === "transfer" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("transfer")}>
+                      Переводы
+                    </Button>
+                  </div>
+                  {recentActivity.length > 0 ? (
+                    recentActivity.map((operation) => (
+                      <div
+                        key={`${operation.kind}-${operation.id}`}
+                        className="flex items-start gap-3 rounded-[18px] border border-border/60 bg-background/75 px-3 py-3"
+                      >
+                        <Badge
+                          className="shrink-0"
+                          variant={operation.kind === "receipt" ? "success" : operation.kind === "transfer" ? "secondary" : "outline"}
+                        >
+                          {operation.kind === "receipt" ? "Приход" : operation.kind === "expenditure" ? "Расход" : "Перевод"}
+                        </Badge>
+
+                        <Link
+                          href={
+                            operation.kind === "receipt"
+                              ? `/receipts/${operation.id}/edit`
+                              : operation.kind === "expenditure"
+                                ? `/expenditures/${operation.id}/edit`
+                                : `/transfers/${operation.id}/edit`
+                          }
+                          className="min-w-0 flex-1 transition-colors hover:text-foreground/80"
+                        >
+                          <div className="truncate text-sm font-medium text-foreground">
+                            {operation.kind === "transfer"
+                              ? `${operation.wallet_from_name || "Без кошелька"} → ${operation.wallet_to_name || "Без кошелька"}`
+                              : `${operation.wallet_name || "Без кошелька"} · ${operation.cash_flow_item_name || "Без статьи"}`}
+                          </div>
+                          <div className="mt-1 text-xs leading-4 text-muted-foreground">
+                            {operation.description ? <div className="truncate">{operation.description}</div> : null}
+                            <div>{formatDate(operation.date)}</div>
+                          </div>
+                        </Link>
+
+                        <div className="flex shrink-0 items-start gap-1.5">
+                          <div
+                            className={
+                              operation.kind === "receipt"
+                                ? "pt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-300"
+                                : operation.kind === "expenditure"
+                                  ? "pt-1 text-sm font-semibold text-rose-600 dark:text-rose-300"
+                                  : "pt-1 text-sm font-semibold text-foreground"
+                            }
+                          >
+                            {operation.kind === "receipt" ? "+" : operation.kind === "expenditure" ? "-" : ""}
+                            {formatCurrency(operation.amount)}
+                          </div>
+                          <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+                            <Link
+                              href={getActivityDuplicateHref(operation)}
+                              aria-label="Копировать документ"
+                              title="Копировать"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+                            <Link
+                              href={
+                                operation.kind === "receipt"
+                                  ? `/receipts/${operation.id}/edit`
+                                  : operation.kind === "expenditure"
+                                    ? `/expenditures/${operation.id}/edit`
+                                    : `/transfers/${operation.id}/edit`
+                              }
+                              aria-label="Редактировать документ"
+                              title="Редактировать"
+                            >
+                              <PencilLine className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-[20px] border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
+                      Операций пока нет. Создай первый приход или расход, чтобы увидеть движение денег.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
 
             <div>
@@ -537,106 +638,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <Card>
-            <CardHeader className="pb-4">
-              <CardTitle>Последние документы</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <Button variant={activityFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("all")}>
-                  Все
-                </Button>
-                <Button variant={activityFilter === "receipt" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("receipt")}>
-                  Приходы
-                </Button>
-                <Button variant={activityFilter === "expenditure" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("expenditure")}>
-                  Расходы
-                </Button>
-                <Button variant={activityFilter === "transfer" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("transfer")}>
-                  Переводы
-                </Button>
-              </div>
-              {recentActivity.length > 0 ? (
-                recentActivity.map((operation) => (
-                  <div
-                    key={`${operation.kind}-${operation.id}`}
-                    className="flex items-start gap-3 rounded-[18px] border border-border/60 bg-background/75 px-3 py-3"
-                  >
-                    <Badge
-                      className="shrink-0"
-                      variant={operation.kind === "receipt" ? "success" : operation.kind === "transfer" ? "secondary" : "outline"}
-                    >
-                      {operation.kind === "receipt" ? "Приход" : operation.kind === "expenditure" ? "Расход" : "Перевод"}
-                    </Badge>
-
-                    <Link
-                      href={
-                        operation.kind === "receipt"
-                          ? `/receipts/${operation.id}/edit`
-                          : operation.kind === "expenditure"
-                            ? `/expenditures/${operation.id}/edit`
-                            : `/transfers/${operation.id}/edit`
-                      }
-                      className="min-w-0 flex-1 transition-colors hover:text-foreground/80"
-                    >
-                      <div className="truncate text-sm font-medium text-foreground">
-                        {operation.kind === "transfer"
-                          ? `${operation.wallet_from_name || "Без кошелька"} → ${operation.wallet_to_name || "Без кошелька"}`
-                          : `${operation.wallet_name || "Без кошелька"} · ${operation.cash_flow_item_name || "Без статьи"}`}
-                      </div>
-                      <div className="mt-1 text-xs leading-4 text-muted-foreground">
-                        {operation.description ? <div className="truncate">{operation.description}</div> : null}
-                        <div>{formatDate(operation.date)}</div>
-                      </div>
-                    </Link>
-
-                    <div className="flex shrink-0 items-start gap-1.5">
-                      <div
-                        className={
-                          operation.kind === "receipt"
-                            ? "pt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-300"
-                            : operation.kind === "expenditure"
-                              ? "pt-1 text-sm font-semibold text-rose-600 dark:text-rose-300"
-                              : "pt-1 text-sm font-semibold text-foreground"
-                        }
-                      >
-                        {operation.kind === "receipt" ? "+" : operation.kind === "expenditure" ? "-" : ""}
-                        {formatCurrency(operation.amount)}
-                      </div>
-                      <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-                        <Link
-                          href={getActivityDuplicateHref(operation)}
-                          aria-label="Копировать документ"
-                          title="Копировать"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-                        <Link
-                          href={
-                            operation.kind === "receipt"
-                              ? `/receipts/${operation.id}/edit`
-                              : operation.kind === "expenditure"
-                                ? `/expenditures/${operation.id}/edit`
-                                : `/transfers/${operation.id}/edit`
-                          }
-                          aria-label="Редактировать документ"
-                          title="Редактировать"
-                        >
-                          <PencilLine className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-[20px] border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
-                  Операций пока нет. Создай первый приход или расход, чтобы увидеть движение денег.
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </>
       )}
 
