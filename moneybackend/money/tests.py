@@ -4155,6 +4155,12 @@ class AiAssistantApiTests(TestCase):
             date=timezone.make_aware(datetime(2026, 4, 20, 12, 0, 0)),
         )
         Expenditure.objects.create(
+            amount=Decimal('300.00'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 27, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
             amount=Decimal('999.00'),
             wallet=self.wallet_sber,
             cash_flow_item=self.expense_item,
@@ -4180,12 +4186,15 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'info')
         self.assertEqual(response.data['intent'], 'get_month_expenses_by_item')
-        self.assertIn('Расходы за апрель 2026 по статьям:', response.data['reply_text'])
-        self.assertIn('Продукты: 542.00', response.data['reply_text'])
-        self.assertIn('бюджет 1000.00', response.data['reply_text'])
-        self.assertIn('остаток 458.00', response.data['reply_text'])
-        self.assertIn('Итого расход: 542.00', response.data['reply_text'])
+        self.assertIn('💸 апрель 2026', response.data['reply_text'])
+        self.assertNotIn('⏱', response.data['reply_text'])
+        self.assertNotIn('🎯', response.data['reply_text'])
+        self.assertIn('Продукты 💸542 ₽ 📊-46%', response.data['reply_text'])
+        self.assertIn('🧾 💸542 ₽ 📊-46%', response.data['reply_text'])
+        self.assertNotIn('842', response.data['reply_text'])
         self.assertEqual(response.data['expense_summary']['total_actual'], '542.00')
+        self.assertEqual(response.data['expense_summary']['total_budget'], '1000.00')
+        self.assertEqual(response.data['expense_summary']['total_deviation_percent'], '-46%')
 
     def test_ai_telegram_webhook_can_select_option_by_number(self):
         client = APIClient()

@@ -3,7 +3,7 @@ import json
 import mimetypes
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib import error, request
 
@@ -257,6 +257,26 @@ def _serialize_decimal(value):
     if parsed_value is None:
         return None
     return f'{parsed_value.quantize(Decimal("0.01")):.2f}'
+
+
+def _format_compact_money(value):
+    amount = _parse_amount(value)
+    if amount is None:
+        return '0 ₽'
+    amount = amount.quantize(Decimal('0.01'))
+    if amount == amount.to_integral_value():
+        return f'{int(amount):,}'.replace(',', ' ') + ' ₽'
+    return f'{amount:,.2f}'.replace(',', ' ') + ' ₽'
+
+
+def _format_budget_deviation_percent(*, actual, budget):
+    actual_amount = _parse_amount(actual) or ZERO_AMOUNT
+    budget_amount = _parse_amount(budget)
+    if budget_amount is None or budget_amount <= ZERO_AMOUNT:
+        return None
+    percent = ((actual_amount - budget_amount) / budget_amount * Decimal('100')).quantize(Decimal('1'))
+    sign = '+' if percent > ZERO_AMOUNT else ''
+    return f'{sign}{percent:.0f}%'
 
 
 def _is_affirmative_confirmation(text):
@@ -1083,7 +1103,10 @@ def _format_month_label(month_start):
 
 
 def _month_expenses_by_item(*, at_time=None):
+    selected_at = timezone.localtime(at_time or timezone.now())
     month_start, next_month_start = _current_month_bounds(at_time=at_time)
+    actual_period_end = min(selected_at, next_month_start)
+    budget_period_end = next_month_start.date() - timedelta(days=1)
     base_queryset = BudgetExpense.objects.filter(
         period__gte=month_start,
         period__lt=next_month_start,
@@ -1096,7 +1119,10 @@ def _month_expenses_by_item(*, at_time=None):
             'cash_flow_item_name': row['cash_flow_item__name'] or 'Без статьи',
             'actual': (row['actual'] or ZERO_AMOUNT).quantize(Decimal('0.01')),
         }
-        for row in base_queryset.filter(type_of_document__in=EXPENSE_ACTUAL_DOCUMENT_TYPES)
+        for row in base_queryset.filter(
+            type_of_document__in=EXPENSE_ACTUAL_DOCUMENT_TYPES,
+            period__lte=actual_period_end,
+        )
         .values('cash_flow_item_id', 'cash_flow_item__name')
         .annotate(actual=Sum('amount'))
     }
@@ -1117,26 +1143,32 @@ def _month_expenses_by_item(*, at_time=None):
         if planned is not None:
             total_budget += planned
         deviation = actual - planned if planned is not None else None
+        deviation_percent = _format_budget_deviation_percent(actual=actual, budget=planned)
         rows.append({
             'cash_flow_item_id': row['cash_flow_item_id'],
             'cash_flow_item_name': row['cash_flow_item_name'],
             'actual': _serialize_decimal(actual),
             'budget': _serialize_decimal(planned) if planned is not None and planned > ZERO_AMOUNT else None,
             'deviation': _serialize_decimal(deviation) if deviation is not None else None,
+            'deviation_percent': deviation_percent,
             'overrun': _serialize_decimal(max(deviation, ZERO_AMOUNT)) if deviation is not None else None,
             'remaining': _serialize_decimal(max(planned - actual, ZERO_AMOUNT)) if planned is not None else None,
         })
 
     rows.sort(key=lambda item: (-Decimal(item['actual']), item['cash_flow_item_name']))
     total_deviation = total_actual - total_budget if total_budget > ZERO_AMOUNT else None
+    total_deviation_percent = _format_budget_deviation_percent(actual=total_actual, budget=total_budget)
     return {
         'period_start': month_start.isoformat(),
         'period_end': next_month_start.isoformat(),
         'period_label': _format_month_label(month_start),
+        'actual_as_of_label': selected_at.strftime('%d.%m'),
+        'budget_to_label': budget_period_end.strftime('%d.%m'),
         'items': rows,
         'total_actual': _serialize_decimal(total_actual),
         'total_budget': _serialize_decimal(total_budget) if total_budget > ZERO_AMOUNT else None,
         'total_deviation': _serialize_decimal(total_deviation) if total_deviation is not None else None,
+        'total_deviation_percent': total_deviation_percent,
         'total_overrun': _serialize_decimal(max(total_deviation, ZERO_AMOUNT)) if total_deviation is not None else None,
         'total_remaining': _serialize_decimal(max(total_budget - total_actual, ZERO_AMOUNT)) if total_deviation is not None else None,
     }
@@ -2627,34 +2659,23 @@ class AiOperationService:
         if not rows:
             return f'Расходов за {summary.get("period_label", "текущий месяц")} по статьям не найдено.'
 
-        lines = [f'Расходы за {summary["period_label"]} по статьям:']
+        lines = [f'💸 {summary["period_label"]}']
         visible_rows = rows[:15]
-        for row in visible_rows:
-            line = f'- {row["cash_flow_item_name"]}: {row["actual"]}'
+        for index, row in enumerate(visible_rows, start=1):
+            line = f'{index}. {row["cash_flow_item_name"]} 💸{_format_compact_money(row["actual"])}'
             if row.get('budget'):
-                line += f' | бюджет {row["budget"]}'
-                if Decimal(row.get('overrun') or '0.00') > ZERO_AMOUNT:
-                    line += f' | перерасход {row["overrun"]}'
-                elif Decimal(row.get('remaining') or '0.00') > ZERO_AMOUNT:
-                    line += f' | остаток {row["remaining"]}'
-                else:
-                    line += ' | в рамках бюджета'
-            else:
-                line += ' | бюджета нет'
+                if row.get('deviation_percent'):
+                    line += f' 📊{row["deviation_percent"]}'
             lines.append(line)
 
         if len(rows) > len(visible_rows):
             lines.append(f'И еще {len(rows) - len(visible_rows)} статей.')
 
-        lines.append(f'Итого расход: {summary["total_actual"]}')
+        total_line = f'🧾 💸{_format_compact_money(summary["total_actual"])}'
         if summary.get('total_budget'):
-            total_deviation = Decimal(summary.get('total_deviation') or '0.00')
-            if total_deviation > ZERO_AMOUNT:
-                lines.append(f'Итого бюджет: {summary["total_budget"]} | перерасход {summary["total_overrun"]}')
-            elif total_deviation < ZERO_AMOUNT:
-                lines.append(f'Итого бюджет: {summary["total_budget"]} | остаток {summary["total_remaining"]}')
-            else:
-                lines.append(f'Итого бюджет: {summary["total_budget"]} | в рамках бюджета')
+            if summary.get('total_deviation_percent'):
+                total_line += f' 📊{summary["total_deviation_percent"]}'
+        lines.append(total_line)
         return '\n'.join(lines)
 
     def _build_confirmation_reply(self, reply_text, options, missing_fields=None, missing_fields_by_item=None):
