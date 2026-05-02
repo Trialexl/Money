@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
@@ -29,19 +30,39 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { exportFormatters } from "@/lib/export-utils"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
 import { DashboardService, type DashboardWalletSummary } from "@/services/dashboard-service"
-import { ReportService, type BudgetReportSummary, type CashFlowReportDetail, type CashFlowReportMonth } from "@/services/report-service"
+import {
+  ReportService,
+  type BudgetReportDetail,
+  type BudgetReportSummary,
+  type CashFlowReportDetail,
+  type CashFlowReportMonth,
+} from "@/services/report-service"
 
 type TimelineMode = "daily" | "monthly"
 type RangePreset = "week" | "month" | "quarter" | "year" | "ytd" | null
+type ReportTab = "cashflow" | "wallets" | "categories" | "budget"
 
-type BudgetExecutionRow = {
+type BudgetPlanningRow = {
   key: string
-  name: string
-  type: "income" | "expense"
-  budgetAmount: number
+  monthKey: string
+  monthLabel: string
+  itemKey: string
+  itemName: string
+  plannedAmount: number
   actualAmount: number
-  difference: number
+  balance: number
   executionPercent: number
+}
+
+type BudgetPlanDetailRow = {
+  key: string
+  monthKey: string
+  monthLabel: string
+  itemKey: string
+  itemName: string
+  projectName: string
+  amount: number
+  documentHref: string | null
 }
 
 type TimelineRow = {
@@ -87,6 +108,26 @@ function shiftDays(days: number) {
   return date
 }
 
+function getMonthInputValue(value: string) {
+  return getDateKey(value).slice(0, 7) || formatDateForInput().slice(0, 7)
+}
+
+function getMonthStartDate(monthValue: string) {
+  return `${monthValue}-01`
+}
+
+function getMonthEndDate(monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number)
+  return formatDateForInput(new Date(year, month, 0))
+}
+
+function getBudgetDocumentHref(row: BudgetReportDetail) {
+  if (!row.document_id || row.document_type !== "Budget") {
+    return null
+  }
+  return `/budgets/${row.document_id}/edit`
+}
+
 function renderNoData(title: string, description: string) {
   return (
     <Card>
@@ -103,30 +144,38 @@ export default function ReportsPage() {
   const searchParams = useSearchParams()
   const today = formatDateForInput()
   const [timelineMode, setTimelineMode] = useState<TimelineMode>("daily")
+  const [activeTab, setActiveTab] = useState<ReportTab>("cashflow")
   const [selectedPreset, setSelectedPreset] = useState<RangePreset>("month")
   const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || formatDateForInput(shiftDays(-30)))
   const [dateTo, setDateTo] = useState(searchParams.get("date_to") || today)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
+  const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
+  const budgetFromMonth = getMonthInputValue(dateFrom)
+  const budgetToMonth = getMonthInputValue(dateTo)
+  const budgetDateFrom = getMonthStartDate(budgetFromMonth)
+  const budgetDateTo = getMonthEndDate(budgetToMonth)
+  const budgetYear = Number(budgetFromMonth.slice(0, 4)) || new Date().getFullYear()
   const cashFlowChartRef = useRef<HTMLDivElement>(null)
   const walletChartRef = useRef<HTMLDivElement>(null)
   const categoryChartRef = useRef<HTMLDivElement>(null)
-  const budgetIncomeChartRef = useRef<HTMLDivElement>(null)
   const budgetExpenseChartRef = useRef<HTMLDivElement>(null)
 
   const reportsQuery = useQuery({
-    queryKey: ["reports-analytics", { dateFrom, dateTo, budgetForecast }],
+    queryKey: ["reports-analytics", { dateFrom, dateTo, budgetDateFrom, budgetDateTo, budgetForecast }],
     staleTime: 60_000,
     queryFn: async () => {
-      const [cashFlow, budgetIncome, budgetExpense, overview] = await Promise.all([
+      const [cashFlow, budgetExpense, overview] = await Promise.all([
         ReportService.getCashFlowReport({ dateFrom, dateTo }),
-        ReportService.getBudgetIncomeReport({ dateFrom, dateTo, limitByToday: budgetForecast }),
-        ReportService.getBudgetExpenseReport({ dateFrom, dateTo, limitByToday: budgetForecast }),
+        ReportService.getBudgetExpenseReport({
+          dateFrom: budgetDateFrom,
+          dateTo: budgetDateTo,
+          limitByToday: budgetForecast,
+        }),
         DashboardService.getOverview({ date: dateTo, hideHiddenWallets: true }),
       ])
 
       return {
         cashFlow,
-        budgetIncome,
         budgetExpense,
         overview,
       }
@@ -139,6 +188,31 @@ export default function ReportsPage() {
     params.set("date_to", nextDateTo)
     params.set("budget_forecast", nextBudgetForecast ? "true" : "false")
     router.replace(`/reports?${params.toString()}`, { scroll: false })
+  }
+
+  const setBudgetMonthRange = (nextDateFromMonth: string, nextDateToMonth: string) => {
+    if (!nextDateFromMonth || !nextDateToMonth) {
+      return
+    }
+    const normalizedDateToMonth =
+      nextDateToMonth < nextDateFromMonth ? nextDateFromMonth : nextDateToMonth
+    const nextDateFrom = getMonthStartDate(nextDateFromMonth)
+    const nextDateTo = getMonthEndDate(normalizedDateToMonth)
+    setDateFrom(nextDateFrom)
+    setDateTo(nextDateTo)
+    setSelectedPreset(null)
+    setSelectedBudgetPlanItemKey(null)
+    updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
+  }
+
+  const setBudgetYearRange = (year: number) => {
+    const nextDateFrom = `${year}-01-01`
+    const nextDateTo = `${year}-12-31`
+    setDateFrom(nextDateFrom)
+    setDateTo(nextDateTo)
+    setSelectedPreset(null)
+    setSelectedBudgetPlanItemKey(null)
+    updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
   }
 
   const setPresetRange = (preset: Exclude<RangePreset, null>) => {
@@ -188,13 +262,14 @@ export default function ReportsPage() {
     )
   }
 
-  const { cashFlow, budgetIncome, budgetExpense, overview } = reportsQuery.data
+  const { cashFlow, budgetExpense, overview } = reportsQuery.data
   const incomeTotal = cashFlow.totals.income
   const expenseTotal = cashFlow.totals.expense
   const netTotal = incomeTotal - expenseTotal
   const plannedBudgetCount = budgetExpense.summary.length
   const includedExpenseTotal = budgetExpense.totals.actual
   const isFutureReportDate = dateTo > today
+  const isBudgetTab = activeTab === "budget"
 
   const timelineMap = new Map<string, TimelineRow>()
 
@@ -289,67 +364,115 @@ export default function ReportsPage() {
     percentage: category.percentage,
   }))
 
-  const budgetExecutionMap = new Map<string, BudgetExecutionRow>()
-
-  budgetIncome.summary.forEach((summaryRow: BudgetReportSummary) => {
-    const key = `income:${summaryRow.cash_flow_item_id || summaryRow.cash_flow_item_name || "unknown"}`
-    const budgetRow = budgetExecutionMap.get(key) || {
-      key,
-      name: summaryRow.cash_flow_item_name || "Неизвестная статья",
-      type: "income" as const,
-      budgetAmount: 0,
-      actualAmount: 0,
-      difference: 0,
-      executionPercent: 0,
-    }
-    budgetRow.budgetAmount += summaryRow.budget
-    budgetRow.actualAmount += summaryRow.actual
-    budgetRow.difference += summaryRow.balance
-    budgetExecutionMap.set(key, budgetRow)
-  })
+  const budgetPlanningMap = new Map<string, BudgetPlanningRow>()
 
   budgetExpense.summary.forEach((row: BudgetReportSummary) => {
-    const key = `expense:${row.cash_flow_item_id || row.cash_flow_item_name || "unknown"}`
-    const budgetRow = budgetExecutionMap.get(key) || {
+    if (row.budget <= 0) {
+      return
+    }
+
+    const monthKey = getMonthKey(row.period)
+    const itemKey = row.cash_flow_item_id || row.cash_flow_item_name || "unknown"
+    const key = `${monthKey}:${itemKey}`
+    const planRow = budgetPlanningMap.get(key) || {
       key,
-      name: row.cash_flow_item_name || "Неизвестная статья",
-      type: "expense" as const,
-      budgetAmount: 0,
+      monthKey,
+      monthLabel: formatMonthLabel(monthKey),
+      itemKey,
+      itemName: row.cash_flow_item_name || "Неизвестная статья",
+      plannedAmount: 0,
       actualAmount: 0,
-      difference: 0,
+      balance: 0,
       executionPercent: 0,
     }
-    budgetRow.budgetAmount += row.budget
-    budgetRow.actualAmount += row.actual
-    budgetRow.difference += row.balance
-    budgetExecutionMap.set(key, budgetRow)
+    planRow.plannedAmount += row.budget
+    planRow.actualAmount += row.actual
+    planRow.balance += row.balance
+    planRow.executionPercent =
+      planRow.plannedAmount > 0 ? (planRow.actualAmount / planRow.plannedAmount) * 100 : 0
+    budgetPlanningMap.set(key, planRow)
   })
 
-  const budgetExecutionRows = Array.from(budgetExecutionMap.values())
-    .map((row: BudgetExecutionRow) => {
-      const executionPercent = row.budgetAmount > 0 ? (row.actualAmount / row.budgetAmount) * 100 : row.actualAmount > 0 ? 100 : 0
+  const budgetPlanningRows = Array.from(budgetPlanningMap.values()).sort((left, right) => {
+    const monthCompare = left.monthKey.localeCompare(right.monthKey)
+    if (monthCompare !== 0) {
+      return monthCompare
+    }
+    return right.plannedAmount - left.plannedAmount
+  })
+  const budgetPlanItemTotals = new Map<string, { key: string; name: string; plannedAmount: number }>()
+  budgetPlanningRows.forEach((row) => {
+    const item = budgetPlanItemTotals.get(row.itemKey) || {
+      key: row.itemKey,
+      name: row.itemName,
+      plannedAmount: 0,
+    }
+    item.plannedAmount += row.plannedAmount
+    budgetPlanItemTotals.set(row.itemKey, item)
+  })
+  const budgetPlanItems = Array.from(budgetPlanItemTotals.values()).sort(
+    (left, right) => right.plannedAmount - left.plannedAmount
+  )
+  const budgetPlanChartKeys = budgetPlanItems.map((item) => item.name)
+  const budgetPlanItemKeyByName = new Map(budgetPlanItems.map((item) => [item.name, item.key]))
+  const budgetPlanMonthKeys = Array.from(new Set(budgetPlanningRows.map((row) => row.monthKey))).sort()
+  const budgetPlanChartRows = budgetPlanMonthKeys.map((monthKey) => {
+    const chartRow: Record<string, string | number> = {
+      month: formatMonthLabel(monthKey),
+    }
+    budgetPlanningRows
+      .filter((row) => row.monthKey === monthKey)
+      .forEach((row) => {
+        chartRow[row.itemName] = (Number(chartRow[row.itemName]) || 0) + row.plannedAmount
+      })
+    return chartRow
+  })
+  const activeSelectedBudgetPlanItemKey =
+    selectedBudgetPlanItemKey && budgetPlanItemTotals.has(selectedBudgetPlanItemKey)
+      ? selectedBudgetPlanItemKey
+      : null
+  const selectedBudgetPlanItemName =
+    activeSelectedBudgetPlanItemKey
+      ? budgetPlanItems.find((item) => item.key === activeSelectedBudgetPlanItemKey)?.name ?? null
+      : null
+  const visibleBudgetPlanningRows = activeSelectedBudgetPlanItemKey
+    ? budgetPlanningRows.filter((row) => row.itemKey === activeSelectedBudgetPlanItemKey)
+    : budgetPlanningRows
+  const budgetPlanDetailRows: BudgetPlanDetailRow[] = budgetExpense.details
+    .filter((row) => row.entry_type === "budget" && row.amount > 0)
+    .map((row) => {
+      const monthKey = getMonthKey(row.period)
+      const itemKey = row.cash_flow_item_id || row.cash_flow_item_name || "unknown"
       return {
-        ...row,
-        executionPercent,
+        key: `${row.document_id || "unknown"}:${row.period}:${itemKey}:${row.amount}`,
+        monthKey,
+        monthLabel: formatMonthLabel(monthKey),
+        itemKey,
+        itemName: row.cash_flow_item_name || "Неизвестная статья",
+        projectName: row.project_name || "Без проекта",
+        amount: row.amount,
+        documentHref: getBudgetDocumentHref(row),
       }
     })
-    .sort((left: BudgetExecutionRow, right: BudgetExecutionRow) => right.budgetAmount - left.budgetAmount)
-
-  const incomeBudgetRows = budgetExecutionRows.filter((row: BudgetExecutionRow) => row.type === "income")
-  const expenseBudgetRows = budgetExecutionRows.filter((row: BudgetExecutionRow) => row.type === "expense")
-  const totalBudgetIncome = budgetIncome.totals.budget
-  const totalBudgetExpense = budgetExpense.totals.budget
-  const totalActualIncome = budgetIncome.totals.actual
-  const totalActualExpense = budgetExpense.totals.actual
-  const incomeBudgetChartRows = incomeBudgetRows.slice(0, 8).map((row: BudgetExecutionRow) => ({ name: row.name, budget: row.budgetAmount, actual: row.actualAmount }))
-  const expenseBudgetChartRows = expenseBudgetRows.slice(0, 8).map((row: BudgetExecutionRow) => ({ name: row.name, budget: row.budgetAmount, actual: row.actualAmount }))
-
-  const budgetExportRows = budgetExecutionRows.map((row: BudgetExecutionRow) => ({
-    name: row.name,
-    type: row.type === "income" ? "Доход" : "Расход",
-    budgetAmount: row.budgetAmount,
+    .sort((left, right) => {
+      const monthCompare = left.monthKey.localeCompare(right.monthKey)
+      if (monthCompare !== 0) {
+        return monthCompare
+      }
+      return left.itemName.localeCompare(right.itemName, "ru")
+    })
+  const visibleBudgetPlanDetailRows = activeSelectedBudgetPlanItemKey
+    ? budgetPlanDetailRows.filter((row) => row.itemKey === activeSelectedBudgetPlanItemKey)
+    : budgetPlanDetailRows
+  const plannedExpenseTotal = budgetPlanningRows.reduce((sum, row) => sum + row.plannedAmount, 0)
+  const plannedExpenseActual = budgetPlanningRows.reduce((sum, row) => sum + row.actualAmount, 0)
+  const plannedExpenseBalance = plannedExpenseTotal - plannedExpenseActual
+  const budgetPlanExportRows = budgetPlanningRows.map((row) => ({
+    month: row.monthLabel,
+    cashFlowItem: row.itemName,
+    plannedAmount: row.plannedAmount,
     actualAmount: row.actualAmount,
-    difference: row.difference,
+    balance: row.balance,
     executionPercent: row.executionPercent,
   }))
 
@@ -365,84 +488,135 @@ export default function ReportsPage() {
         <CardContent className="space-y-4 p-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-1">
-              <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">Период анализа</div>
+              <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">
+                {isBudgetTab ? "Период бюджета" : "Период анализа"}
+              </div>
               <div className="text-sm leading-5 text-muted-foreground">
-                Быстрый диапазон или свой период.
+                {isBudgetTab
+                  ? "Выбор только по месяцам: бюджет считается от начала до конца месяца."
+                  : "Быстрый диапазон или свой период."}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant={selectedPreset === "week" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("week")}>
-                7 дней
-              </Button>
-              <Button variant={selectedPreset === "month" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("month")}>
-                Месяц
-              </Button>
-              <Button variant={selectedPreset === "quarter" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("quarter")}>
-                Квартал
-              </Button>
-              <Button variant={selectedPreset === "year" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("year")}>
-                Год
-              </Button>
-              <Button variant={selectedPreset === "ytd" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("ytd")}>
-                С начала года
-              </Button>
-            </div>
+            {isBudgetTab ? (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => setBudgetYearRange(budgetYear - 1)}>
+                  {budgetYear - 1}
+                </Button>
+                <Button variant="default" size="sm" onClick={() => setBudgetYearRange(new Date().getFullYear())}>
+                  Текущий год
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setBudgetYearRange(budgetYear + 1)}>
+                  {budgetYear + 1}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button variant={selectedPreset === "week" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("week")}>
+                  7 дней
+                </Button>
+                <Button variant={selectedPreset === "month" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("month")}>
+                  Месяц
+                </Button>
+                <Button variant={selectedPreset === "quarter" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("quarter")}>
+                  Квартал
+                </Button>
+                <Button variant={selectedPreset === "year" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("year")}>
+                  Год
+                </Button>
+                <Button variant={selectedPreset === "ytd" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("ytd")}>
+                  С начала года
+                </Button>
+              </div>
+            )}
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="space-y-2">
-              <Label htmlFor="reports-date-from">Дата с</Label>
-              <Input
-                id="reports-date-from"
-                type="date"
-                value={dateFrom}
-                onChange={(event) => {
-                  const nextDateFrom = event.target.value
-                  setDateFrom(nextDateFrom)
-                  setSelectedPreset(null)
-                  updateReportUrl(nextDateFrom, dateTo, budgetForecast)
+          {isBudgetTab ? (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <div className="space-y-2">
+                <Label htmlFor="budget-period-month-from">Месяц с</Label>
+                <Input
+                  id="budget-period-month-from"
+                  type="month"
+                  value={budgetFromMonth}
+                  onChange={(event) => setBudgetMonthRange(event.target.value, budgetToMonth)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="budget-period-month-to">Месяц по</Label>
+                <Input
+                  id="budget-period-month-to"
+                  type="month"
+                  value={budgetToMonth}
+                  onChange={(event) => setBudgetMonthRange(budgetFromMonth, event.target.value)}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <div className="space-y-2">
+                <Label htmlFor="reports-date-from">Дата с</Label>
+                <Input
+                  id="reports-date-from"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => {
+                    const nextDateFrom = event.target.value
+                    setDateFrom(nextDateFrom)
+                    setSelectedPreset(null)
+                    setSelectedBudgetPlanItemKey(null)
+                    updateReportUrl(nextDateFrom, dateTo, budgetForecast)
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reports-date-to">Дата по</Label>
+                <Input
+                  id="reports-date-to"
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => {
+                    const nextDateTo = event.target.value
+                    setDateTo(nextDateTo)
+                    setSelectedPreset(null)
+                    setSelectedBudgetPlanItemKey(null)
+                    updateReportUrl(dateFrom, nextDateTo, budgetForecast)
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {isBudgetTab ? (
+            <div className="flex flex-col gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <Label htmlFor="budget-forecast-mode" className="cursor-pointer">
+                  Прогноз бюджета
+                </Label>
+                <div className="text-sm leading-5 text-muted-foreground">
+                  План считается до конца выбранного месяца, факт ограничивается сегодняшним днем.
+                </div>
+              </div>
+              <Switch
+                id="budget-forecast-mode"
+                checked={budgetForecast}
+                onCheckedChange={(checked) => {
+                  const nextBudgetForecast = Boolean(checked)
+                  setBudgetForecast(nextBudgetForecast)
+                  updateReportUrl(dateFrom, dateTo, nextBudgetForecast)
                 }}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="reports-date-to">Дата по</Label>
-              <Input
-                id="reports-date-to"
-                type="date"
-                value={dateTo}
-                onChange={(event) => {
-                  const nextDateTo = event.target.value
-                  setDateTo(nextDateTo)
-                  setSelectedPreset(null)
-                  updateReportUrl(dateFrom, nextDateTo, budgetForecast)
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <Label htmlFor="budget-forecast-mode" className="cursor-pointer">
-                Прогноз бюджета
-              </Label>
-              <div className="text-sm leading-5 text-muted-foreground">
-                План считается до выбранной даты, факт ограничивается сегодняшним днем.
-              </div>
-            </div>
-            <Switch
-              id="budget-forecast-mode"
-              checked={budgetForecast}
-              onCheckedChange={(checked) => {
-                const nextBudgetForecast = Boolean(checked)
-                setBudgetForecast(nextBudgetForecast)
-                updateReportUrl(dateFrom, dateTo, nextBudgetForecast)
-              }}
-            />
-          </div>
+          ) : null}
 
           <div className="rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
-            Период: с {formatDate(dateFrom)} по {formatDate(dateTo)}
-            {isFutureReportDate && budgetForecast ? " · прогноз по бюджету включен" : ""}
+            {isBudgetTab ? (
+              <>Период бюджета: с {formatDate(budgetDateFrom)} по {formatDate(budgetDateTo)}</>
+            ) : (
+              <>
+                Период: с {formatDate(dateFrom)} по {formatDate(dateTo)}
+                {isFutureReportDate && budgetForecast ? " · прогноз по бюджету включен" : ""}
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -490,7 +664,11 @@ export default function ReportsPage() {
         <StatCard label="Бюджетный факт" value={formatCurrency(includedExpenseTotal)} hint={`${plannedBudgetCount} строк отчета по расходному бюджету`} icon={Landmark} />
       </div>
 
-      <Tabs defaultValue="cashflow" className="space-y-5">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as ReportTab)}
+        className="space-y-5"
+      >
         <TabsList className="grid h-auto grid-cols-2 gap-2 rounded-[18px] bg-muted/60 p-1.5 xl:grid-cols-4">
           <TabsTrigger value="cashflow" className="rounded-[14px] py-2.5">
             Поток денег
@@ -502,7 +680,7 @@ export default function ReportsPage() {
             Категории
           </TabsTrigger>
           <TabsTrigger value="budget" className="rounded-[14px] py-2.5">
-            Исполнение бюджета
+            План бюджета
           </TabsTrigger>
         </TabsList>
 
@@ -833,226 +1011,203 @@ export default function ReportsPage() {
           <Card>
             <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-1">
-                <CardTitle>Исполнение бюджета</CardTitle>
-                <CardDescription>План и факт рядом, чтобы сразу видеть отклонения по доходам и расходам.</CardDescription>
+                <CardTitle>План расходов по месяцам</CardTitle>
+                <CardDescription>
+                  Бюджетный отчет работает месячными периодами: от первого дня месяца до последнего.
+                </CardDescription>
               </div>
               <ExportReportButtons
-                data={budgetExportRows}
+                data={budgetPlanExportRows}
                 columns={[
-                  { key: "name", header: "Категория" },
-                  { key: "type", header: "Тип" },
-                  { key: "budgetAmount", header: "План", formatter: exportFormatters.currency },
+                  { key: "month", header: "Месяц" },
+                  { key: "cashFlowItem", header: "Статья" },
+                  { key: "plannedAmount", header: "План", formatter: exportFormatters.currency },
                   { key: "actualAmount", header: "Факт", formatter: exportFormatters.currency },
-                  { key: "difference", header: "Разница", formatter: exportFormatters.currency },
+                  { key: "balance", header: "Остаток", formatter: exportFormatters.currency },
                   { key: "executionPercent", header: "Исполнение", formatter: exportFormatters.percent },
                 ]}
-                filename="budget-execution-report"
-                title="Исполнение бюджета"
+                filename="budget-expense-plan-by-month"
+                title="План расходного бюджета по месяцам"
+                chartRef={budgetExpenseChartRef}
               />
             </CardHeader>
           </Card>
 
-          <div className="grid gap-6 xl:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Доходный бюджет</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <div className="text-muted-foreground">План</div>
-                    <div className="mt-2 text-xl font-semibold">{formatCurrency(totalBudgetIncome)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Факт</div>
-                    <div className="mt-2 text-xl font-semibold text-emerald-600 dark:text-emerald-300">{formatCurrency(totalActualIncome)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Исполнение</div>
-                    <div className="mt-2 text-xl font-semibold">
-                      {totalBudgetIncome > 0 ? `${Math.round((totalActualIncome / totalBudgetIncome) * 100)}%` : "—"}
-                    </div>
-                  </div>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-emerald-500"
-                    style={{
-                      width: `${totalBudgetIncome > 0 ? Math.min(100, (totalActualIncome / totalBudgetIncome) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Расходный бюджет</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <div className="text-muted-foreground">План</div>
-                    <div className="mt-2 text-xl font-semibold">{formatCurrency(totalBudgetExpense)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Факт</div>
-                    <div className="mt-2 text-xl font-semibold text-rose-600 dark:text-rose-300">{formatCurrency(totalActualExpense)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Исполнение</div>
-                    <div className="mt-2 text-xl font-semibold">
-                      {totalBudgetExpense > 0 ? `${Math.round((totalActualExpense / totalBudgetExpense) * 100)}%` : "—"}
-                    </div>
-                  </div>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={`h-full ${totalActualExpense > totalBudgetExpense ? "bg-rose-500" : "bg-primary"}`}
-                    style={{
-                      width: `${totalBudgetExpense > 0 ? Math.min(100, (totalActualExpense / totalBudgetExpense) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
+          <div className="grid gap-4 md:grid-cols-3">
+            <StatCard
+              label="План расходов"
+              value={formatCurrency(plannedExpenseTotal)}
+              hint={`${budgetPlanMonthKeys.length} мес. · ${budgetPlanItems.length} стат.`}
+              icon={Landmark}
+            />
+            <StatCard
+              label="Факт по плановым статьям"
+              value={formatCurrency(plannedExpenseActual)}
+              hint={budgetForecast ? "Факт ограничен сегодняшним днем" : "Факт за выбранный период"}
+              icon={TrendingDown}
+              tone="danger"
+            />
+            <StatCard
+              label="Остаток по плану"
+              value={formatCurrency(plannedExpenseBalance)}
+              hint="План минус факт по запланированным статьям"
+              icon={BarChart3}
+              tone={plannedExpenseBalance >= 0 ? "positive" : "danger"}
+            />
           </div>
 
-          {budgetExecutionRows.length === 0 ? (
-            renderNoData("Нет данных по исполнению бюджета", "За выбранный период не найдено бюджетов и связанных с ними фактических операций.")
+          {budgetPlanningRows.length === 0 ? (
+            renderNoData("Нет плана расходного бюджета", "За выбранные месяцы не найдено запланированных расходных статей.")
           ) : (
             <>
-              <div className="grid gap-6 xl:grid-cols-2">
-                <Card>
-                  <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <CardTitle>Доходы: план vs факт</CardTitle>
-                    </div>
-                    <ExportReportButtons
-                      data={incomeBudgetChartRows}
-                      columns={[
-                        { key: "name", header: "Категория" },
-                        { key: "budget", header: "План", formatter: exportFormatters.currency },
-                        { key: "actual", header: "Факт", formatter: exportFormatters.currency },
-                      ]}
-                      filename="budget-income-plan-fact"
-                      title="Доходный бюджет: план vs факт"
-                      chartRef={budgetIncomeChartRef}
-                    />
-                  </CardHeader>
-                  <CardContent>
-                    {incomeBudgetChartRows.length === 0 ? (
-                      <div className="py-20 text-center text-sm text-muted-foreground">Доходных бюджетов в выбранном периоде нет.</div>
-                    ) : (
-                      <div className="h-[380px]" ref={budgetIncomeChartRef}>
-                        <ResponsiveBar
-                          data={incomeBudgetChartRows}
-                          keys={["budget", "actual"]}
-                          indexBy="name"
-                          margin={{ top: 20, right: 20, bottom: 30, left: 130 }}
-                          padding={0.3}
-                          layout="horizontal"
-                          groupMode="grouped"
-                          axisBottom={{ tickSize: 0, tickPadding: 8 }}
-                          axisLeft={{ tickSize: 0, tickPadding: 8 }}
-                          tooltip={({ id, value, indexValue }) => (
-                            <div className="rounded border bg-background px-2 py-1 text-xs">
-                              {String(indexValue)} / {String(id)}: {formatCurrency(Number(value))}
-                            </div>
-                          )}
-                          colors={["hsl(var(--primary))", "#10b981"]}
-                        />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <CardTitle>Расходы: план vs факт</CardTitle>
-                    </div>
-                    <ExportReportButtons
-                      data={expenseBudgetChartRows}
-                      columns={[
-                        { key: "name", header: "Категория" },
-                        { key: "budget", header: "План", formatter: exportFormatters.currency },
-                        { key: "actual", header: "Факт", formatter: exportFormatters.currency },
-                      ]}
-                      filename="budget-expense-plan-fact"
-                      title="Расходный бюджет: план vs факт"
-                      chartRef={budgetExpenseChartRef}
-                    />
-                  </CardHeader>
-                  <CardContent>
-                    {expenseBudgetChartRows.length === 0 ? (
-                      <div className="py-20 text-center text-sm text-muted-foreground">Расходных бюджетов в выбранном периоде нет.</div>
-                    ) : (
-                      <div className="h-[380px]" ref={budgetExpenseChartRef}>
-                        <ResponsiveBar
-                          data={expenseBudgetChartRows}
-                          keys={["budget", "actual"]}
-                          indexBy="name"
-                          margin={{ top: 20, right: 20, bottom: 30, left: 130 }}
-                          padding={0.3}
-                          layout="horizontal"
-                          groupMode="grouped"
-                          axisBottom={{ tickSize: 0, tickPadding: 8 }}
-                          axisLeft={{ tickSize: 0, tickPadding: 8 }}
-                          tooltip={({ id, value, indexValue }) => (
-                            <div className="rounded border bg-background px-2 py-1 text-xs">
-                              {String(indexValue)} / {String(id)}: {formatCurrency(Number(value))}
-                            </div>
-                          )}
-                          colors={["hsl(var(--primary))", "#ef4444"]}
-                        />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
               <Card>
-                <CardHeader>
-                  <CardTitle>Детализация исполнения бюджета</CardTitle>
+                <CardHeader className="gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-1">
+                    <CardTitle>Общий график планируемых расходов</CardTitle>
+                    <CardDescription>
+                      Каждый месяц собран из статей расхода. Клик по сегменту фильтрует таблицы ниже.
+                    </CardDescription>
+                  </div>
+                  {selectedBudgetPlanItemName ? (
+                    <Button variant="outline" size="sm" onClick={() => setSelectedBudgetPlanItemKey(null)}>
+                      Все статьи
+                    </Button>
+                  ) : null}
                 </CardHeader>
                 <CardContent>
+                  <div className="h-[460px]" ref={budgetExpenseChartRef}>
+                    <ResponsiveBar
+                      data={budgetPlanChartRows}
+                      keys={budgetPlanChartKeys}
+                      indexBy="month"
+                      margin={{ top: 20, right: 20, bottom: 80, left: 64 }}
+                      padding={0.26}
+                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -35 }}
+                      axisLeft={{ tickSize: 0, tickPadding: 8 }}
+                      enableLabel={false}
+                      colors={[
+                        "#2dd4bf",
+                        "#60a5fa",
+                        "#f97316",
+                        "#a78bfa",
+                        "#f43f5e",
+                        "#84cc16",
+                        "#facc15",
+                        "#38bdf8",
+                        "#fb7185",
+                        "#34d399",
+                      ]}
+                      colorBy="id"
+                      tooltip={({ id, value, indexValue }) => (
+                        <div className="rounded border bg-background px-2 py-1 text-xs">
+                          {String(indexValue)} / {String(id)}: {formatCurrency(Number(value))}
+                        </div>
+                      )}
+                      onClick={(bar) => {
+                        const itemKey = budgetPlanItemKeyByName.get(String(bar.id))
+                        if (itemKey) {
+                          setSelectedBudgetPlanItemKey((current) => (current === itemKey ? null : itemKey))
+                        }
+                      }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-1">
+                    <CardTitle>
+                      {selectedBudgetPlanItemName
+                        ? `Расшифровка: ${selectedBudgetPlanItemName}`
+                        : "Расшифровка плана по месяцам"}
+                    </CardTitle>
+                    <CardDescription>План, факт и остаток по каждой запланированной статье.</CardDescription>
+                  </div>
+                  {selectedBudgetPlanItemName ? <Badge variant="secondary">Фильтр по статье</Badge> : null}
+                </CardHeader>
+                <CardContent className="space-y-6">
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b text-left text-sm text-muted-foreground">
-                          <th className="pb-3">Категория</th>
-                          <th className="pb-3">Тип</th>
+                          <th className="pb-3">Месяц</th>
+                          <th className="pb-3">Статья</th>
                           <th className="pb-3 text-right">План</th>
                           <th className="pb-3 text-right">Факт</th>
-                          <th className="pb-3 text-right">Разница</th>
+                          <th className="pb-3 text-right">Остаток</th>
                           <th className="pb-3 text-right">Исполнение</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {budgetExecutionRows.map((row) => {
-                          const isIncome = row.type === "income"
-                          return (
-                            <tr key={row.key} className="border-b border-border/60">
-                              <td className="py-3">{row.name}</td>
-                              <td className="py-3">
-                                <Badge variant={isIncome ? "success" : "secondary"}>{isIncome ? "Доход" : "Расход"}</Badge>
-                              </td>
-                              <td className="py-3 text-right">{formatCurrency(row.budgetAmount)}</td>
-                              <td className={`py-3 text-right font-medium ${isIncome ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
-                                {formatCurrency(row.actualAmount)}
-                              </td>
-                              <td className={`py-3 text-right ${row.difference >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
-                                {formatCurrency(row.difference)}
-                              </td>
-                              <td className="py-3 text-right">
-                                {row.budgetAmount > 0 ? `${Math.round(row.executionPercent)}%` : "—"}
-                              </td>
-                            </tr>
-                          )
-                        })}
+                        {visibleBudgetPlanningRows.map((row) => (
+                          <tr
+                            key={row.key}
+                            className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40"
+                            onClick={() =>
+                              setSelectedBudgetPlanItemKey((current) =>
+                                current === row.itemKey ? null : row.itemKey
+                              )
+                            }
+                          >
+                            <td className="py-3">{row.monthLabel}</td>
+                            <td className="py-3 font-medium">{row.itemName}</td>
+                            <td className="py-3 text-right">{formatCurrency(row.plannedAmount)}</td>
+                            <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                              {formatCurrency(row.actualAmount)}
+                            </td>
+                            <td className={`py-3 text-right ${row.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                              {formatCurrency(row.balance)}
+                            </td>
+                            <td className="py-3 text-right">{Math.round(row.executionPercent)}%</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">
+                      Строки документов, из которых сложился план
+                    </div>
+                    {visibleBudgetPlanDetailRows.length === 0 ? (
+                      <div className="rounded-[18px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                        Для выбранной статьи нет строк графика бюджета.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b text-left text-sm text-muted-foreground">
+                              <th className="pb-3">Месяц</th>
+                              <th className="pb-3">Статья</th>
+                              <th className="pb-3">Проект</th>
+                              <th className="pb-3">Документ</th>
+                              <th className="pb-3 text-right">Сумма</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleBudgetPlanDetailRows.map((row) => (
+                              <tr key={row.key} className="border-b border-border/60">
+                                <td className="py-3">{row.monthLabel}</td>
+                                <td className="py-3">{row.itemName}</td>
+                                <td className="py-3 text-muted-foreground">{row.projectName}</td>
+                                <td className="py-3">
+                                  {row.documentHref ? (
+                                    <Link className="text-primary hover:underline" href={row.documentHref}>
+                                      Открыть
+                                    </Link>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </td>
+                                <td className="py-3 text-right font-medium">{formatCurrency(row.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

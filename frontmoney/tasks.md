@@ -67,8 +67,8 @@
 - [x] Preserve selected budget calculation date in the URL where applicable, so future budget views can be refreshed, shared, and revisited without losing context.
 
 ## Backlog: Budget Report Planning View
-- [ ] Rework the report budget section into a planning view for planned expense articles: when the current year or another period is selected, show each month and how much expense is planned by each cash flow item.
-- [ ] Add a combined budget planning chart that stacks or groups planned expenses by cash flow item across months, so the user can see the full year expense plan at a glance.
-- [ ] Add budget plan details below the chart as a table, and also support drill-down by clicking a cash flow item or chart segment to explain how the amount was formed.
-- [ ] Replace free-form day range selection in the budget report with month-based period selection: budget periods should start at the beginning of a month and end at the end of a month, because selecting dates like 02.04 is not useful for budget planning.
-- [ ] Make period selection convenient for yearly planning: quick current year, previous/next year, and custom month range controls should be available without manual day picking.
+- [x] Rework the report budget section into a planning view for planned expense articles: when the current year or another period is selected, show each month and how much expense is planned by each cash flow item.
+- [x] Add a combined budget planning chart that stacks or groups planned expenses by cash flow item across months, so the user can see the full year expense plan at a glance.
+- [x] Add budget plan details below the chart as a table, and also support drill-down by clicking a cash flow item or chart segment to explain how the amount was formed.
+- [x] Replace free-form day range selection in the budget report with month-based period selection: budget periods should start at the beginning of a month and end at the end of a month, because selecting dates like 02.04 is not useful for budget planning.
+- [x] Make period selection convenient for yearly planning: quick current year, previous/next year, and custom month range controls should be available without manual day picking.
