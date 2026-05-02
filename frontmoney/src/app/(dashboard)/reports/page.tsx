@@ -88,7 +88,27 @@ type CategoryRow = {
   percentage: number
 }
 
-const BUDGET_PLAN_COLORS = [
+type MonthlyCashFlowItemRow = {
+  key: string
+  monthKey: string
+  monthLabel: string
+  itemKey: string
+  itemName: string
+  income: number
+  expense: number
+  net: number
+}
+
+type MonthlyCashFlowGroup = {
+  key: string
+  label: string
+  income: number
+  expense: number
+  net: number
+  rows: MonthlyCashFlowItemRow[]
+}
+
+const REPORT_ITEM_COLORS = [
   "#2dd4bf",
   "#60a5fa",
   "#f97316",
@@ -414,12 +434,100 @@ export default function ReportsPage() {
       ...item,
       percentage: expenseTotal > 0 ? (item.amount / expenseTotal) * 100 : 0,
     }))
-  const topCategoryRows = categoryRows.slice(0, 8)
   const topExpenseCategory = categoryRows[0] || null
-  const categoriesExportRows = categoryRows.map((category: CategoryRow) => ({
-    name: category.name,
-    amount: category.amount,
-    percentage: category.percentage,
+
+  const monthlyCashFlowItemMap = new Map<string, MonthlyCashFlowItemRow>()
+  cashFlow.details.forEach((detail: CashFlowReportDetail) => {
+    const monthKey = getMonthKey(detail.period)
+    const itemKey = detail.cash_flow_item_id || detail.cash_flow_item_name || "unknown"
+    const key = `${monthKey}:${itemKey}`
+    const row = monthlyCashFlowItemMap.get(key) || {
+      key,
+      monthKey,
+      monthLabel: formatMonthLabel(monthKey),
+      itemKey,
+      itemName: detail.cash_flow_item_name || "Неизвестная статья",
+      income: 0,
+      expense: 0,
+      net: 0,
+    }
+    row.income += detail.income
+    row.expense += detail.expense
+    row.net = row.income - row.expense
+    monthlyCashFlowItemMap.set(key, row)
+  })
+
+  const monthlyCashFlowItemRows = Array.from(monthlyCashFlowItemMap.values()).sort((left, right) => {
+    const monthCompare = left.monthKey.localeCompare(right.monthKey)
+    if (monthCompare !== 0) {
+      return monthCompare
+    }
+    const turnoverCompare = right.income + right.expense - (left.income + left.expense)
+    if (turnoverCompare !== 0) {
+      return turnoverCompare
+    }
+    return left.itemName.localeCompare(right.itemName, "ru")
+  })
+  const monthlyCashFlowGroupMap = new Map<string, MonthlyCashFlowGroup>()
+  monthlyCashFlowItemRows.forEach((row) => {
+    const group = monthlyCashFlowGroupMap.get(row.monthKey) || {
+      key: row.monthKey,
+      label: row.monthLabel,
+      income: 0,
+      expense: 0,
+      net: 0,
+      rows: [],
+    }
+    group.income += row.income
+    group.expense += row.expense
+    group.net = group.income - group.expense
+    group.rows.push(row)
+    monthlyCashFlowGroupMap.set(row.monthKey, group)
+  })
+  const monthlyCashFlowGroups = Array.from(monthlyCashFlowGroupMap.values()).sort((left, right) =>
+    left.key.localeCompare(right.key)
+  )
+  const monthlyExpenseItemTotals = new Map<string, { key: string; name: string; expense: number }>()
+  monthlyCashFlowItemRows.forEach((row) => {
+    if (row.expense <= 0) {
+      return
+    }
+    const item = monthlyExpenseItemTotals.get(row.itemKey) || {
+      key: row.itemKey,
+      name: row.itemName,
+      expense: 0,
+    }
+    item.expense += row.expense
+    monthlyExpenseItemTotals.set(row.itemKey, item)
+  })
+  const monthlyExpenseItems = Array.from(monthlyExpenseItemTotals.values()).sort(
+    (left, right) => right.expense - left.expense
+  )
+  const monthlyExpenseLegendItems = monthlyExpenseItems.map((item, index) => ({
+    ...item,
+    color: REPORT_ITEM_COLORS[index % REPORT_ITEM_COLORS.length],
+    share: expenseTotal > 0 ? (item.expense / expenseTotal) * 100 : 0,
+  }))
+  const monthlyExpenseItemByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item]))
+  const monthlyExpenseColorByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item.color]))
+  const monthlyExpenseChartKeys = monthlyExpenseLegendItems.map((item) => item.key)
+  const monthlyExpenseChartRows = monthlyCashFlowGroups.map((group) => {
+    const chartRow: Record<string, string | number> = {
+      month: group.label,
+    }
+    group.rows
+      .filter((row) => row.expense > 0)
+      .forEach((row) => {
+        chartRow[row.itemKey] = (Number(chartRow[row.itemKey]) || 0) + row.expense
+      })
+    return chartRow
+  })
+  const monthlyCashFlowExportRows = monthlyCashFlowItemRows.map((row) => ({
+    month: row.monthLabel,
+    cashFlowItem: row.itemName,
+    income: row.income,
+    expense: row.expense,
+    net: row.net,
   }))
 
   const budgetPlanningMap = new Map<string, BudgetPlanningRow>()
@@ -476,24 +584,12 @@ export default function ReportsPage() {
   const plannedExpenseBalance = plannedExpenseTotal - plannedExpenseActual
   const budgetPlanLegendItems = budgetPlanItems.map((item, index) => ({
     ...item,
-    color: BUDGET_PLAN_COLORS[index % BUDGET_PLAN_COLORS.length],
+    color: REPORT_ITEM_COLORS[index % REPORT_ITEM_COLORS.length],
     share: plannedExpenseTotal > 0 ? (item.plannedAmount / plannedExpenseTotal) * 100 : 0,
   }))
   const budgetPlanItemByKey = new Map(budgetPlanLegendItems.map((item) => [item.key, item]))
   const budgetPlanColorByKey = new Map(budgetPlanLegendItems.map((item) => [item.key, item.color]))
-  const budgetPlanChartKeys = budgetPlanLegendItems.map((item) => item.key)
   const budgetPlanMonthKeys = Array.from(new Set(budgetPlanningRows.map((row) => row.monthKey))).sort()
-  const budgetPlanChartRows = budgetPlanMonthKeys.map((monthKey) => {
-    const chartRow: Record<string, string | number> = {
-      month: formatMonthLabel(monthKey),
-    }
-    budgetPlanningRows
-      .filter((row) => row.monthKey === monthKey)
-      .forEach((row) => {
-        chartRow[row.itemKey] = (Number(chartRow[row.itemKey]) || 0) + row.plannedAmount
-      })
-    return chartRow
-  })
   const activeSelectedBudgetPlanItemKey =
     selectedBudgetPlanItemKey && budgetPlanItemTotals.has(selectedBudgetPlanItemKey)
       ? selectedBudgetPlanItemKey
@@ -505,6 +601,20 @@ export default function ReportsPage() {
   const visibleBudgetPlanningRows = activeSelectedBudgetPlanItemKey
     ? budgetPlanningRows.filter((row) => row.itemKey === activeSelectedBudgetPlanItemKey)
     : budgetPlanningRows
+  const budgetPlanChartKeys = activeSelectedBudgetPlanItemKey
+    ? [activeSelectedBudgetPlanItemKey]
+    : budgetPlanLegendItems.map((item) => item.key)
+  const budgetPlanChartRows = budgetPlanMonthKeys.map((monthKey) => {
+    const chartRow: Record<string, string | number> = {
+      month: formatMonthLabel(monthKey),
+    }
+    visibleBudgetPlanningRows
+      .filter((row) => row.monthKey === monthKey)
+      .forEach((row) => {
+        chartRow[row.itemKey] = (Number(chartRow[row.itemKey]) || 0) + row.plannedAmount
+      })
+    return chartRow
+  })
   const budgetPlanDetailRows: BudgetPlanDetailRow[] = budgetExpense.details
     .filter((row) => row.entry_type === "budget" && row.amount > 0)
     .map((row) => {
@@ -768,7 +878,7 @@ export default function ReportsPage() {
             Кошельки
           </TabsTrigger>
           <TabsTrigger value="categories" className="rounded-[14px] py-2.5">
-            Категории
+            Статьи по месяцам
           </TabsTrigger>
           <TabsTrigger value="budget" className="rounded-[14px] py-2.5">
             План бюджета
@@ -981,115 +1091,181 @@ export default function ReportsPage() {
           <Card>
             <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-1">
-                <CardTitle>Структура расходных категорий</CardTitle>
-                <CardDescription>Показывает, какие статьи съедают основную часть расходов и куда смотреть в первую очередь.</CardDescription>
+                <CardTitle>Помесячный отчет по статьям</CardTitle>
+                <CardDescription>
+                  Расходы на графике собраны по месяцам и статьям. Ниже таблица в стиле 1С: месяц, итог прихода,
+                  итог расхода и статьи внутри группы.
+                </CardDescription>
               </div>
               <ExportReportButtons
-                data={categoriesExportRows}
+                data={monthlyCashFlowExportRows}
                 columns={[
-                  { key: "name", header: "Категория" },
-                  { key: "amount", header: "Сумма", formatter: exportFormatters.currency },
-                  { key: "percentage", header: "Доля", formatter: exportFormatters.percent },
+                  { key: "month", header: "Месяц" },
+                  { key: "cashFlowItem", header: "Статья" },
+                  { key: "income", header: "Приход", formatter: exportFormatters.currency },
+                  { key: "expense", header: "Расход", formatter: exportFormatters.currency },
+                  { key: "net", header: "Итог", formatter: exportFormatters.currency },
                 ]}
-                filename="expense-categories-report"
-                title="Отчет по структуре расходных категорий"
+                filename="monthly-cash-flow-by-items"
+                title="Помесячный отчет по статьям"
                 chartRef={categoryChartRef}
               />
             </CardHeader>
           </Card>
 
-          {categoryRows.length === 0 ? (
-            renderNoData("Нет расходов по категориям", "За выбранный период не найдено расходов. Измени диапазон или проверь, есть ли траты в системе.")
+          {monthlyCashFlowGroups.length === 0 ? (
+            renderNoData("Нет данных по статьям", "За выбранный период не найдено приходов или расходов по статьям.")
           ) : (
             <>
-              <div className="grid gap-6 xl:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Распределение расходов</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-[420px]">
-                      <ResponsivePie
-                        data={categoryRows.slice(0, 10).map((category) => ({
-                          id: category.name,
-                          label: category.name,
-                          value: category.amount,
-                        }))}
-                        margin={{ top: 20, right: 140, bottom: 20, left: 20 }}
-                        innerRadius={0.58}
-                        padAngle={1}
-                        cornerRadius={4}
-                        activeOuterRadiusOffset={8}
-                        tooltip={({ datum }) => (
-                          <div className="rounded border bg-background px-2 py-1 text-xs">
-                            {String(datum.label)}: {formatCurrency(Number(datum.value))}
-                          </div>
-                        )}
-                        legends={[
-                          {
-                            anchor: "right",
-                            direction: "column",
-                            translateX: 110,
-                            itemWidth: 120,
-                            itemHeight: 18,
-                          },
-                        ]}
-                        colors={{ scheme: "category10" }}
-                      />
+              <Card>
+                <CardHeader className="gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-1">
+                    <CardTitle>Расходы по месяцам и статьям</CardTitle>
+                    <CardDescription>
+                      Цвета соответствуют легенде справа. Переводы и движения без статьи не участвуют в отчете.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                    <div className="h-[420px] min-w-0" ref={categoryChartRef}>
+                      {monthlyExpenseChartKeys.length === 0 ? (
+                        <div className="flex h-full items-center justify-center rounded-[22px] border border-dashed border-border/70 text-sm text-muted-foreground">
+                          За выбранный период нет расходов по статьям.
+                        </div>
+                      ) : (
+                        <ResponsiveBar
+                          data={monthlyExpenseChartRows}
+                          keys={monthlyExpenseChartKeys}
+                          indexBy="month"
+                          margin={{ top: 12, right: 12, bottom: 44, left: 68 }}
+                          padding={0.34}
+                          axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: 0 }}
+                          axisLeft={{
+                            tickSize: 0,
+                            tickPadding: 8,
+                            format: (value) => formatCompactCurrency(Number(value)),
+                          }}
+                          enableLabel={false}
+                          colors={({ id }) => monthlyExpenseColorByKey.get(String(id)) || "#94a3b8"}
+                          colorBy="id"
+                          theme={{
+                            axis: {
+                              ticks: {
+                                text: {
+                                  fill: "hsl(var(--muted-foreground))",
+                                  fontSize: 11,
+                                },
+                              },
+                            },
+                            grid: {
+                              line: {
+                                stroke: "hsl(var(--border))",
+                                strokeOpacity: 0.45,
+                              },
+                            },
+                            tooltip: {
+                              container: {
+                                background: "hsl(var(--background))",
+                                color: "hsl(var(--foreground))",
+                                border: "1px solid hsl(var(--border))",
+                                borderRadius: 12,
+                                boxShadow: "0 12px 32px rgb(0 0 0 / 0.22)",
+                              },
+                            },
+                          }}
+                          tooltip={({ id, value, indexValue }) => {
+                            const item = monthlyExpenseItemByKey.get(String(id))
+                            return (
+                              <div className="px-2 py-1 text-xs">
+                                {String(indexValue)} / {item?.name || String(id)}: {formatCurrency(Number(value))}
+                              </div>
+                            )
+                          }}
+                        />
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Топ категорий по сумме</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-[420px]" ref={categoryChartRef}>
-                      <ResponsiveBar
-                        data={topCategoryRows.map((category) => ({ name: category.name, amount: category.amount }))}
-                        keys={["amount"]}
-                        indexBy="name"
-                        margin={{ top: 20, right: 20, bottom: 30, left: 130 }}
-                        padding={0.3}
-                        layout="horizontal"
-                        axisBottom={{ tickSize: 0, tickPadding: 8 }}
-                        axisLeft={{ tickSize: 0, tickPadding: 8 }}
-                        tooltip={({ value, indexValue }) => (
-                          <div className="rounded border bg-background px-2 py-1 text-xs">
-                            {String(indexValue)}: {formatCurrency(Number(value))}
+                    <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
+                      <div className="text-sm font-semibold tracking-[-0.02em]">Легенда расходных статей</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Итог по выбранному периоду.</div>
+                      <div className="mt-4 max-h-[340px] space-y-2 overflow-y-auto pr-1">
+                        {monthlyExpenseLegendItems.length === 0 ? (
+                          <div className="rounded-2xl border border-border/60 bg-card/50 px-3 py-3 text-sm text-muted-foreground">
+                            Расходных статей нет.
                           </div>
+                        ) : (
+                          monthlyExpenseLegendItems.map((item) => (
+                            <div key={item.key} className="rounded-2xl border border-border/60 bg-card/50 px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="h-3 w-3 shrink-0 rounded-full"
+                                  style={{ backgroundColor: item.color }}
+                                />
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                                <span className="text-sm font-semibold text-rose-600 dark:text-rose-300">
+                                  {formatCurrency(item.expense)}
+                                </span>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {item.share.toFixed(1)}% от расходов
+                              </div>
+                            </div>
+                          ))
                         )}
-                        colors={["#ef4444"]}
-                      />
+                      </div>
                     </div>
-                  </CardContent>
-                </Card>
-              </div>
+                  </div>
+                </CardContent>
+              </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Детализация категорий расходов</CardTitle>
+                  <CardTitle>Таблица по месяцам и статьям</CardTitle>
+                  <CardDescription>
+                    В каждой группе сначала итог месяца, затем строки статей с приходом, расходом и результатом.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b text-left text-sm text-muted-foreground">
-                          <th className="pb-3">Категория</th>
-                          <th className="pb-3 text-right">Сумма</th>
-                          <th className="pb-3 text-right">Доля</th>
+                          <th className="pb-3">Месяц / статья</th>
+                          <th className="pb-3 text-right">Приход</th>
+                          <th className="pb-3 text-right">Расход</th>
+                          <th className="pb-3 text-right">Итог</th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {categoryRows.map((category) => (
-                          <tr key={category.id} className="border-b border-border/60">
-                            <td className="py-3">{category.name}</td>
-                            <td className="py-3 text-right font-medium text-rose-600 dark:text-rose-300">{formatCurrency(category.amount)}</td>
-                            <td className="py-3 text-right text-muted-foreground">{category.percentage.toFixed(1)}%</td>
+                      {monthlyCashFlowGroups.map((group) => (
+                        <tbody key={group.key}>
+                          <tr className="border-b border-border bg-muted/40 text-sm font-semibold">
+                            <td className="py-3">{group.label}</td>
+                            <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
+                              {formatCurrency(group.income)}
+                            </td>
+                            <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                              {formatCurrency(group.expense)}
+                            </td>
+                            <td className={`py-3 text-right ${group.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                              {formatCurrency(group.net)}
+                            </td>
                           </tr>
-                        ))}
-                      </tbody>
+                          {group.rows.map((row) => (
+                            <tr key={row.key} className="border-b border-border/60">
+                              <td className="py-3 pl-5 font-medium">{row.itemName}</td>
+                              <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
+                                {row.income > 0 ? formatCurrency(row.income) : "—"}
+                              </td>
+                              <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                                {row.expense > 0 ? formatCurrency(row.expense) : "—"}
+                              </td>
+                              <td className={`py-3 text-right ${row.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                                {formatCurrency(row.net)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      ))}
                     </table>
                   </div>
                 </CardContent>
@@ -1159,7 +1335,7 @@ export default function ReportsPage() {
                   <div className="space-y-1">
                     <CardTitle>График планируемых расходов: {selectedBudgetProjectName}</CardTitle>
                     <CardDescription>
-                      Месяцы собраны из статей расхода. Легенда справа фильтрует расшифровку ниже.
+                      Месяцы собраны из статей расхода. Легенда справа фильтрует график и таблицы ниже.
                     </CardDescription>
                   </div>
                   {selectedBudgetPlanItemName ? (
