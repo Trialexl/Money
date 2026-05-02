@@ -219,8 +219,8 @@ export default function DashboardPage() {
     <div className="space-y-5">
       <section>
         <div className="rounded-[20px] border border-border/60 bg-card/85 p-3 shadow-soft sm:rounded-[24px] sm:p-4">
-          <div className="grid grid-cols-[minmax(0,1fr)_116px] items-start gap-3 md:grid-cols-[minmax(0,1fr)_148px]">
-            <div className="min-w-0 flex-1 space-y-3">
+          <div className="grid grid-cols-[minmax(0,1fr)_116px] items-start gap-3 md:grid-cols-[minmax(0,1fr)_148px] lg:items-center">
+            <div className="min-w-0 flex-1 space-y-3 lg:mx-auto lg:w-full lg:max-w-[720px] lg:py-4 lg:text-center">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Общий остаток</div>
                   <div className="mt-1.5 text-xl font-semibold tracking-[-0.04em] text-foreground sm:mt-2 sm:text-2xl">
