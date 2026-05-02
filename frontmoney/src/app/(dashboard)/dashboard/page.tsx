@@ -417,10 +417,6 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent className="p-0">
                   <div className="max-h-[440px] overflow-y-auto">
-                    <div className="grid grid-cols-[minmax(0,1.3fr)_160px] gap-3 border-b border-border/60 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      <div>Кошелек</div>
-                      <div>Остаток</div>
-                    </div>
                     {sortedWallets.map((wallet) => (
                       <Link
                         key={wallet.wallet_id}
