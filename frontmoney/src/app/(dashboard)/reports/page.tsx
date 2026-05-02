@@ -25,11 +25,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { exportFormatters } from "@/lib/export-utils"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
 import { DashboardService, type DashboardWalletSummary } from "@/services/dashboard-service"
+import { ProjectService } from "@/services/project-service"
 import {
   ReportService,
   type BudgetReportDetail,
@@ -60,7 +62,6 @@ type BudgetPlanDetailRow = {
   monthLabel: string
   itemKey: string
   itemName: string
-  projectName: string
   amount: number
   documentHref: string | null
 }
@@ -87,6 +88,21 @@ type CategoryRow = {
   percentage: number
 }
 
+const BUDGET_PLAN_COLORS = [
+  "#2dd4bf",
+  "#60a5fa",
+  "#f97316",
+  "#a78bfa",
+  "#f43f5e",
+  "#84cc16",
+  "#facc15",
+  "#38bdf8",
+  "#fb7185",
+  "#34d399",
+  "#c084fc",
+  "#fb923c",
+]
+
 function getDateKey(value?: string) {
   return value ? value.slice(0, 10) : ""
 }
@@ -100,6 +116,20 @@ function formatMonthLabel(value: string) {
     month: "short",
     year: "numeric",
   })
+}
+
+function formatCompactCurrency(value: number) {
+  const absoluteValue = Math.abs(value)
+
+  if (absoluteValue >= 1_000_000) {
+    return `${(value / 1_000_000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млн`
+  }
+
+  if (absoluteValue >= 1_000) {
+    return `${Math.round(value / 1_000).toLocaleString("ru-RU")} тыс`
+  }
+
+  return Math.round(value).toLocaleString("ru-RU")
 }
 
 function shiftDays(days: number) {
@@ -149,6 +179,7 @@ export default function ReportsPage() {
   const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || formatDateForInput(shiftDays(-30)))
   const [dateTo, setDateTo] = useState(searchParams.get("date_to") || today)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
+  const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
   const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
   const budgetFromMonth = getMonthInputValue(dateFrom)
   const budgetToMonth = getMonthInputValue(dateTo)
@@ -160,8 +191,17 @@ export default function ReportsPage() {
   const categoryChartRef = useRef<HTMLDivElement>(null)
   const budgetExpenseChartRef = useRef<HTMLDivElement>(null)
 
+  const projectsQuery = useQuery({
+    queryKey: ["projects", "reports-budget"],
+    staleTime: 300_000,
+    queryFn: () => ProjectService.getProjects(),
+  })
+
   const reportsQuery = useQuery({
-    queryKey: ["reports-analytics", { dateFrom, dateTo, budgetDateFrom, budgetDateTo, budgetForecast }],
+    queryKey: [
+      "reports-analytics",
+      { dateFrom, dateTo, budgetDateFrom, budgetDateTo, budgetForecast, budgetProjectId },
+    ],
     staleTime: 60_000,
     queryFn: async () => {
       const [cashFlow, budgetExpense, overview] = await Promise.all([
@@ -170,6 +210,7 @@ export default function ReportsPage() {
           dateFrom: budgetDateFrom,
           dateTo: budgetDateTo,
           limitByToday: budgetForecast,
+          project: budgetProjectId || undefined,
         }),
         DashboardService.getOverview({ date: dateTo, hideHiddenWallets: true }),
       ])
@@ -182,11 +223,21 @@ export default function ReportsPage() {
     },
   })
 
-  const updateReportUrl = (nextDateFrom: string, nextDateTo: string, nextBudgetForecast: boolean) => {
+  const updateReportUrl = (
+    nextDateFrom: string,
+    nextDateTo: string,
+    nextBudgetForecast: boolean,
+    nextBudgetProjectId = budgetProjectId
+  ) => {
     const params = new URLSearchParams(searchParams.toString())
     params.set("date_from", nextDateFrom)
     params.set("date_to", nextDateTo)
     params.set("budget_forecast", nextBudgetForecast ? "true" : "false")
+    if (nextBudgetProjectId) {
+      params.set("budget_project", nextBudgetProjectId)
+    } else {
+      params.delete("budget_project")
+    }
     router.replace(`/reports?${params.toString()}`, { scroll: false })
   }
 
@@ -263,6 +314,13 @@ export default function ReportsPage() {
   }
 
   const { cashFlow, budgetExpense, overview } = reportsQuery.data
+  const budgetProjectOptions = (projectsQuery.data ?? [])
+    .filter((project) => !project.deleted)
+    .sort((left, right) => left.name.localeCompare(right.name, "ru"))
+  const selectedBudgetProjectName =
+    budgetProjectId
+      ? budgetProjectOptions.find((project) => project.id === budgetProjectId)?.name ?? "Выбранный проект"
+      : "Без проекта"
   const incomeTotal = cashFlow.totals.income
   const expenseTotal = cashFlow.totals.expense
   const netTotal = incomeTotal - expenseTotal
@@ -413,8 +471,17 @@ export default function ReportsPage() {
   const budgetPlanItems = Array.from(budgetPlanItemTotals.values()).sort(
     (left, right) => right.plannedAmount - left.plannedAmount
   )
-  const budgetPlanChartKeys = budgetPlanItems.map((item) => item.name)
-  const budgetPlanItemKeyByName = new Map(budgetPlanItems.map((item) => [item.name, item.key]))
+  const plannedExpenseTotal = budgetPlanningRows.reduce((sum, row) => sum + row.plannedAmount, 0)
+  const plannedExpenseActual = budgetPlanningRows.reduce((sum, row) => sum + row.actualAmount, 0)
+  const plannedExpenseBalance = plannedExpenseTotal - plannedExpenseActual
+  const budgetPlanLegendItems = budgetPlanItems.map((item, index) => ({
+    ...item,
+    color: BUDGET_PLAN_COLORS[index % BUDGET_PLAN_COLORS.length],
+    share: plannedExpenseTotal > 0 ? (item.plannedAmount / plannedExpenseTotal) * 100 : 0,
+  }))
+  const budgetPlanItemByKey = new Map(budgetPlanLegendItems.map((item) => [item.key, item]))
+  const budgetPlanColorByKey = new Map(budgetPlanLegendItems.map((item) => [item.key, item.color]))
+  const budgetPlanChartKeys = budgetPlanLegendItems.map((item) => item.key)
   const budgetPlanMonthKeys = Array.from(new Set(budgetPlanningRows.map((row) => row.monthKey))).sort()
   const budgetPlanChartRows = budgetPlanMonthKeys.map((monthKey) => {
     const chartRow: Record<string, string | number> = {
@@ -423,7 +490,7 @@ export default function ReportsPage() {
     budgetPlanningRows
       .filter((row) => row.monthKey === monthKey)
       .forEach((row) => {
-        chartRow[row.itemName] = (Number(chartRow[row.itemName]) || 0) + row.plannedAmount
+        chartRow[row.itemKey] = (Number(chartRow[row.itemKey]) || 0) + row.plannedAmount
       })
     return chartRow
   })
@@ -449,7 +516,6 @@ export default function ReportsPage() {
         monthLabel: formatMonthLabel(monthKey),
         itemKey,
         itemName: row.cash_flow_item_name || "Неизвестная статья",
-        projectName: row.project_name || "Без проекта",
         amount: row.amount,
         documentHref: getBudgetDocumentHref(row),
       }
@@ -464,9 +530,6 @@ export default function ReportsPage() {
   const visibleBudgetPlanDetailRows = activeSelectedBudgetPlanItemKey
     ? budgetPlanDetailRows.filter((row) => row.itemKey === activeSelectedBudgetPlanItemKey)
     : budgetPlanDetailRows
-  const plannedExpenseTotal = budgetPlanningRows.reduce((sum, row) => sum + row.plannedAmount, 0)
-  const plannedExpenseActual = budgetPlanningRows.reduce((sum, row) => sum + row.actualAmount, 0)
-  const plannedExpenseBalance = plannedExpenseTotal - plannedExpenseActual
   const budgetPlanExportRows = budgetPlanningRows.map((row) => ({
     month: row.monthLabel,
     cashFlowItem: row.itemName,
@@ -531,7 +594,7 @@ export default function ReportsPage() {
           </div>
 
           {isBudgetTab ? (
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,0.8fr)]">
               <div className="space-y-2">
                 <Label htmlFor="budget-period-month-from">Месяц с</Label>
                 <Input
@@ -549,6 +612,31 @@ export default function ReportsPage() {
                   value={budgetToMonth}
                   onChange={(event) => setBudgetMonthRange(budgetFromMonth, event.target.value)}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="budget-project">Проект</Label>
+                <Select
+                  value={budgetProjectId || "none"}
+                  onValueChange={(value) => {
+                    const nextBudgetProjectId = value === "none" ? "" : value
+                    setBudgetProjectId(nextBudgetProjectId)
+                    setSelectedBudgetPlanItemKey(null)
+                    updateReportUrl(dateFrom, dateTo, budgetForecast, nextBudgetProjectId)
+                  }}
+                  disabled={projectsQuery.isLoading}
+                >
+                  <SelectTrigger id="budget-project">
+                    <SelectValue placeholder="Без проекта" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без проекта</SelectItem>
+                    {budgetProjectOptions.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           ) : (
@@ -610,7 +698,10 @@ export default function ReportsPage() {
 
           <div className="rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
             {isBudgetTab ? (
-              <>Период бюджета: с {formatDate(budgetDateFrom)} по {formatDate(budgetDateTo)}</>
+              <>
+                Период бюджета: с {formatDate(budgetDateFrom)} по {formatDate(budgetDateTo)} · проект:{" "}
+                {selectedBudgetProjectName}
+              </>
             ) : (
               <>
                 Период: с {formatDate(dateFrom)} по {formatDate(dateTo)}
@@ -1057,15 +1148,18 @@ export default function ReportsPage() {
           </div>
 
           {budgetPlanningRows.length === 0 ? (
-            renderNoData("Нет плана расходного бюджета", "За выбранные месяцы не найдено запланированных расходных статей.")
+            renderNoData(
+              "Нет плана расходного бюджета",
+              `За выбранные месяцы не найдено запланированных расходных статей: ${selectedBudgetProjectName}.`
+            )
           ) : (
             <>
               <Card>
                 <CardHeader className="gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="space-y-1">
-                    <CardTitle>Общий график планируемых расходов</CardTitle>
+                    <CardTitle>График планируемых расходов: {selectedBudgetProjectName}</CardTitle>
                     <CardDescription>
-                      Каждый месяц собран из статей расхода. Клик по сегменту фильтрует таблицы ниже.
+                      Месяцы собраны из статей расхода. Легенда справа фильтрует расшифровку ниже.
                     </CardDescription>
                   </div>
                   {selectedBudgetPlanItemName ? (
@@ -1075,41 +1169,112 @@ export default function ReportsPage() {
                   ) : null}
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[460px]" ref={budgetExpenseChartRef}>
-                    <ResponsiveBar
-                      data={budgetPlanChartRows}
-                      keys={budgetPlanChartKeys}
-                      indexBy="month"
-                      margin={{ top: 20, right: 20, bottom: 80, left: 64 }}
-                      padding={0.26}
-                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -35 }}
-                      axisLeft={{ tickSize: 0, tickPadding: 8 }}
-                      enableLabel={false}
-                      colors={[
-                        "#2dd4bf",
-                        "#60a5fa",
-                        "#f97316",
-                        "#a78bfa",
-                        "#f43f5e",
-                        "#84cc16",
-                        "#facc15",
-                        "#38bdf8",
-                        "#fb7185",
-                        "#34d399",
-                      ]}
-                      colorBy="id"
-                      tooltip={({ id, value, indexValue }) => (
-                        <div className="rounded border bg-background px-2 py-1 text-xs">
-                          {String(indexValue)} / {String(id)}: {formatCurrency(Number(value))}
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                    <div className="h-[380px] min-w-0" ref={budgetExpenseChartRef}>
+                      <ResponsiveBar
+                        data={budgetPlanChartRows}
+                        keys={budgetPlanChartKeys}
+                        indexBy="month"
+                        margin={{ top: 12, right: 12, bottom: 44, left: 68 }}
+                        padding={0.34}
+                        axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: 0 }}
+                        axisLeft={{
+                          tickSize: 0,
+                          tickPadding: 8,
+                          format: (value) => formatCompactCurrency(Number(value)),
+                        }}
+                        enableLabel={false}
+                        colors={({ id }) => budgetPlanColorByKey.get(String(id)) || "#94a3b8"}
+                        colorBy="id"
+                        theme={{
+                          axis: {
+                            ticks: {
+                              text: {
+                                fill: "hsl(var(--muted-foreground))",
+                                fontSize: 11,
+                              },
+                            },
+                          },
+                          grid: {
+                            line: {
+                              stroke: "hsl(var(--border))",
+                              strokeOpacity: 0.45,
+                            },
+                          },
+                          tooltip: {
+                            container: {
+                              background: "hsl(var(--background))",
+                              color: "hsl(var(--foreground))",
+                              border: "1px solid hsl(var(--border))",
+                              borderRadius: 12,
+                              boxShadow: "0 12px 32px rgb(0 0 0 / 0.22)",
+                            },
+                          },
+                        }}
+                        tooltip={({ id, value, indexValue }) => {
+                          const item = budgetPlanItemByKey.get(String(id))
+                          return (
+                            <div className="px-2 py-1 text-xs">
+                              {String(indexValue)} / {item?.name || String(id)}: {formatCurrency(Number(value))}
+                            </div>
+                          )
+                        }}
+                        onClick={(bar) => {
+                          const itemKey = String(bar.id)
+                          if (budgetPlanItemTotals.has(itemKey)) {
+                            setSelectedBudgetPlanItemKey((current) => (current === itemKey ? null : itemKey))
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold tracking-[-0.02em]">Легенда статей</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Клик по статье фильтрует таблицы.
+                          </div>
                         </div>
-                      )}
-                      onClick={(bar) => {
-                        const itemKey = budgetPlanItemKeyByName.get(String(bar.id))
-                        if (itemKey) {
-                          setSelectedBudgetPlanItemKey((current) => (current === itemKey ? null : itemKey))
-                        }
-                      }}
-                    />
+                        {selectedBudgetPlanItemName ? (
+                          <Button variant="ghost" size="sm" onClick={() => setSelectedBudgetPlanItemKey(null)}>
+                            Сброс
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="mt-4 max-h-[300px] space-y-2 overflow-y-auto pr-1">
+                        {budgetPlanLegendItems.map((item) => {
+                          const isSelected = activeSelectedBudgetPlanItemKey === item.key
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              className={`w-full rounded-2xl border px-3 py-2 text-left transition ${
+                                isSelected
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
+                              }`}
+                              onClick={() =>
+                                setSelectedBudgetPlanItemKey((current) =>
+                                  current === item.key ? null : item.key
+                                )
+                              }
+                            >
+                              <span className="flex items-center gap-2">
+                                <span
+                                  className="h-3 w-3 shrink-0 rounded-full"
+                                  style={{ backgroundColor: item.color }}
+                                />
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+                                <span className="text-sm font-semibold">{formatCurrency(item.plannedAmount)}</span>
+                              </span>
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                {item.share.toFixed(1)}% от плана
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1122,7 +1287,9 @@ export default function ReportsPage() {
                         ? `Расшифровка: ${selectedBudgetPlanItemName}`
                         : "Расшифровка плана по месяцам"}
                     </CardTitle>
-                    <CardDescription>План, факт и остаток по каждой запланированной статье.</CardDescription>
+                    <CardDescription>
+                      Проект: {selectedBudgetProjectName}. План, факт и остаток по каждой запланированной статье.
+                    </CardDescription>
                   </div>
                   {selectedBudgetPlanItemName ? <Badge variant="secondary">Фильтр по статье</Badge> : null}
                 </CardHeader>
@@ -1181,7 +1348,6 @@ export default function ReportsPage() {
                             <tr className="border-b text-left text-sm text-muted-foreground">
                               <th className="pb-3">Месяц</th>
                               <th className="pb-3">Статья</th>
-                              <th className="pb-3">Проект</th>
                               <th className="pb-3">Документ</th>
                               <th className="pb-3 text-right">Сумма</th>
                             </tr>
@@ -1191,7 +1357,6 @@ export default function ReportsPage() {
                               <tr key={row.key} className="border-b border-border/60">
                                 <td className="py-3">{row.monthLabel}</td>
                                 <td className="py-3">{row.itemName}</td>
-                                <td className="py-3 text-muted-foreground">{row.projectName}</td>
                                 <td className="py-3">
                                   {row.documentHref ? (
                                     <Link className="text-primary hover:underline" href={row.documentHref}>

@@ -1839,6 +1839,30 @@ class DashboardOverviewTests(TestCase):
         self.assertEqual(response.data['month_comparison']['difference_percent']['expense'], '-20.00')
         self.assertEqual(response.data['month_comparison']['difference_percent']['income'], '-42.86')
 
+    def test_dashboard_month_comparison_ignores_transfers_but_keeps_wallet_balance(self):
+        reserve_wallet = Wallet.objects.create(name='Резервный кошелек')
+        Transfer.objects.create(
+            amount=Decimal('120.00'),
+            date=self.make_dt(2024, 3, 5),
+            wallet_out=self.visible_wallet,
+            wallet_in=reserve_wallet,
+            comment='Внутренний перевод',
+        )
+
+        response = self.client.get(
+            '/api/v1/dashboard/overview/',
+            {'date': self.selected_at.isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['wallet_total'], '400.00')
+        self.assertEqual(response.data['month_comparison']['current_month']['expense'], '600.00')
+        self.assertEqual(response.data['month_comparison']['current_month']['income'], '700.00')
+        self.assertEqual(
+            sorted(wallet['wallet_name'] for wallet in response.data['wallets']),
+            ['Основной кошелек', 'Резервный кошелек'],
+        )
+
     def test_dashboard_can_include_hidden_wallets_in_balance_block(self):
         response = self.client.get(
             '/api/v1/dashboard/overview/',
@@ -2156,18 +2180,36 @@ class ReportEndpointsTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['totals'], {'income': '1150.00', 'expense': '450.00'})
+        self.assertEqual(response.data['totals'], {'income': '1000.00', 'expense': '300.00'})
         self.assertEqual(
             response.data['months'],
             [
                 {
                     'period': self.make_month_start(2024, 3),
-                    'income': '1150.00',
-                    'expense': '450.00',
+                    'income': '1000.00',
+                    'expense': '300.00',
                 }
             ],
         )
-        self.assertEqual(len(response.data['details']), 4)
+        self.assertEqual(len(response.data['details']), 2)
+        self.assertEqual(
+            [row['document_type'] for row in response.data['details']],
+            ['Receipt', 'Expenditure'],
+        )
+
+    def test_flow_of_funds_summary_omits_transfers_from_analytics(self):
+        response = self.client.get(
+            '/api/v1/flow-of-funds/summary/',
+            {
+                'date_from': self.make_dt(2024, 3, 1).isoformat(),
+                'date_to': self.make_dt(2024, 3, 31).isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total_amount'], 700.0)
+        self.assertEqual(response.data['record_count'], 2)
+        self.assertNotIn(None, [row['cash_flow_item__name'] for row in response.data['item_summary']])
 
     def test_budget_expense_report_returns_plan_fact_and_balance(self):
         response = self.client.get(
@@ -2179,7 +2221,36 @@ class ReportEndpointsTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['totals'], {'actual': '450.00', 'budget': '500.00', 'balance': '50.00'})
+        self.assertEqual(response.data['totals'], {'actual': '450.00', 'budget': '0.00', 'balance': '-450.00'})
+        self.assertEqual(
+            response.data['summary'],
+            [
+                {
+                    'period': self.make_month_start(2024, 3),
+                    'project_id': None,
+                    'project_name': None,
+                    'cash_flow_item_id': str(self.food_item.id),
+                    'cash_flow_item_name': 'Еда',
+                    'actual': '450.00',
+                    'budget': '0.00',
+                    'balance': '-450.00',
+                },
+            ],
+        )
+        self.assertEqual(len(response.data['details']), 2)
+
+    def test_budget_expense_report_filters_selected_project(self):
+        response = self.client.get(
+            '/api/v1/reports/budget-expense/',
+            {
+                'date_from': self.make_dt(2024, 3, 1).isoformat(),
+                'date_to': self.make_dt(2024, 3, 31).isoformat(),
+                'project': str(self.project.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['totals'], {'actual': '0.00', 'budget': '500.00', 'balance': '500.00'})
         self.assertEqual(
             response.data['summary'],
             [
@@ -2193,19 +2264,9 @@ class ReportEndpointsTests(TestCase):
                     'budget': '500.00',
                     'balance': '500.00',
                 },
-                {
-                    'period': self.make_month_start(2024, 3),
-                    'project_id': None,
-                    'project_name': None,
-                    'cash_flow_item_id': str(self.food_item.id),
-                    'cash_flow_item_name': 'Еда',
-                    'actual': '450.00',
-                    'budget': '0.00',
-                    'balance': '-450.00',
-                },
             ],
         )
-        self.assertEqual(len(response.data['details']), 3)
+        self.assertEqual(len(response.data['details']), 1)
 
     def test_budget_income_report_returns_plan_fact_and_balance(self):
         response = self.client.get(
@@ -2217,7 +2278,36 @@ class ReportEndpointsTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['totals'], {'actual': '1000.00', 'budget': '1200.00', 'balance': '200.00'})
+        self.assertEqual(response.data['totals'], {'actual': '1000.00', 'budget': '0.00', 'balance': '-1000.00'})
+        self.assertEqual(
+            response.data['summary'],
+            [
+                {
+                    'period': self.make_month_start(2024, 3),
+                    'project_id': None,
+                    'project_name': None,
+                    'cash_flow_item_id': str(self.salary_item.id),
+                    'cash_flow_item_name': 'Зарплата',
+                    'actual': '1000.00',
+                    'budget': '0.00',
+                    'balance': '-1000.00',
+                },
+            ],
+        )
+        self.assertEqual(len(response.data['details']), 1)
+
+    def test_budget_income_report_filters_selected_project(self):
+        response = self.client.get(
+            '/api/v1/reports/budget-income/',
+            {
+                'date_from': self.make_dt(2024, 3, 1).isoformat(),
+                'date_to': self.make_dt(2024, 3, 31).isoformat(),
+                'project': str(self.project.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['totals'], {'actual': '0.00', 'budget': '1200.00', 'balance': '1200.00'})
         self.assertEqual(
             response.data['summary'],
             [
@@ -2231,19 +2321,9 @@ class ReportEndpointsTests(TestCase):
                     'budget': '1200.00',
                     'balance': '1200.00',
                 },
-                {
-                    'period': self.make_month_start(2024, 3),
-                    'project_id': None,
-                    'project_name': None,
-                    'cash_flow_item_id': str(self.salary_item.id),
-                    'cash_flow_item_name': 'Зарплата',
-                    'actual': '1000.00',
-                    'budget': '0.00',
-                    'balance': '-1000.00',
-                },
             ],
         )
-        self.assertEqual(len(response.data['details']), 2)
+        self.assertEqual(len(response.data['details']), 1)
 
     def test_openapi_schema_contains_report_and_dashboard_endpoints(self):
         response = self.client.get('/api/schema/')

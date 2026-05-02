@@ -12,6 +12,7 @@ import {
   endOfMonth,
   endOfWeek,
   format as formatDateFns,
+  isAfter,
   isSameDay,
   isSameMonth,
   startOfMonth,
@@ -370,6 +371,7 @@ export default function DashboardPage() {
                       {calendarDays.map((day) => {
                         const isSelected = isSameDay(day, selectedDashboardDate)
                         const isCurrentMonth = isSameMonth(day, visibleMonth)
+                        const isFutureDay = isAfter(day, todayDate)
 
                         return (
                           <button
@@ -380,6 +382,8 @@ export default function DashboardPage() {
                               "flex h-10 items-center justify-center rounded-2xl text-sm font-medium transition-colors",
                               isSelected
                                 ? "bg-primary text-primary-foreground shadow-[0_18px_35px_-18px_hsl(var(--primary)/0.8)]"
+                                : isFutureDay && isCurrentMonth
+                                  ? "text-primary hover:bg-primary/10"
                                 : isCurrentMonth
                                   ? "text-foreground hover:bg-card"
                                   : "text-muted-foreground/45 hover:bg-card/70"

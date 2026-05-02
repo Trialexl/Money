@@ -35,6 +35,7 @@ from .sync import get_outbox_payload_map
 
 
 PERCENT_QUANTIZER = Decimal('0.01')
+TRANSFER_DOCUMENT_TYPE = 2
 
 
 def _dashboard_money(value):
@@ -90,7 +91,7 @@ def _flow_period_totals(date_from, date_to):
         period__gte=date_from,
         period__lte=date_to,
         cash_flow_item__isnull=False,
-    ).aggregate(
+    ).exclude(type_of_document=TRANSFER_DOCUMENT_TYPE).aggregate(
         income_total=Sum('amount', filter=Q(amount__gt=0)),
         expense_total=Sum('amount', filter=Q(amount__lt=0)),
     )
@@ -245,7 +246,9 @@ class CashFlowItemViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelVi
         date_from = self.request.query_params.get('date_from')
         date_to = self.request.query_params.get('date_to')
         
-        flow_queryset = FlowOfFunds.objects.all()
+        flow_queryset = FlowOfFunds.objects.filter(cash_flow_item__isnull=False).exclude(
+            type_of_document=TRANSFER_DOCUMENT_TYPE
+        )
         if date_from:
             flow_queryset = flow_queryset.filter(period__gte=date_from)
         if date_to:
@@ -459,7 +462,9 @@ class FlowOfFundsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """Получить агрегированную сводку по движению средств"""
-        queryset = self.get_queryset()
+        queryset = self.get_queryset().filter(cash_flow_item__isnull=False).exclude(
+            type_of_document=TRANSFER_DOCUMENT_TYPE
+        )
         
         # Сумма по кошелькам
         wallet_summary = queryset.values('wallet__name').annotate(
@@ -992,7 +997,9 @@ class ReportViewSet(viewsets.ViewSet):
             if date_to is None or date_to > today:
                 date_to = today
 
-        queryset = FlowOfFunds.objects.select_related('wallet', 'cash_flow_item')
+        queryset = FlowOfFunds.objects.select_related('wallet', 'cash_flow_item').filter(
+            cash_flow_item__isnull=False
+        ).exclude(type_of_document=TRANSFER_DOCUMENT_TYPE)
         queryset = _apply_period_filters(queryset, date_from=date_from, date_to=date_to)
 
         wallet_id = validated.get('wallet')
@@ -1071,6 +1078,10 @@ class ReportViewSet(viewsets.ViewSet):
         project_id = validated.get('project')
         if project_id:
             plan_queryset = plan_queryset.filter(project_id=project_id)
+            actual_queryset = actual_queryset.filter(project_id=project_id)
+        else:
+            plan_queryset = plan_queryset.filter(project__isnull=True)
+            actual_queryset = actual_queryset.filter(project__isnull=True)
 
         cash_flow_item_id = validated.get('cash_flow_item')
         if cash_flow_item_id:
@@ -2941,7 +2952,9 @@ class FlowOfFundsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """Получить агрегированную сводку по движению средств"""
-        queryset = self.get_queryset()
+        queryset = self.get_queryset().filter(cash_flow_item__isnull=False).exclude(
+            type_of_document=TRANSFER_DOCUMENT_TYPE
+        )
         
         # Сумма по кошелькам
         wallet_summary = queryset.values('wallet__name').annotate(
