@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { ResponsiveBar } from "@nivo/bar"
 import { ResponsiveLine } from "@nivo/line"
@@ -23,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { exportFormatters } from "@/lib/export-utils"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
@@ -97,10 +99,14 @@ function renderNoData(title: string, description: string) {
 }
 
 export default function ReportsPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const today = formatDateForInput()
   const [timelineMode, setTimelineMode] = useState<TimelineMode>("daily")
   const [selectedPreset, setSelectedPreset] = useState<RangePreset>("month")
-  const [dateFrom, setDateFrom] = useState(formatDateForInput(shiftDays(-30)))
-  const [dateTo, setDateTo] = useState(formatDateForInput())
+  const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || formatDateForInput(shiftDays(-30)))
+  const [dateTo, setDateTo] = useState(searchParams.get("date_to") || today)
+  const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
   const cashFlowChartRef = useRef<HTMLDivElement>(null)
   const walletChartRef = useRef<HTMLDivElement>(null)
   const categoryChartRef = useRef<HTMLDivElement>(null)
@@ -108,13 +114,13 @@ export default function ReportsPage() {
   const budgetExpenseChartRef = useRef<HTMLDivElement>(null)
 
   const reportsQuery = useQuery({
-    queryKey: ["reports-analytics", { dateFrom, dateTo }],
+    queryKey: ["reports-analytics", { dateFrom, dateTo, budgetForecast }],
     staleTime: 60_000,
     queryFn: async () => {
       const [cashFlow, budgetIncome, budgetExpense, overview] = await Promise.all([
         ReportService.getCashFlowReport({ dateFrom, dateTo }),
-        ReportService.getBudgetIncomeReport({ dateFrom, dateTo }),
-        ReportService.getBudgetExpenseReport({ dateFrom, dateTo }),
+        ReportService.getBudgetIncomeReport({ dateFrom, dateTo, limitByToday: budgetForecast }),
+        ReportService.getBudgetExpenseReport({ dateFrom, dateTo, limitByToday: budgetForecast }),
         DashboardService.getOverview({ date: dateTo, hideHiddenWallets: true }),
       ])
 
@@ -126,6 +132,14 @@ export default function ReportsPage() {
       }
     },
   })
+
+  const updateReportUrl = (nextDateFrom: string, nextDateTo: string, nextBudgetForecast: boolean) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("date_from", nextDateFrom)
+    params.set("date_to", nextDateTo)
+    params.set("budget_forecast", nextBudgetForecast ? "true" : "false")
+    router.replace(`/reports?${params.toString()}`, { scroll: false })
+  }
 
   const setPresetRange = (preset: Exclude<RangePreset, null>) => {
     const today = new Date()
@@ -151,9 +165,12 @@ export default function ReportsPage() {
       from.setMonth(0, 1)
     }
 
-    setDateFrom(formatDateForInput(from))
-    setDateTo(formatDateForInput(today))
+    const nextDateFrom = formatDateForInput(from)
+    const nextDateTo = formatDateForInput(today)
+    setDateFrom(nextDateFrom)
+    setDateTo(nextDateTo)
     setSelectedPreset(preset)
+    updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
   }
 
   if (reportsQuery.isLoading) {
@@ -177,6 +194,7 @@ export default function ReportsPage() {
   const netTotal = incomeTotal - expenseTotal
   const plannedBudgetCount = budgetExpense.summary.length
   const includedExpenseTotal = budgetExpense.totals.actual
+  const isFutureReportDate = dateTo > today
 
   const timelineMap = new Map<string, TimelineRow>()
 
@@ -379,8 +397,10 @@ export default function ReportsPage() {
                 type="date"
                 value={dateFrom}
                 onChange={(event) => {
-                  setDateFrom(event.target.value)
+                  const nextDateFrom = event.target.value
+                  setDateFrom(nextDateFrom)
                   setSelectedPreset(null)
+                  updateReportUrl(nextDateFrom, dateTo, budgetForecast)
                 }}
               />
             </div>
@@ -391,15 +411,38 @@ export default function ReportsPage() {
                 type="date"
                 value={dateTo}
                 onChange={(event) => {
-                  setDateTo(event.target.value)
+                  const nextDateTo = event.target.value
+                  setDateTo(nextDateTo)
                   setSelectedPreset(null)
+                  updateReportUrl(dateFrom, nextDateTo, budgetForecast)
                 }}
               />
             </div>
           </div>
 
+          <div className="flex flex-col gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <Label htmlFor="budget-forecast-mode" className="cursor-pointer">
+                Прогноз бюджета
+              </Label>
+              <div className="text-sm leading-5 text-muted-foreground">
+                План считается до выбранной даты, факт ограничивается сегодняшним днем.
+              </div>
+            </div>
+            <Switch
+              id="budget-forecast-mode"
+              checked={budgetForecast}
+              onCheckedChange={(checked) => {
+                const nextBudgetForecast = Boolean(checked)
+                setBudgetForecast(nextBudgetForecast)
+                updateReportUrl(dateFrom, dateTo, nextBudgetForecast)
+              }}
+            />
+          </div>
+
           <div className="rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
             Период: с {formatDate(dateFrom)} по {formatDate(dateTo)}
+            {isFutureReportDate && budgetForecast ? " · прогноз по бюджету включен" : ""}
           </div>
         </CardContent>
       </Card>

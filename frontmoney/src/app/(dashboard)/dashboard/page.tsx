@@ -12,7 +12,6 @@ import {
   endOfMonth,
   endOfWeek,
   format as formatDateFns,
-  isAfter,
   isSameDay,
   isSameMonth,
   startOfMonth,
@@ -353,7 +352,6 @@ export default function DashboardPage() {
                         type="button"
                         className="flex h-10 w-10 items-center justify-center rounded-2xl border border-border/70 bg-card/80 transition-colors hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
                         onClick={() => setVisibleMonth((current) => addMonths(current, 1))}
-                        disabled={isAfter(startOfMonth(addMonths(visibleMonth, 1)), startOfMonth(todayDate))}
                         aria-label="Следующий месяц"
                       >
                         <ChevronRight className="h-4 w-4" />
@@ -372,13 +370,11 @@ export default function DashboardPage() {
                       {calendarDays.map((day) => {
                         const isSelected = isSameDay(day, selectedDashboardDate)
                         const isCurrentMonth = isSameMonth(day, visibleMonth)
-                        const isFutureDay = isAfter(day, todayDate)
 
                         return (
                           <button
                             key={day.toISOString()}
                             type="button"
-                            disabled={isFutureDay}
                             onClick={() => handleSelectDashboardDate(day)}
                             className={cn(
                               "flex h-10 items-center justify-center rounded-2xl text-sm font-medium transition-colors",
@@ -386,8 +382,7 @@ export default function DashboardPage() {
                                 ? "bg-primary text-primary-foreground shadow-[0_18px_35px_-18px_hsl(var(--primary)/0.8)]"
                                 : isCurrentMonth
                                   ? "text-foreground hover:bg-card"
-                                  : "text-muted-foreground/45 hover:bg-card/70",
-                              isFutureDay && "cursor-not-allowed text-muted-foreground/35 hover:bg-transparent"
+                                  : "text-muted-foreground/45 hover:bg-card/70"
                             )}
                           >
                             {formatDateFns(day, "d")}
