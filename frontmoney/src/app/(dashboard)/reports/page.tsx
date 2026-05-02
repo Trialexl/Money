@@ -200,6 +200,7 @@ export default function ReportsPage() {
   const [dateTo, setDateTo] = useState(searchParams.get("date_to") || today)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
+  const [selectedMonthlyExpenseItemKey, setSelectedMonthlyExpenseItemKey] = useState<string | null>(null)
   const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
   const budgetFromMonth = getMonthInputValue(dateFrom)
   const budgetToMonth = getMonthInputValue(dateTo)
@@ -510,8 +511,36 @@ export default function ReportsPage() {
   }))
   const monthlyExpenseItemByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item]))
   const monthlyExpenseColorByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item.color]))
-  const monthlyExpenseChartKeys = monthlyExpenseLegendItems.map((item) => item.key)
-  const monthlyExpenseChartRows = monthlyCashFlowGroups.map((group) => {
+  const activeSelectedMonthlyExpenseItemKey =
+    selectedMonthlyExpenseItemKey && monthlyExpenseItemTotals.has(selectedMonthlyExpenseItemKey)
+      ? selectedMonthlyExpenseItemKey
+      : null
+  const selectedMonthlyExpenseItemName =
+    activeSelectedMonthlyExpenseItemKey
+      ? monthlyExpenseItems.find((item) => item.key === activeSelectedMonthlyExpenseItemKey)?.name ?? null
+      : null
+  const visibleMonthlyCashFlowGroups = activeSelectedMonthlyExpenseItemKey
+    ? monthlyCashFlowGroups
+        .map((group) => ({
+          ...group,
+          income: group.rows
+            .filter((row) => row.itemKey === activeSelectedMonthlyExpenseItemKey)
+            .reduce((sum, row) => sum + row.income, 0),
+          expense: group.rows
+            .filter((row) => row.itemKey === activeSelectedMonthlyExpenseItemKey)
+            .reduce((sum, row) => sum + row.expense, 0),
+          rows: group.rows.filter((row) => row.itemKey === activeSelectedMonthlyExpenseItemKey),
+        }))
+        .map((group) => ({
+          ...group,
+          net: group.income - group.expense,
+        }))
+        .filter((group) => group.rows.length > 0)
+    : monthlyCashFlowGroups
+  const monthlyExpenseChartKeys = activeSelectedMonthlyExpenseItemKey
+    ? [activeSelectedMonthlyExpenseItemKey]
+    : monthlyExpenseLegendItems.map((item) => item.key)
+  const monthlyExpenseChartRows = visibleMonthlyCashFlowGroups.map((group) => {
     const chartRow: Record<string, string | number> = {
       month: group.label,
     }
@@ -1122,9 +1151,14 @@ export default function ReportsPage() {
                   <div className="space-y-1">
                     <CardTitle>Расходы по месяцам и статьям</CardTitle>
                     <CardDescription>
-                      Цвета соответствуют легенде справа. Переводы и движения без статьи не участвуют в отчете.
+                      Цвета соответствуют легенде справа. Клик по статье фильтрует график и таблицу.
                     </CardDescription>
                   </div>
+                  {selectedMonthlyExpenseItemName ? (
+                    <Button variant="outline" size="sm" onClick={() => setSelectedMonthlyExpenseItemKey(null)}>
+                      Все статьи
+                    </Button>
+                  ) : null}
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -1186,16 +1220,42 @@ export default function ReportsPage() {
                       )}
                     </div>
                     <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
-                      <div className="text-sm font-semibold tracking-[-0.02em]">Легенда расходных статей</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Итог по выбранному периоду.</div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold tracking-[-0.02em]">Легенда расходных статей</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Клик по статье фильтрует график и таблицу.
+                          </div>
+                        </div>
+                        {selectedMonthlyExpenseItemName ? (
+                          <Button variant="ghost" size="sm" onClick={() => setSelectedMonthlyExpenseItemKey(null)}>
+                            Сброс
+                          </Button>
+                        ) : null}
+                      </div>
                       <div className="mt-4 max-h-[340px] space-y-2 overflow-y-auto pr-1">
                         {monthlyExpenseLegendItems.length === 0 ? (
                           <div className="rounded-2xl border border-border/60 bg-card/50 px-3 py-3 text-sm text-muted-foreground">
                             Расходных статей нет.
                           </div>
                         ) : (
-                          monthlyExpenseLegendItems.map((item) => (
-                            <div key={item.key} className="rounded-2xl border border-border/60 bg-card/50 px-3 py-2">
+                          monthlyExpenseLegendItems.map((item) => {
+                            const isSelected = activeSelectedMonthlyExpenseItemKey === item.key
+                            return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              className={`w-full rounded-2xl border px-3 py-2 text-left transition ${
+                                isSelected
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
+                              }`}
+                              onClick={() =>
+                                setSelectedMonthlyExpenseItemKey((current) =>
+                                  current === item.key ? null : item.key
+                                )
+                              }
+                            >
                               <div className="flex items-center gap-2">
                                 <span
                                   className="h-3 w-3 shrink-0 rounded-full"
@@ -1209,8 +1269,8 @@ export default function ReportsPage() {
                               <div className="mt-1 text-xs text-muted-foreground">
                                 {item.share.toFixed(1)}% от расходов
                               </div>
-                            </div>
-                          ))
+                            </button>
+                          )})
                         )}
                       </div>
                     </div>
@@ -1220,7 +1280,11 @@ export default function ReportsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Таблица по месяцам и статьям</CardTitle>
+                  <CardTitle>
+                    {selectedMonthlyExpenseItemName
+                      ? `Таблица: ${selectedMonthlyExpenseItemName}`
+                      : "Таблица по месяцам и статьям"}
+                  </CardTitle>
                   <CardDescription>
                     В каждой группе сначала итог месяца, затем строки статей с приходом, расходом и результатом.
                   </CardDescription>
@@ -1236,7 +1300,7 @@ export default function ReportsPage() {
                           <th className="pb-3 text-right">Итог</th>
                         </tr>
                       </thead>
-                      {monthlyCashFlowGroups.map((group) => (
+                      {visibleMonthlyCashFlowGroups.map((group) => (
                         <tbody key={group.key}>
                           <tr className="border-b border-border bg-muted/40 text-sm font-semibold">
                             <td className="py-3">{group.label}</td>
