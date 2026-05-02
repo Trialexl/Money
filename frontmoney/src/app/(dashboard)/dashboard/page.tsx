@@ -219,8 +219,8 @@ export default function DashboardPage() {
     <div className="space-y-5">
       <section>
         <div className="rounded-[20px] border border-border/60 bg-card/85 p-3 shadow-soft sm:rounded-[24px] sm:p-4">
-          <div className="grid grid-cols-[minmax(0,1fr)_116px] items-start gap-3 md:grid-cols-[minmax(0,1fr)_148px] lg:items-center">
-            <div className="min-w-0 flex-1 space-y-3 lg:mx-auto lg:w-full lg:max-w-[720px] lg:py-4 lg:text-center">
+          <div className="grid grid-cols-[minmax(0,1fr)_116px] items-start gap-3 md:grid-cols-[minmax(0,1fr)_148px] lg:grid-cols-[minmax(230px,0.72fr)_minmax(320px,1fr)_148px] lg:items-stretch xl:grid-cols-[minmax(260px,0.72fr)_minmax(420px,1fr)_212px]">
+            <div className="min-w-0 flex-1 space-y-3 lg:py-4">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Общий остаток</div>
                   <div className="mt-1.5 text-xl font-semibold tracking-[-0.04em] text-foreground sm:mt-2 sm:text-2xl">
@@ -255,6 +255,50 @@ export default function DashboardPage() {
                   </div>
                   <div className="mt-1 text-xs leading-4 text-muted-foreground">Прошлый: {formatCurrency(previousMonthNet)}</div>
                 </div>
+            </div>
+
+            <div className="hidden min-w-0 rounded-[24px] border border-border/60 bg-background/45 p-4 lg:flex lg:flex-col">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Остатки по кошелькам
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 rounded-2xl"
+                  onClick={() => setShowHiddenWallets((value) => !value)}
+                  aria-label={showHiddenWallets ? "Скрыть скрытые кошельки" : "Показать скрытые кошельки"}
+                  title={showHiddenWallets ? "Скрыть скрытые кошельки" : "Показать скрытые кошельки"}
+                >
+                  {showHiddenWallets ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                </Button>
+              </div>
+              {sortedWallets.length > 0 ? (
+                <div className="grid max-h-[230px] gap-2 overflow-y-auto pr-1 xl:grid-cols-2">
+                  {sortedWallets.map((wallet) => (
+                    <Link
+                      key={wallet.wallet_id}
+                      href={`/wallets/${wallet.wallet_id}`}
+                      className="min-w-0 rounded-[18px] border border-border/60 bg-card/60 px-3 py-2.5 text-sm transition-colors hover:bg-card"
+                    >
+                      <div className="truncate font-medium text-foreground">{wallet.wallet_name}</div>
+                      <div
+                        className={
+                          wallet.balance >= 0
+                            ? "mt-1 font-semibold text-emerald-600 dark:text-emerald-300"
+                            : "mt-1 font-semibold text-rose-600 dark:text-rose-300"
+                        }
+                      >
+                        {formatCurrency(wallet.balance)}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex min-h-[120px] items-center justify-center rounded-[18px] border border-dashed border-border/70 px-4 text-center text-sm text-muted-foreground">
+                  Нет видимых кошельков с остатком.
+                </div>
+              )}
             </div>
 
             <div className="flex shrink-0 flex-col gap-2.5 md:gap-3">
@@ -400,7 +444,7 @@ export default function DashboardPage() {
         <>
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_380px]">
             <div className="space-y-5">
-              <Card>
+              <Card className="lg:hidden">
                 <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border/60 pb-4">
                   <CardTitle>Кошельки</CardTitle>
                   <div className="flex shrink-0 items-center">
