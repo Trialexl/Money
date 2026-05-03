@@ -31,7 +31,7 @@ services:
       - django_static:/app/staticfiles
 
   frontend:
-    image: trialexl/money-frontend@sha256:65287ffad9bedfa7a612982e4a9ccc91e910d042794b3d5be56fe845340796c9
+    image: trialexl/money-frontend@sha256:9b051f9ee91b6d67e43e25183fc3b499b8a305503226e61ec725df6c6f9e6008
     restart: unless-stopped
     depends_on:
       - backend

@@ -208,6 +208,8 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
   }, [effectiveCashFlowItemId, cashFlowItems])
   const parsedAmount = Number.parseFloat(amount)
   const hasAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0
+  const parsedAmountMonth = Number.parseInt(amountMonth, 10)
+  const hasAmountMonth = !Number.isNaN(parsedAmountMonth) && parsedAmountMonth > 0
   const destinationWallets = walletOptions.filter((wallet) => wallet.id !== effectiveWalletFromId)
   const selectedWalletFromLabel = effectiveWalletFromId
     ? walletOptions.find((wallet) => wallet.id === effectiveWalletFromId)?.name || "Загружаем кошелек"
@@ -313,19 +315,6 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
                       />
                     </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="autopayment-period">Месяцев в графике</Label>
-                      <Input
-                        id="autopayment-period"
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={amountMonth}
-                        onChange={(event) => setAmountMonth(event.target.value)}
-                        placeholder="12"
-                        required
-                      />
-                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -442,9 +431,12 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
         draftRows={planningDraftRows ?? undefined}
         draftStorageKey={planningDraftStorageKey}
         onDraftRowsChange={setPlanningDraftRows}
-        onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
+        onMonthlyAmountChange={(nextAmount) => setAmount(String(nextAmount))}
+        onMonthCountChange={(nextMonthCount) => setAmountMonth(String(nextMonthCount))}
         distributionSource={{
-          totalAmount: hasAmount ? parsedAmount : 0,
+          totalAmount: hasAmount && hasAmountMonth ? Math.round(parsedAmount * parsedAmountMonth * 100) / 100 : hasAmount ? parsedAmount : 0,
+          monthlyAmount: hasAmount ? parsedAmount : undefined,
+          monthCount: hasAmountMonth ? parsedAmountMonth : undefined,
           startDate: dateStart,
         }}
       />

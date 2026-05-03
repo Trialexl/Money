@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
 import {
   ArrowDownRight,
@@ -25,6 +25,7 @@ import {
 import { BrandMark } from "@/components/shared/brand-mark"
 import { Button } from "@/components/ui/button"
 import { ModeToggle } from "@/components/ui/mode-toggle"
+import { buildReturnToHref, withReturnToHref } from "@/lib/return-navigation"
 import { getUserDisplayName, getUserSecondaryText } from "@/lib/user-profile"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/auth-store"
@@ -97,6 +98,7 @@ const topCreateActions: Record<string, { href: string; label: string }> = {
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { logout, user } = useAuthStore()
 
@@ -105,6 +107,19 @@ export function AppShell({ children }: AppShellProps) {
     allItems.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)) ?? allItems[0]
   const isDashboard = pathname === "/dashboard"
   const topCreateAction = topCreateActions[pathname]
+  const returnToHref = buildReturnToHref(pathname, searchParams)
+
+  const getCreateActionHref = (href: string) => {
+    if (
+      (pathname === "/receipts" && href === "/receipts/new") ||
+      (pathname === "/expenditures" && href === "/expenditures/new") ||
+      (pathname === "/transfers" && href === "/transfers/new")
+    ) {
+      return withReturnToHref(href, returnToHref)
+    }
+
+    return href
+  }
 
   const handleLogout = async () => {
     await logout()
@@ -139,7 +154,7 @@ export function AppShell({ children }: AppShellProps) {
 
             {topCreateAction ? (
               <Button asChild size="icon" aria-label={topCreateAction.label} title={topCreateAction.label}>
-                <Link href={topCreateAction.href}>
+                <Link href={getCreateActionHref(topCreateAction.href)}>
                   <Plus className="h-4 w-4" />
                 </Link>
               </Button>
@@ -182,7 +197,7 @@ export function AppShell({ children }: AppShellProps) {
 
                     return (
                       <Button key={action.href} asChild className="justify-between">
-                        <Link href={action.href} onClick={() => setIsMenuOpen(false)}>
+                        <Link href={getCreateActionHref(action.href)} onClick={() => setIsMenuOpen(false)}>
                           {action.label}
                           <Icon className="h-4 w-4" />
                         </Link>

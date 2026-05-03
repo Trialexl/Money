@@ -166,6 +166,9 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
   ]
   const parsedAmount = Number.parseFloat(amount)
   const hasAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0
+  const parsedAmountMonthForDistribution = Number.parseInt(amountMonth, 10)
+  const hasAmountMonthForDistribution =
+    !Number.isNaN(parsedAmountMonthForDistribution) && parsedAmountMonthForDistribution > 0
   const errorMessage =
     validationError ||
     (budgetMutation.error as any)?.response?.data?.detail ||
@@ -266,18 +269,6 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="budget-amount-month">Месяцев в графике</Label>
-                    <Input
-                      id="budget-amount-month"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={amountMonth}
-                      onChange={(event) => setAmountMonth(event.target.value)}
-                      placeholder="12"
-                    />
-                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -335,8 +326,10 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
         draftStorageKey={planningDraftStorageKey}
         onDraftRowsChange={setPlanningDraftRows}
         onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
+        onMonthCountChange={(nextMonthCount) => setAmountMonth(String(nextMonthCount))}
         distributionSource={{
           totalAmount: hasAmount ? parsedAmount : 0,
+          monthCount: hasAmountMonthForDistribution ? parsedAmountMonthForDistribution : undefined,
           startDate: dateStart || date,
         }}
       />

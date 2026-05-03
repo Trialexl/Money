@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useDeferredValue, useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDownRight, ArrowUpRight, Copy, PencilLine, Search, SlidersHorizontal, Trash2, Wallet2, X } from "lucide-react"
@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency, formatDate } from "@/lib/formatters"
+import { buildReturnToHref, withReturnToHref } from "@/lib/return-navigation"
+import { cn } from "@/lib/utils"
 import {
   Expenditure,
   ExpenditureService,
@@ -133,6 +135,7 @@ function toCashFlowItemOption(item: { id: string; name?: string | null; code?: s
 
 export default function FinancialOperationsCatalog({ mode }: FinancialOperationsCatalogProps) {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
   const config = CATALOG_CONFIG[mode]
@@ -153,6 +156,9 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
   const deferredSearch = useDeferredValue(searchTerm)
   const referencesQuery = useOperationReferenceDataQuery()
   const normalizedSearch = deferredSearch.trim()
+  const highlightedOperationId = searchParams.get("highlight") || ""
+  const returnToHref = buildReturnToHref(pathname, searchParams)
+  const createHref = withReturnToHref(config.createHref, returnToHref)
 
   useEffect(() => {
     if (!didMountFilterReset.current) {
@@ -206,6 +212,10 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
       params.set("page_size", String(pageSize))
     }
 
+    if (highlightedOperationId) {
+      params.set("highlight", highlightedOperationId)
+    }
+
     const nextSearch = params.toString()
     if (searchParams.toString() !== nextSearch) {
       router.replace(nextSearch ? `${config.routeHref}?${nextSearch}` : config.routeHref, { scroll: false })
@@ -221,6 +231,7 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
     normalizedSearch,
     page,
     pageSize,
+    highlightedOperationId,
     router,
     searchParams,
     selectedCategoryId,
@@ -594,7 +605,7 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
           action={
             !hasActiveFilters ? (
               <Button asChild>
-                <Link href={config.createHref}>{config.createLabel}</Link>
+                <Link href={createHref}>{config.createLabel}</Link>
               </Button>
             ) : (
               <Button variant="outline" onClick={handleResetFilters}>
@@ -614,9 +625,16 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
             <div className="divide-y divide-border/60 md:hidden">
               {operations.map((operation) => {
                 const budgetIncluded = mode === "expenditure" && isExpenditureOperation(operation) ? operation.include_in_budget : null
+                const isHighlighted = highlightedOperationId === operation.id
 
                 return (
-                  <div key={operation.id} className="space-y-4 px-5 py-4">
+                  <div
+                    key={operation.id}
+                    className={cn(
+                      "space-y-4 px-5 py-4 transition-colors",
+                      isHighlighted && "bg-primary/10 ring-1 ring-inset ring-primary/35"
+                    )}
+                  >
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
@@ -653,12 +671,20 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
 
                     <div className="flex flex-wrap gap-1">
                       <Button asChild variant="ghost" size="icon">
-                        <Link href={`${config.routeHref}/${operation.id}/edit`} aria-label="Редактировать" title="Редактировать">
+                        <Link
+                          href={withReturnToHref(`${config.routeHref}/${operation.id}/edit`, returnToHref)}
+                          aria-label="Редактировать"
+                          title="Редактировать"
+                        >
                           <PencilLine className="h-4 w-4" />
                         </Link>
                       </Button>
                       <Button asChild variant="ghost" size="icon">
-                        <Link href={getDuplicateHref(config.createHref, operation)} aria-label="Дублировать" title="Дублировать">
+                        <Link
+                          href={withReturnToHref(getDuplicateHref(config.createHref, operation), returnToHref)}
+                          aria-label="Дублировать"
+                          title="Дублировать"
+                        >
                           <Copy className="h-4 w-4" />
                         </Link>
                       </Button>
@@ -687,9 +713,16 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
                 <tbody>
                   {operations.map((operation) => {
                     const budgetIncluded = mode === "expenditure" && isExpenditureOperation(operation) ? operation.include_in_budget : null
+                    const isHighlighted = highlightedOperationId === operation.id
 
                     return (
-                      <tr key={operation.id} className="border-b border-border/60 align-top last:border-b-0">
+                      <tr
+                        key={operation.id}
+                        className={cn(
+                          "border-b border-border/60 align-top transition-colors last:border-b-0",
+                          isHighlighted && "bg-primary/10 ring-1 ring-inset ring-primary/35"
+                        )}
+                      >
                         <td className="px-6 py-4">
                           <div className="max-w-[280px]">
                             {operation.description ? <div className="text-sm font-medium text-foreground">{operation.description}</div> : null}
@@ -718,12 +751,20 @@ export default function FinancialOperationsCatalog({ mode }: FinancialOperations
                         <td className="px-6 py-4">
                           <div className="flex justify-end gap-1">
                             <Button asChild variant="ghost" size="icon">
-                              <Link href={`${config.routeHref}/${operation.id}/edit`} aria-label="Редактировать" title="Редактировать">
+                              <Link
+                                href={withReturnToHref(`${config.routeHref}/${operation.id}/edit`, returnToHref)}
+                                aria-label="Редактировать"
+                                title="Редактировать"
+                              >
                                 <PencilLine className="h-4 w-4" />
                               </Link>
                             </Button>
                             <Button asChild variant="ghost" size="icon">
-                              <Link href={getDuplicateHref(config.createHref, operation)} aria-label="Дублировать" title="Дублировать">
+                              <Link
+                                href={withReturnToHref(getDuplicateHref(config.createHref, operation), returnToHref)}
+                                aria-label="Дублировать"
+                                title="Дублировать"
+                              >
                                 <Copy className="h-4 w-4" />
                               </Link>
                             </Button>

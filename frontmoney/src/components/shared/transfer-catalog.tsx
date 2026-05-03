@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useDeferredValue, useEffect, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useDeferredValue, useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRightLeft, Copy, PencilLine, Search, SlidersHorizontal, Trash2, Wallet2, X } from "lucide-react"
 
@@ -18,6 +19,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency, formatDate } from "@/lib/formatters"
+import { buildReturnToHref, withReturnToHref } from "@/lib/return-navigation"
+import { cn } from "@/lib/utils"
 import { PageSizeOption, TransferService } from "@/services/financial-operations-service"
 
 function getMonthStart(date = new Date()) {
@@ -38,26 +41,117 @@ function getTransferDuplicateHref(transfer: Awaited<ReturnType<typeof TransferSe
   return `/transfers/new?${params.toString()}`
 }
 
+function parsePage(value: string | null) {
+  const parsed = Number.parseInt(value ?? "", 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
+}
+
+function parsePageSize(value: string | null): PageSizeOption {
+  if (value === "50") {
+    return 50
+  }
+
+  if (value === "100") {
+    return 100
+  }
+
+  return 20
+}
+
 export default function TransferCatalog() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const queryClient = useQueryClient()
-  const [searchTerm, setSearchTerm] = useState("")
-  const [dateFrom, setDateFrom] = useState("")
-  const [dateTo, setDateTo] = useState("")
-  const [walletFromId, setWalletFromId] = useState("all-wallets-from")
-  const [walletToId, setWalletToId] = useState("all-wallets-to")
-  const [amountMin, setAmountMin] = useState("")
-  const [amountMax, setAmountMax] = useState("")
+  const didMountFilterReset = useRef(false)
+  const [searchTerm, setSearchTerm] = useState(() => searchParams.get("search") || "")
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get("date_from") || "")
+  const [dateTo, setDateTo] = useState(() => searchParams.get("date_to") || "")
+  const [walletFromId, setWalletFromId] = useState(() => searchParams.get("wallet_from") || "all-wallets-from")
+  const [walletToId, setWalletToId] = useState(() => searchParams.get("wallet_to") || "all-wallets-to")
+  const [amountMin, setAmountMin] = useState(() => searchParams.get("amount_min") || "")
+  const [amountMax, setAmountMax] = useState(() => searchParams.get("amount_max") || "")
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<PageSizeOption>(20)
+  const [page, setPage] = useState(() => parsePage(searchParams.get("page")))
+  const [pageSize, setPageSize] = useState<PageSizeOption>(() => parsePageSize(searchParams.get("page_size")))
   const deferredSearch = useDeferredValue(searchTerm)
   const normalizedSearch = deferredSearch.trim()
   const walletsQuery = useActiveWalletsQuery()
+  const highlightedTransferId = searchParams.get("highlight") || ""
+  const returnToHref = buildReturnToHref(pathname, searchParams)
+  const createHref = withReturnToHref("/transfers/new", returnToHref)
 
   useEffect(() => {
+    if (!didMountFilterReset.current) {
+      didMountFilterReset.current = true
+      return
+    }
+
     setPage(1)
   }, [normalizedSearch, dateFrom, dateTo, walletFromId, walletToId, amountMin, amountMax])
+
+  useEffect(() => {
+    const params = new URLSearchParams()
+
+    if (normalizedSearch) {
+      params.set("search", normalizedSearch)
+    }
+
+    if (dateFrom) {
+      params.set("date_from", dateFrom)
+    }
+
+    if (dateTo) {
+      params.set("date_to", dateTo)
+    }
+
+    if (walletFromId !== "all-wallets-from") {
+      params.set("wallet_from", walletFromId)
+    }
+
+    if (walletToId !== "all-wallets-to") {
+      params.set("wallet_to", walletToId)
+    }
+
+    if (amountMin) {
+      params.set("amount_min", amountMin)
+    }
+
+    if (amountMax) {
+      params.set("amount_max", amountMax)
+    }
+
+    if (page > 1) {
+      params.set("page", String(page))
+    }
+
+    if (pageSize !== 20) {
+      params.set("page_size", String(pageSize))
+    }
+
+    if (highlightedTransferId) {
+      params.set("highlight", highlightedTransferId)
+    }
+
+    const nextSearch = params.toString()
+    if (searchParams.toString() !== nextSearch) {
+      router.replace(nextSearch ? `/transfers?${nextSearch}` : "/transfers", { scroll: false })
+    }
+  }, [
+    amountMax,
+    amountMin,
+    dateFrom,
+    dateTo,
+    highlightedTransferId,
+    normalizedSearch,
+    page,
+    pageSize,
+    router,
+    searchParams,
+    walletFromId,
+    walletToId,
+  ])
 
   const transfersQuery = useQuery({
     queryKey: [
@@ -348,7 +442,7 @@ export default function TransferCatalog() {
           action={
             !hasActiveFilters ? (
               <Button asChild>
-                <Link href="/transfers/new">Создать перевод</Link>
+                <Link href={createHref}>Создать перевод</Link>
               </Button>
             ) : (
               <Button variant="outline" onClick={handleResetFilters}>
@@ -371,52 +465,70 @@ export default function TransferCatalog() {
             </div>
 
             <div className="divide-y divide-border/60 md:hidden">
-              {transfers.map((transfer) => (
-                <div key={transfer.id} className="space-y-4 px-5 py-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">Перевод</Badge>
+              {transfers.map((transfer) => {
+                const isHighlighted = highlightedTransferId === transfer.id
+
+                return (
+                  <div
+                    key={transfer.id}
+                    className={cn(
+                      "space-y-4 px-5 py-4 transition-colors",
+                      isHighlighted && "bg-primary/10 ring-1 ring-inset ring-primary/35"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">Перевод</Badge>
+                        </div>
+                        {transfer.description ? <div className="text-sm font-medium text-foreground">{transfer.description}</div> : null}
+                        <div className="text-xs text-muted-foreground">
+                          {transfer.number || "Без номера"} · {formatDate(transfer.date)}
+                        </div>
                       </div>
-                      {transfer.description ? <div className="text-sm font-medium text-foreground">{transfer.description}</div> : null}
-                      <div className="text-xs text-muted-foreground">
-                        {transfer.number || "Без номера"} · {formatDate(transfer.date)}
+                      <div className="text-right text-lg font-semibold tracking-[-0.03em] text-foreground">{formatCurrency(transfer.amount)}</div>
+                    </div>
+
+                    <div className="grid gap-3 rounded-[20px] border border-border/60 bg-background/70 p-4 text-sm">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Откуда</div>
+                          <div className="mt-1 text-foreground">{walletMap[transfer.wallet_from] || "Неизвестный кошелек"}</div>
+                        </div>
+                        <ArrowRightLeft className="h-4 w-4 text-primary" />
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Куда</div>
+                          <div className="mt-1 text-foreground">{walletMap[transfer.wallet_to] || "Неизвестный кошелек"}</div>
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right text-lg font-semibold tracking-[-0.03em] text-foreground">{formatCurrency(transfer.amount)}</div>
-                  </div>
 
-                  <div className="grid gap-3 rounded-[20px] border border-border/60 bg-background/70 p-4 text-sm">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Откуда</div>
-                        <div className="mt-1 text-foreground">{walletMap[transfer.wallet_from] || "Неизвестный кошелек"}</div>
-                      </div>
-                      <ArrowRightLeft className="h-4 w-4 text-primary" />
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Куда</div>
-                        <div className="mt-1 text-foreground">{walletMap[transfer.wallet_to] || "Неизвестный кошелек"}</div>
-                      </div>
+                    <div className="flex flex-wrap gap-1">
+                      <Button asChild variant="ghost" size="icon">
+                        <Link
+                          href={withReturnToHref(`/transfers/${transfer.id}/edit`, returnToHref)}
+                          aria-label="Редактировать"
+                          title="Редактировать"
+                        >
+                          <PencilLine className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      <Button asChild variant="ghost" size="icon">
+                        <Link
+                          href={withReturnToHref(getTransferDuplicateHref(transfer), returnToHref)}
+                          aria-label="Дублировать"
+                          title="Дублировать"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(transfer.id)} disabled={deleteMutation.isPending} aria-label="Удалить" title="Удалить">
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap gap-1">
-                    <Button asChild variant="ghost" size="icon">
-                      <Link href={`/transfers/${transfer.id}/edit`} aria-label="Редактировать" title="Редактировать">
-                        <PencilLine className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                    <Button asChild variant="ghost" size="icon">
-                      <Link href={getTransferDuplicateHref(transfer)} aria-label="Дублировать" title="Дублировать">
-                        <Copy className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(transfer.id)} disabled={deleteMutation.isPending} aria-label="Удалить" title="Удалить">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             <div className="hidden overflow-x-auto md:block">
@@ -432,45 +544,63 @@ export default function TransferCatalog() {
                   </tr>
                 </thead>
                 <tbody>
-                  {transfers.map((transfer) => (
-                    <tr key={transfer.id} className="border-b border-border/60 align-top last:border-b-0">
-                      <td className="px-6 py-4">
-                        <div className="max-w-[280px]">
-                          {transfer.description ? <div className="text-sm font-medium text-foreground">{transfer.description}</div> : null}
-                          <div className="mt-1 text-xs text-muted-foreground">{transfer.number || "Без номера"}</div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-sm text-foreground">{formatDate(transfer.date)}</td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3 text-sm">
-                          <span className="text-foreground">{walletMap[transfer.wallet_from] || "Неизвестный кошелек"}</span>
-                          <ArrowRightLeft className="h-4 w-4 text-primary" />
-                          <span className="text-foreground">{walletMap[transfer.wallet_to] || "Неизвестный кошелек"}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-right text-sm font-semibold text-foreground">{formatCurrency(transfer.amount)}</td>
-                      <td className="px-4 py-4">
-                        <Badge variant="outline">Перевод</Badge>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex justify-end gap-1">
-                          <Button asChild variant="ghost" size="icon">
-                            <Link href={`/transfers/${transfer.id}/edit`} aria-label="Редактировать" title="Редактировать">
-                              <PencilLine className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                          <Button asChild variant="ghost" size="icon">
-                            <Link href={getTransferDuplicateHref(transfer)} aria-label="Дублировать" title="Дублировать">
-                              <Copy className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(transfer.id)} disabled={deleteMutation.isPending} aria-label="Удалить" title="Удалить">
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {transfers.map((transfer) => {
+                    const isHighlighted = highlightedTransferId === transfer.id
+
+                    return (
+                      <tr
+                        key={transfer.id}
+                        className={cn(
+                          "border-b border-border/60 align-top transition-colors last:border-b-0",
+                          isHighlighted && "bg-primary/10 ring-1 ring-inset ring-primary/35"
+                        )}
+                      >
+                        <td className="px-6 py-4">
+                          <div className="max-w-[280px]">
+                            {transfer.description ? <div className="text-sm font-medium text-foreground">{transfer.description}</div> : null}
+                            <div className="mt-1 text-xs text-muted-foreground">{transfer.number || "Без номера"}</div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-foreground">{formatDate(transfer.date)}</td>
+                        <td className="px-4 py-4">
+                          <div className="flex items-center gap-3 text-sm">
+                            <span className="text-foreground">{walletMap[transfer.wallet_from] || "Неизвестный кошелек"}</span>
+                            <ArrowRightLeft className="h-4 w-4 text-primary" />
+                            <span className="text-foreground">{walletMap[transfer.wallet_to] || "Неизвестный кошелек"}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-right text-sm font-semibold text-foreground">{formatCurrency(transfer.amount)}</td>
+                        <td className="px-4 py-4">
+                          <Badge variant="outline">Перевод</Badge>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex justify-end gap-1">
+                            <Button asChild variant="ghost" size="icon">
+                              <Link
+                                href={withReturnToHref(`/transfers/${transfer.id}/edit`, returnToHref)}
+                                aria-label="Редактировать"
+                                title="Редактировать"
+                              >
+                                <PencilLine className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                            <Button asChild variant="ghost" size="icon">
+                              <Link
+                                href={withReturnToHref(getTransferDuplicateHref(transfer), returnToHref)}
+                                aria-label="Дублировать"
+                                title="Дублировать"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleDelete(transfer.id)} disabled={deleteMutation.isPending} aria-label="Удалить" title="Удалить">
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

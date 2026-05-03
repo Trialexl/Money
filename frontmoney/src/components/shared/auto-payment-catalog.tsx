@@ -453,7 +453,6 @@ export default function AutoPaymentCatalog() {
                       <Badge variant={autoPayment.is_transfer ? "outline" : "secondary"}>
                         {autoPayment.is_transfer ? "Перевод" : "Списание"}
                       </Badge>
-                      {isOverdue ? <Badge variant="destructive">Просрочен</Badge> : null}
                       {!isOverdue && isSoon ? <Badge variant="outline">Скоро</Badge> : null}
                     </div>
 

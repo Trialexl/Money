@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { formatDateForInput } from "@/lib/formatters"
+import { resolveReturnHref } from "@/lib/return-navigation"
 import { CashFlowItemService } from "@/services/cash-flow-item-service"
 import {
   Expenditure,
@@ -113,6 +114,8 @@ export default function FinancialOperationForm({
   const defaultWalletId = searchParams.get("wallet") || ""
   const defaultCashFlowItemId = searchParams.get("cash_flow_item") || ""
   const duplicateId = searchParams.get("duplicate")
+  const returnToHref = searchParams.get("return_to")
+  const cancelHref = resolveReturnHref(returnToHref, config.routeHref)
   const isDuplicateMode = Boolean(duplicateId) && !isEdit
   const planningDraftStorageKey = !isEdit && mode === "expenditure" ? "planning-draft:expenditure:new" : undefined
 
@@ -353,7 +356,7 @@ export default function FinancialOperationForm({
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
         queryClient.invalidateQueries({ queryKey: ["wallets"] }),
       ])
-      router.push(config.routeHref)
+      router.push(resolveReturnHref(returnToHref, config.routeHref, savedOperation.id || operation?.id, { resetPage: !isEdit }))
     },
   })
 
@@ -389,7 +392,7 @@ export default function FinancialOperationForm({
         description={isEdit ? config.previewHint : config.newDescription}
         actions={
           <Button asChild variant="outline" size="icon">
-            <Link href={config.cancelHref} aria-label="К списку" title="К списку">
+            <Link href={cancelHref} aria-label="К списку" title="К списку">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -530,7 +533,7 @@ export default function FinancialOperationForm({
                           : "Создать расход и выйти"}
                   </Button>
                   <Button asChild variant="outline" size="icon">
-                    <Link href={config.cancelHref} aria-label="Отмена" title="Отмена">
+                    <Link href={cancelHref} aria-label="Отмена" title="Отмена">
                       <X className="h-4 w-4" />
                     </Link>
                   </Button>

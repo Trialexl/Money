@@ -9,6 +9,8 @@ import { ResponsiveLine } from "@nivo/line"
 import { ResponsivePie } from "@nivo/pie"
 import {
   BarChart3,
+  ChevronDown,
+  ChevronRight,
   Landmark,
   TrendingDown,
   TrendingUp,
@@ -200,6 +202,7 @@ export default function ReportsPage() {
   const [dateTo, setDateTo] = useState(searchParams.get("date_to") || today)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
+  const [collapsedMonthlyGroups, setCollapsedMonthlyGroups] = useState<Record<string, boolean>>({})
   const [selectedMonthlyExpenseItemKey, setSelectedMonthlyExpenseItemKey] = useState<string | null>(null)
   const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
   const budgetFromMonth = getMonthInputValue(dateFrom)
@@ -1300,10 +1303,33 @@ export default function ReportsPage() {
                           <th className="pb-3 text-right">Итог</th>
                         </tr>
                       </thead>
-                      {visibleMonthlyCashFlowGroups.map((group) => (
+                      {visibleMonthlyCashFlowGroups.map((group) => {
+                        const isCollapsed = collapsedMonthlyGroups[group.key] ?? false
+
+                        return (
                         <tbody key={group.key}>
-                          <tr className="border-b border-border bg-muted/40 text-sm font-semibold">
-                            <td className="py-3">{group.label}</td>
+                          <tr
+                            className="cursor-pointer border-b border-border bg-muted/40 text-sm font-semibold transition-colors hover:bg-muted/60"
+                            onClick={() =>
+                              setCollapsedMonthlyGroups((current) => ({
+                                ...current,
+                                [group.key]: !(current[group.key] ?? false),
+                              }))
+                            }
+                          >
+                            <td className="py-3">
+                              <span className="flex items-center gap-2">
+                                {isCollapsed ? (
+                                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                )}
+                                <span>{group.label}</span>
+                                <span className="text-xs font-medium text-muted-foreground">
+                                  {group.rows.length} стат.
+                                </span>
+                              </span>
+                            </td>
                             <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
                               {formatCurrency(group.income)}
                             </td>
@@ -1314,7 +1340,7 @@ export default function ReportsPage() {
                               {formatCurrency(group.net)}
                             </td>
                           </tr>
-                          {group.rows.map((row) => (
+                          {isCollapsed ? null : group.rows.map((row) => (
                             <tr key={row.key} className="border-b border-border/60">
                               <td className="py-3 pl-5 font-medium">{row.itemName}</td>
                               <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
@@ -1329,7 +1355,7 @@ export default function ReportsPage() {
                             </tr>
                           ))}
                         </tbody>
-                      ))}
+                      )})}
                     </table>
                   </div>
                 </CardContent>

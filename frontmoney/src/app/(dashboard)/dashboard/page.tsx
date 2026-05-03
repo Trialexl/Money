@@ -441,8 +441,8 @@ export default function DashboardPage() {
         />
       ) : (
         <>
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_380px]">
-            <div className="space-y-5">
+          <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.4fr)_380px]">
+            <div className="min-w-0 space-y-5">
               <Card className="lg:hidden">
                 <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border/60 pb-4">
                   <CardTitle>Кошельки</CardTitle>
@@ -586,11 +586,13 @@ export default function DashboardPage() {
               </Card>
             </div>
 
-            <div>
-              <Card>
+            <div className="min-w-0">
+              <Card className="min-w-0 overflow-hidden">
                 <CardHeader className="pb-4">
                   <CardTitle>Бюджет текущего месяца</CardTitle>
-                  <CardDescription>Остатки и перерасходы по всем статьям расходного бюджета.</CardDescription>
+                  <CardDescription className="max-w-full">
+                    Остатки и перерасходы по всем статьям расходного бюджета.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="rounded-[20px] border border-border/60 bg-background/75 p-4">
@@ -614,20 +616,20 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-[18px] border border-emerald-500/20 bg-emerald-500/5 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="min-w-0 rounded-[18px] border border-emerald-500/20 bg-emerald-500/5 p-3">
+                      <div className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                         Остаток
                       </div>
-                      <div className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-300">
+                      <div className="mt-1 truncate text-sm font-semibold text-emerald-600 dark:text-emerald-300">
                         {formatCurrency(overview.budget_expense.remaining_total)}
                       </div>
                     </div>
-                    <div className="rounded-[18px] border border-rose-500/20 bg-rose-500/5 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    <div className="min-w-0 rounded-[18px] border border-rose-500/20 bg-rose-500/5 p-3">
+                      <div className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                         Перерасход
                       </div>
-                      <div className="mt-1 text-sm font-semibold text-rose-600 dark:text-rose-300">
+                      <div className="mt-1 truncate text-sm font-semibold text-rose-600 dark:text-rose-300">
                         {formatCurrency(overview.budget_expense.overrun_total)}
                       </div>
                     </div>

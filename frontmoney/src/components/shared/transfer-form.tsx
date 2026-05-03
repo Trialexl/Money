@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
+import { resolveReturnHref } from "@/lib/return-navigation"
 import { Transfer, TransferService } from "@/services/financial-operations-service"
 import { PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
 
@@ -32,6 +33,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   const duplicateId = searchParams.get("duplicate")
   const defaultWalletFromId = searchParams.get("wallet_from") || ""
   const defaultWalletToId = searchParams.get("wallet_to") || ""
+  const returnToHref = searchParams.get("return_to")
+  const cancelHref = resolveReturnHref(returnToHref, "/transfers")
   const isDuplicateMode = Boolean(duplicateId) && !isEdit
   const planningDraftStorageKey = !isEdit ? "planning-draft:transfer:new" : undefined
   const [amount, setAmount] = useState("")
@@ -99,7 +102,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
         queryClient.invalidateQueries({ queryKey: ["wallets"] }),
       ])
-      router.push("/transfers")
+      router.push(resolveReturnHref(returnToHref, "/transfers", savedTransfer.id || transfer?.id, { resetPage: !isEdit }))
     },
   })
 
@@ -176,7 +179,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
         }
         actions={
           <Button asChild variant="outline" size="icon">
-            <Link href="/transfers" aria-label="К списку" title="К списку">
+            <Link href={cancelHref} aria-label="К списку" title="К списку">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -311,7 +314,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
                     {transferMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать перевод и выйти"}
                   </Button>
                   <Button asChild variant="outline" size="icon">
-                    <Link href="/transfers" aria-label="Отмена" title="Отмена">
+                    <Link href={cancelHref} aria-label="Отмена" title="Отмена">
                       <X className="h-4 w-4" />
                     </Link>
                   </Button>

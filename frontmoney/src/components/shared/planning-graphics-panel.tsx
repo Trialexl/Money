@@ -19,8 +19,12 @@ interface PlanningGraphicsPanelProps {
   draftStorageKey?: string
   onDraftRowsChange?: (rows: PlanningGraphicDraft[]) => void
   onTotalAmountChange?: (amount: number) => void
+  onMonthlyAmountChange?: (amount: number) => void
+  onMonthCountChange?: (monthCount: number) => void
   distributionSource?: {
     totalAmount?: number
+    monthlyAmount?: number
+    monthCount?: number
     startDate?: string
   }
 }
@@ -41,6 +45,22 @@ function contractDescription(kind: PlanningDocumentKind) {
   return "Периоды перевода между кошельками."
 }
 
+function formatAmountInput(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return ""
+  }
+
+  return String(Math.round(value * 100) / 100)
+}
+
+function formatMonthCountInput(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "1"
+  }
+
+  return String(Math.trunc(value))
+}
+
 export function PlanningGraphicsPanel({
   kind,
   documentId,
@@ -49,13 +69,16 @@ export function PlanningGraphicsPanel({
   draftStorageKey,
   onDraftRowsChange,
   onTotalAmountChange,
+  onMonthlyAmountChange,
+  onMonthCountChange,
   distributionSource,
 }: PlanningGraphicsPanelProps) {
   const [dateStart, setDateStart] = useState(formatDateForInput())
   const [amount, setAmount] = useState("")
   const [distributionStartDate, setDistributionStartDate] = useState(distributionSource?.startDate || formatDateForInput())
-  const [distributionMonthCount, setDistributionMonthCount] = useState("1")
-  const [distributionMonthlyAmount, setDistributionMonthlyAmount] = useState("")
+  const [distributionTotalAmount, setDistributionTotalAmount] = useState(formatAmountInput(distributionSource?.totalAmount))
+  const [distributionMonthCount, setDistributionMonthCount] = useState(formatMonthCountInput(distributionSource?.monthCount))
+  const [distributionMonthlyAmount, setDistributionMonthlyAmount] = useState(formatAmountInput(distributionSource?.monthlyAmount))
   const [rows, setRows] = useState<PlanningGraphicDraft[]>(draftRows ?? [])
   const [rowsReady, setRowsReady] = useState(!documentId)
   const [rowsTouched, setRowsTouched] = useState(false)
@@ -64,13 +87,26 @@ export function PlanningGraphicsPanel({
   useEffect(() => {
     setDateStart(formatDateForInput())
     setAmount("")
-    setDistributionStartDate(distributionSource?.startDate || formatDateForInput())
-    setDistributionMonthCount("1")
-    setDistributionMonthlyAmount("")
     setRowsTouched(false)
     setRowsReady(!documentId)
     setValidationError(null)
-  }, [documentId, distributionSource?.startDate, kind])
+  }, [documentId, kind])
+
+  useEffect(() => {
+    setDistributionStartDate(distributionSource?.startDate || formatDateForInput())
+  }, [distributionSource?.startDate])
+
+  useEffect(() => {
+    setDistributionTotalAmount(formatAmountInput(distributionSource?.totalAmount))
+  }, [distributionSource?.totalAmount])
+
+  useEffect(() => {
+    setDistributionMonthCount(formatMonthCountInput(distributionSource?.monthCount))
+  }, [distributionSource?.monthCount])
+
+  useEffect(() => {
+    setDistributionMonthlyAmount(formatAmountInput(distributionSource?.monthlyAmount))
+  }, [distributionSource?.monthlyAmount])
 
   const graphicsQuery = useQuery({
     queryKey: ["planning-graphics", kind, documentId ?? "new"],
@@ -160,12 +196,49 @@ export function PlanningGraphicsPanel({
     )
   }
 
+  const handleDistributionMonthCountChange = (value: string) => {
+    setDistributionMonthCount(value)
+
+    const parsedMonths = Number.parseInt(value, 10)
+    if (Number.isFinite(parsedMonths) && parsedMonths > 0) {
+      onMonthCountChange?.(parsedMonths)
+
+      const parsedMonthlyAmount = Number.parseFloat(distributionMonthlyAmount)
+      if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0) {
+        setDistributionTotalAmount(formatAmountInput(parsedMonthlyAmount * parsedMonths))
+      }
+    }
+  }
+
+  const handleDistributionMonthlyAmountChange = (value: string) => {
+    setDistributionMonthlyAmount(value)
+
+    const parsedMonthlyAmount = Number.parseFloat(value)
+    const parsedMonths = Number.parseInt(distributionMonthCount, 10)
+    if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0 && Number.isFinite(parsedMonths) && parsedMonths > 0) {
+      setDistributionTotalAmount(formatAmountInput(parsedMonthlyAmount * parsedMonths))
+    }
+  }
+
+  const handleDistributionTotalBlur = () => {
+    const parsedTotalAmount = Number.parseFloat(distributionTotalAmount)
+    if (!Number.isNaN(parsedTotalAmount) && parsedTotalAmount > 0 && !onMonthlyAmountChange) {
+      onTotalAmountChange?.(Math.round(parsedTotalAmount * 100) / 100)
+    }
+  }
+
   const handleAutoFill = () => {
     setValidationError(null)
 
     const parsedMonths = Number.parseInt(distributionMonthCount, 10)
+    const parsedTotalAmount = Number.parseFloat(distributionTotalAmount)
     const parsedMonthlyAmount = Number.parseFloat(distributionMonthlyAmount)
-    const totalFromDocument = distributionSource?.totalAmount ?? 0
+
+    if (!Number.isFinite(parsedMonths) || parsedMonths <= 0) {
+      setValidationError("Укажи положительное количество месяцев.")
+      return
+    }
+
     const builtRows =
       !Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0
         ? PlanningService.buildMonthlyRows({
@@ -174,7 +247,7 @@ export function PlanningGraphicsPanel({
             monthCount: parsedMonths,
           })
         : PlanningService.buildDistributedRows({
-            totalAmount: totalFromDocument,
+            totalAmount: parsedTotalAmount,
             startDate: distributionStartDate,
             monthCount: parsedMonths,
           })
@@ -186,12 +259,23 @@ export function PlanningGraphicsPanel({
 
     commitRows(builtRows)
     if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0) {
-      onTotalAmountChange?.(Math.round(parsedMonthlyAmount * parsedMonths * 100) / 100)
+      const nextTotalAmount = Math.round(parsedMonthlyAmount * parsedMonths * 100) / 100
+      setDistributionTotalAmount(formatAmountInput(nextTotalAmount))
+      onMonthlyAmountChange?.(parsedMonthlyAmount)
+      if (!onMonthlyAmountChange) {
+        onTotalAmountChange?.(nextTotalAmount)
+      }
+    } else if (!Number.isNaN(parsedTotalAmount) && parsedTotalAmount > 0) {
+      const nextTotalAmount = Math.round(parsedTotalAmount * 100) / 100
+      const averageMonthlyAmount = Math.round((nextTotalAmount / parsedMonths) * 100) / 100
+      onTotalAmountChange?.(nextTotalAmount)
+      onMonthlyAmountChange?.(averageMonthlyAmount)
     }
+    onMonthCountChange?.(parsedMonths)
   }
 
   const hasContract = Object.keys(graphicContract ?? {}).length > 0
-  const canAutoFill = Boolean(distributionSource?.totalAmount && distributionSource.totalAmount > 0) || Number.parseFloat(distributionMonthlyAmount) > 0
+  const canAutoFill = Number.parseFloat(distributionTotalAmount) > 0 || Number.parseFloat(distributionMonthlyAmount) > 0
 
   return (
     <Card>
@@ -222,7 +306,7 @@ export function PlanningGraphicsPanel({
             <Sparkles className="h-4 w-4 text-primary" />
             Автозаполнение графика
           </div>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_130px_minmax(0,1fr)_auto] md:items-end">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_150px_150px_120px_auto] xl:items-end">
             <div className="space-y-2">
               <Label htmlFor={`${kind}-distribution-date`}>Дата начала</Label>
               <Input
@@ -233,6 +317,31 @@ export function PlanningGraphicsPanel({
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor={`${kind}-distribution-total`}>Общая сумма</Label>
+              <Input
+                id={`${kind}-distribution-total`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={distributionTotalAmount}
+                onBlur={handleDistributionTotalBlur}
+                onChange={(event) => setDistributionTotalAmount(event.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`${kind}-distribution-monthly`}>Сумма в месяц</Label>
+              <Input
+                id={`${kind}-distribution-monthly`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={distributionMonthlyAmount}
+                onChange={(event) => handleDistributionMonthlyAmountChange(event.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor={`${kind}-distribution-months`}>Месяцев</Label>
               <Input
                 id={`${kind}-distribution-months`}
@@ -240,25 +349,16 @@ export function PlanningGraphicsPanel({
                 min="1"
                 step="1"
                 value={distributionMonthCount}
-                onChange={(event) => setDistributionMonthCount(event.target.value)}
+                onChange={(event) => handleDistributionMonthCountChange(event.target.value)}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor={`${kind}-distribution-monthly`}>Ежемесячная сумма</Label>
-              <Input
-                id={`${kind}-distribution-monthly`}
-                type="number"
-                min="0"
-                step="0.01"
-                value={distributionMonthlyAmount}
-                onChange={(event) => setDistributionMonthlyAmount(event.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-            <Button type="button" variant="outline" onClick={handleAutoFill} disabled={!canAutoFill}>
+            <Button type="button" variant="outline" onClick={handleAutoFill} disabled={!canAutoFill} className="md:col-span-2 xl:col-span-1">
               <Sparkles className="h-4 w-4" />
               Заполнить
             </Button>
+          </div>
+          <div className="text-xs leading-5 text-muted-foreground">
+            Если сумма в месяц заполнена, график строится по ней. Если пустая — общая сумма распределяется по месяцам.
           </div>
         </div>
 
