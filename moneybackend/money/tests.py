@@ -1418,6 +1418,93 @@ class FinancialOperationCatalogApiTests(TestCase):
     def make_dt(self, day):
         return timezone.make_aware(datetime(2024, 4, day, 10, 0, 0))
 
+    def test_document_lists_default_to_newest_first(self):
+        old_receipt = Receipt.objects.create(
+            date=self.make_dt(1),
+            amount=Decimal('100.00'),
+            wallet=self.wallet_main,
+            cash_flow_item=self.item_salary,
+        )
+        new_receipt = Receipt.objects.create(
+            date=self.make_dt(20),
+            amount=Decimal('200.00'),
+            wallet=self.wallet_main,
+            cash_flow_item=self.item_salary,
+        )
+        old_expenditure = Expenditure.objects.create(
+            date=self.make_dt(2),
+            amount=Decimal('100.00'),
+            wallet=self.wallet_main,
+            cash_flow_item=self.item_transport,
+        )
+        new_expenditure = Expenditure.objects.create(
+            date=self.make_dt(21),
+            amount=Decimal('200.00'),
+            wallet=self.wallet_main,
+            cash_flow_item=self.item_transport,
+        )
+        old_transfer = Transfer.objects.create(
+            date=self.make_dt(3),
+            amount=Decimal('100.00'),
+            wallet_out=self.wallet_main,
+            wallet_in=self.wallet_target,
+        )
+        new_transfer = Transfer.objects.create(
+            date=self.make_dt(22),
+            amount=Decimal('200.00'),
+            wallet_out=self.wallet_main,
+            wallet_in=self.wallet_target,
+        )
+        old_budget = Budget.objects.create(
+            date=self.make_dt(4),
+            date_start=self.make_dt(4),
+            amount=Decimal('100.00'),
+            amount_month=1,
+            cash_flow_item=self.item_transport,
+            type_of_budget=False,
+        )
+        new_budget = Budget.objects.create(
+            date=self.make_dt(23),
+            date_start=self.make_dt(23),
+            amount=Decimal('200.00'),
+            amount_month=1,
+            cash_flow_item=self.item_transport,
+            type_of_budget=False,
+        )
+        old_auto_payment = AutoPayment.objects.create(
+            date=self.make_dt(5),
+            date_start=self.make_dt(5),
+            amount=Decimal('100.00'),
+            amount_month=1,
+            wallet_out=self.wallet_main,
+            cash_flow_item=self.item_transport,
+            is_transfer=False,
+        )
+        new_auto_payment = AutoPayment.objects.create(
+            date=self.make_dt(24),
+            date_start=self.make_dt(24),
+            amount=Decimal('200.00'),
+            amount_month=1,
+            wallet_out=self.wallet_main,
+            cash_flow_item=self.item_transport,
+            is_transfer=False,
+        )
+
+        cases = [
+            ('/api/v1/receipts/', new_receipt.id, old_receipt.id),
+            ('/api/v1/expenditures/', new_expenditure.id, old_expenditure.id),
+            ('/api/v1/transfers/', new_transfer.id, old_transfer.id),
+            ('/api/v1/budgets/', new_budget.id, old_budget.id),
+            ('/api/v1/auto-payments/', new_auto_payment.id, old_auto_payment.id),
+        ]
+
+        for endpoint, first_id, second_id in cases:
+            response = self.client.get(endpoint, {'page_size': 50})
+            self.assertEqual(response.status_code, 200)
+            rows = response.data['results'] if isinstance(response.data, dict) else response.data
+            self.assertGreaterEqual(len(rows), 2, endpoint)
+            self.assertEqual([rows[0]['id'], rows[1]['id']], [str(first_id), str(second_id)], endpoint)
+
     def test_receipts_list_is_paginated_with_default_page_size(self):
         for day in range(1, 26):
             Receipt.objects.create(
@@ -4266,15 +4353,82 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'info')
         self.assertEqual(response.data['intent'], 'get_month_expenses_by_item')
-        self.assertIn('💸 апрель 2026', response.data['reply_text'])
+        self.assertIn('📊 апрель 2026', response.data['reply_text'])
         self.assertNotIn('⏱', response.data['reply_text'])
         self.assertNotIn('🎯', response.data['reply_text'])
-        self.assertIn('Продукты 💸542 ₽ 📊-46%', response.data['reply_text'])
-        self.assertIn('🧾 💸542 ₽ 📊-46%', response.data['reply_text'])
+        self.assertNotIn('💸', response.data['reply_text'])
+        self.assertNotIn('-46%', response.data['reply_text'])
+        self.assertIn('Продукты — 542 ₽ · 46%', response.data['reply_text'])
+        self.assertIn('Итого — 542 ₽ · 46%', response.data['reply_text'])
         self.assertNotIn('842', response.data['reply_text'])
         self.assertEqual(response.data['expense_summary']['total_actual'], '542.00')
         self.assertEqual(response.data['expense_summary']['total_budget'], '1000.00')
         self.assertEqual(response.data['expense_summary']['total_deviation_percent'], '-46%')
+
+    def test_ai_telegram_webhook_reports_requested_month_expenses_by_item(self):
+        client = APIClient()
+        current_dt = timezone.make_aware(datetime(2026, 5, 3, 12, 0, 0))
+        april_start = timezone.make_aware(datetime(2026, 4, 1, 0, 0, 0))
+        may_start = timezone.make_aware(datetime(2026, 5, 1, 0, 0, 0))
+
+        Budget.objects.create(
+            amount=Decimal('1000.00'),
+            cash_flow_item=self.expense_item,
+            type_of_budget=False,
+            date=april_start,
+            date_start=april_start,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('342.00'),
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 10, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('300.00'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 27, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('999.00'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 5, 2, 12, 0, 0)),
+        )
+        Budget.objects.create(
+            amount=Decimal('5000.00'),
+            cash_flow_item=self.expense_item,
+            type_of_budget=False,
+            date=may_start,
+            date_start=may_start,
+        )
+
+        with patch('money.ai_service.timezone.now', return_value=current_dt):
+            response = client.post(
+                '/api/v1/ai/telegram-webhook/',
+                {
+                    'update_id': 4314,
+                    'message': {
+                        'message_id': 4315,
+                        'text': 'Апрель расходы',
+                        'chat': {'id': 4316},
+                        'from': {'id': 4317, 'username': 'trialex'},
+                    },
+                },
+                format='json',
+                HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'info')
+        self.assertEqual(response.data['intent'], 'get_month_expenses_by_item')
+        self.assertIn('📊 апрель 2026', response.data['reply_text'])
+        self.assertIn('Продукты — 642 ₽ · 36%', response.data['reply_text'])
+        self.assertNotIn('999', response.data['reply_text'])
+        self.assertEqual(response.data['expense_summary']['period_label'], 'апрель 2026')
+        self.assertEqual(response.data['expense_summary']['total_actual'], '642.00')
+        self.assertEqual(response.data['expense_summary']['total_budget'], '1000.00')
 
     def test_ai_telegram_webhook_can_select_option_by_number(self):
         client = APIClient()

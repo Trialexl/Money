@@ -163,9 +163,12 @@ export default function AutoPaymentCatalog() {
       return true
     })
     .sort((left, right) => {
-      const leftDate = left.date_start || left.date
-      const rightDate = right.date_start || right.date
-      return leftDate.localeCompare(rightDate)
+      const leftDate = left.date || left.date_start || ""
+      const rightDate = right.date || right.date_start || ""
+      if (leftDate === rightDate) {
+        return right.id.localeCompare(left.id)
+      }
+      return rightDate.localeCompare(leftDate)
     })
 
   const totalAmount = filteredAutoPayments.reduce((sum, autoPayment) => sum + autoPayment.amount, 0)

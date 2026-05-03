@@ -108,6 +108,48 @@ export interface TransferListParams extends BaseOperationListParams {
   walletTo?: string
 }
 
+function compareDateDesc(leftDate?: string, rightDate?: string) {
+  const left = leftDate || ""
+  const right = rightDate || ""
+
+  if (left === right) {
+    return 0
+  }
+
+  if (!left) {
+    return 1
+  }
+
+  if (!right) {
+    return -1
+  }
+
+  return right.localeCompare(left)
+}
+
+function compareDocumentDateDesc(left: { date?: string; id?: string }, right: { date?: string; id?: string }) {
+  const dateComparison = compareDateDesc(left.date, right.date)
+  if (dateComparison !== 0) {
+    return dateComparison
+  }
+
+  return (right.id || "").localeCompare(left.id || "")
+}
+
+function comparePlanningDocumentDateDesc(
+  left: { date?: string; date_start?: string; id?: string },
+  right: { date?: string; date_start?: string; id?: string },
+) {
+  const leftDate = left.date || left.date_start
+  const rightDate = right.date || right.date_start
+  const dateComparison = compareDateDesc(leftDate, rightDate)
+  if (dateComparison !== 0) {
+    return dateComparison
+  }
+
+  return (right.id || "").localeCompare(left.id || "")
+}
+
 function buildCommonOperationListParams(params?: BaseOperationListParams) {
   return {
     ...(params?.search?.trim() ? { search: params.search.trim() } : {}),
@@ -175,13 +217,18 @@ function mapTransfer(raw: any): Transfer {
   }
 }
 
-function mapPaginatedResponse<T>(data: any, mapper: (raw: any) => T, page: number, pageSize: number): PaginatedResult<T> {
+function mapPaginatedResponse<T extends { date?: string; id?: string }>(
+  data: any,
+  mapper: (raw: any) => T,
+  page: number,
+  pageSize: number,
+): PaginatedResult<T> {
   if (Array.isArray(data)) {
     return {
       count: data.length,
       next: null,
       previous: null,
-      results: data.map(mapper),
+    results: data.map(mapper).sort(compareDocumentDateDesc),
       page,
       pageSize,
       totalPages: data.length === 0 ? 1 : Math.ceil(data.length / pageSize),
@@ -189,7 +236,7 @@ function mapPaginatedResponse<T>(data: any, mapper: (raw: any) => T, page: numbe
   }
 
   const count = typeof data?.count === "number" ? data.count : 0
-  const results = Array.isArray(data?.results) ? data.results.map(mapper) : []
+  const results = Array.isArray(data?.results) ? data.results.map(mapper).sort(compareDocumentDateDesc) : []
 
   return {
     count,
@@ -202,7 +249,7 @@ function mapPaginatedResponse<T>(data: any, mapper: (raw: any) => T, page: numbe
   }
 }
 
-async function fetchAllPaginated<T>(
+async function fetchAllPaginated<T extends { date?: string; id?: string }>(
   path: string,
   params: Record<string, unknown>,
   mapper: (raw: any) => T,
@@ -223,7 +270,7 @@ async function fetchAllPaginated<T>(
     page += 1
   }
 
-  return items
+  return items.sort(compareDocumentDateDesc)
 }
 
 // Budgets
@@ -431,7 +478,7 @@ export const BudgetService = {
       cash_flow_item: fromApiRelationId(b.cash_flow_item),
       project: fromApiRelationId(b.project) || undefined,
       deleted: b.deleted,
-    })) as Budget[]
+    })).sort(comparePlanningDocumentDateDesc) as Budget[]
   },
 
   getBudget: async (id: string) => {
@@ -513,7 +560,7 @@ export const AutoPaymentService = {
       amount_month: a.amount_month != null ? Number(a.amount_month) : undefined,
       date_start: fromApiDateTime(a.date_start) ?? undefined,
       deleted: a.deleted,
-    })) as AutoPayment[]
+    })).sort(comparePlanningDocumentDateDesc) as AutoPayment[]
   },
 
   getAutoPayment: async (id: string) => {

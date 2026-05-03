@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
 import { formatDateForInput } from "@/lib/formatters"
+import { resolveReturnHref } from "@/lib/return-navigation"
 import { Budget, BudgetService } from "@/services/financial-operations-service"
 import { PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
 
@@ -39,6 +40,8 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
   const duplicateId = searchParams.get("duplicate")
+  const returnToHref = searchParams.get("return_to")
+  const cancelHref = resolveReturnHref(returnToHref, "/budgets")
   const defaultCashFlowItemId = searchParams.get("cash_flow_item") || ""
   const isDuplicateMode = Boolean(duplicateId) && !isEdit
   const planningDraftStorageKey = !isEdit ? "planning-draft:budget:new" : undefined
@@ -138,7 +141,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
         queryClient.invalidateQueries({ queryKey: ["budgets"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
       ])
-      router.push("/budgets")
+      router.push(resolveReturnHref(returnToHref, "/budgets", savedBudget.id || budget?.id, { resetPage: !isEdit }))
     },
   })
 
@@ -207,7 +210,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
         }
         actions={
           <Button asChild variant="outline" size="icon">
-            <Link href="/budgets" aria-label="К списку" title="К списку">
+            <Link href={cancelHref} aria-label="К списку" title="К списку">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -302,7 +305,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                     {budgetMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать бюджет и выйти"}
                   </Button>
                   <Button asChild variant="outline" size="icon">
-                    <Link href="/budgets" aria-label="Отмена" title="Отмена">
+                    <Link href={cancelHref} aria-label="Отмена" title="Отмена">
                       <X className="h-4 w-4" />
                     </Link>
                   </Button>

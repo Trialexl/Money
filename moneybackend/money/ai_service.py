@@ -41,6 +41,70 @@ SUPPORTED_INTENTS = {
 }
 
 TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024
+MONTH_NAME_TO_NUMBER = {
+    'январь': 1,
+    'января': 1,
+    'январе': 1,
+    'янв': 1,
+    'февраль': 2,
+    'февраля': 2,
+    'феврале': 2,
+    'фев': 2,
+    'март': 3,
+    'марта': 3,
+    'марте': 3,
+    'мар': 3,
+    'апрель': 4,
+    'апреля': 4,
+    'апреле': 4,
+    'апр': 4,
+    'май': 5,
+    'мая': 5,
+    'мае': 5,
+    'июнь': 6,
+    'июня': 6,
+    'июне': 6,
+    'июн': 6,
+    'июль': 7,
+    'июля': 7,
+    'июле': 7,
+    'июл': 7,
+    'август': 8,
+    'августа': 8,
+    'августе': 8,
+    'авг': 8,
+    'сентябрь': 9,
+    'сентября': 9,
+    'сентябре': 9,
+    'сент': 9,
+    'сен': 9,
+    'октябрь': 10,
+    'октября': 10,
+    'октябре': 10,
+    'окт': 10,
+    'ноябрь': 11,
+    'ноября': 11,
+    'ноябре': 11,
+    'ноя': 11,
+    'декабрь': 12,
+    'декабря': 12,
+    'декабре': 12,
+    'дек': 12,
+}
+MONTH_LABELS = {
+    1: 'январь',
+    2: 'февраль',
+    3: 'март',
+    4: 'апрель',
+    5: 'май',
+    6: 'июнь',
+    7: 'июль',
+    8: 'август',
+    9: 'сентябрь',
+    10: 'октябрь',
+    11: 'ноябрь',
+    12: 'декабрь',
+}
 
 
 def _normalize_text(value):
@@ -216,6 +280,7 @@ def _detect_month_expenses_by_item_intent(text):
     if not normalized:
         return None
 
+    period_month = _detect_month_expenses_period(text)
     has_expense_word = any(
         token in normalized
         for token in (
@@ -239,11 +304,13 @@ def _detect_month_expenses_by_item_intent(text):
         )
     )
     has_budget_context = 'бюджет' in normalized or 'отклонен' in normalized or 'перерасход' in normalized
+    is_short_report_command = normalized in {'расходы', 'траты', 'затраты', 'списания'}
 
-    if has_expense_word and (has_item_grouping or has_budget_context):
+    if has_expense_word and (has_item_grouping or has_budget_context or period_month or is_short_report_command):
         return {
             'intent': INTENT_GET_MONTH_EXPENSES_BY_ITEM,
             'confidence': 0.98,
+            'period_month': period_month,
             'comment': text,
         }
 
@@ -277,6 +344,39 @@ def _format_budget_deviation_percent(*, actual, budget):
     percent = ((actual_amount - budget_amount) / budget_amount * Decimal('100')).quantize(Decimal('1'))
     sign = '+' if percent > ZERO_AMOUNT else ''
     return f'{sign}{percent:.0f}%'
+
+
+def _format_deviation_percent_for_reply(value):
+    if not value:
+        return None
+    return str(value).strip().lstrip('+-')
+
+
+def _detect_month_expenses_period(text, *, at_time=None):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    selected_at = timezone.localtime(at_time or timezone.now())
+    current_year = selected_at.year
+    current_month = selected_at.month
+
+    if re.search(r'\b(прошл|предыдущ)\w*\s+месяц\w*\b', normalized):
+        if current_month == 1:
+            return f'{current_year - 1}-12'
+        return f'{current_year}-{current_month - 1:02d}'
+
+    if re.search(r'\b(текущ|эт|нынешн)\w*\s+месяц\w*\b', normalized):
+        return f'{current_year}-{current_month:02d}'
+
+    year_match = re.search(r'\b(19\d{2}|20\d{2})\b', normalized)
+    year = int(year_match.group(1)) if year_match else current_year
+    for month_name, month_number in sorted(MONTH_NAME_TO_NUMBER.items(), key=lambda item: len(item[0]), reverse=True):
+        pattern = rf'(?<![0-9a-zа-я]){re.escape(month_name)}(?![0-9a-zа-я])'
+        if re.search(pattern, normalized):
+            return f'{year}-{month_number:02d}'
+
+    return None
 
 
 def _is_affirmative_confirmation(text):
@@ -1077,35 +1177,45 @@ def _all_wallet_balances(*, at_time=None):
 def _current_month_bounds(*, at_time=None):
     selected_at = timezone.localtime(at_time or timezone.now())
     month_start = selected_at.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return month_start, _next_month_start(month_start)
+
+
+def _next_month_start(month_start):
     if month_start.month == 12:
-        next_month_start = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        next_month_start = month_start.replace(month=month_start.month + 1)
-    return month_start, next_month_start
+        return month_start.replace(year=month_start.year + 1, month=1)
+    return month_start.replace(month=month_start.month + 1)
+
+
+def _parse_period_month(value):
+    if not value:
+        return None
+    match = re.match(r'^\s*(19\d{2}|20\d{2})-(0?[1-9]|1[0-2])\s*$', str(value))
+    if not match:
+        return None
+    year = int(match.group(1))
+    month = int(match.group(2))
+    return timezone.make_aware(datetime(year, month, 1, 0, 0, 0))
 
 
 def _format_month_label(month_start):
-    month_names = {
-        1: 'январь',
-        2: 'февраль',
-        3: 'март',
-        4: 'апрель',
-        5: 'май',
-        6: 'июнь',
-        7: 'июль',
-        8: 'август',
-        9: 'сентябрь',
-        10: 'октябрь',
-        11: 'ноябрь',
-        12: 'декабрь',
-    }
-    return f'{month_names.get(month_start.month, month_start.strftime("%m"))} {month_start.year}'
+    return f'{MONTH_LABELS.get(month_start.month, month_start.strftime("%m"))} {month_start.year}'
 
 
-def _month_expenses_by_item(*, at_time=None):
+def _month_expenses_by_item(*, at_time=None, month_start=None):
     selected_at = timezone.localtime(at_time or timezone.now())
-    month_start, next_month_start = _current_month_bounds(at_time=at_time)
-    actual_period_end = min(selected_at, next_month_start)
+    current_month_start, _ = _current_month_bounds(at_time=selected_at)
+    if month_start is None:
+        month_start = current_month_start
+    else:
+        month_start = timezone.localtime(month_start)
+        month_start = month_start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    next_month_start = _next_month_start(month_start)
+    if month_start < current_month_start:
+        actual_period_end = next_month_start
+    elif month_start > current_month_start:
+        actual_period_end = month_start
+    else:
+        actual_period_end = min(selected_at, next_month_start)
     budget_period_end = next_month_start.date() - timedelta(days=1)
     base_queryset = BudgetExpense.objects.filter(
         period__gte=month_start,
@@ -2022,7 +2132,11 @@ class AiOperationService:
             }
 
         if intent == INTENT_GET_MONTH_EXPENSES_BY_ITEM:
-            summary = _month_expenses_by_item(at_time=timezone.now())
+            selected_at = timezone.now()
+            summary = _month_expenses_by_item(
+                at_time=selected_at,
+                month_start=_parse_period_month(normalized.get('period_month')),
+            )
             return {
                 'status': 'info',
                 'intent': intent,
@@ -2363,6 +2477,7 @@ class AiOperationService:
             'occurred_at': occurred_at,
             'operation_sign': operation_sign,
             'source_index': parsed.get('source_index'),
+            'period_month': parsed.get('period_month') or _detect_month_expenses_period(source_text),
             'raw': parsed,
         }
 
@@ -2659,22 +2774,24 @@ class AiOperationService:
         if not rows:
             return f'Расходов за {summary.get("period_label", "текущий месяц")} по статьям не найдено.'
 
-        lines = [f'💸 {summary["period_label"]}']
+        lines = [f'📊 {summary["period_label"]}']
         visible_rows = rows[:15]
         for index, row in enumerate(visible_rows, start=1):
-            line = f'{index}. {row["cash_flow_item_name"]} 💸{_format_compact_money(row["actual"])}'
+            line = f'{index}. {row["cash_flow_item_name"]} — {_format_compact_money(row["actual"])}'
             if row.get('budget'):
-                if row.get('deviation_percent'):
-                    line += f' 📊{row["deviation_percent"]}'
+                deviation_percent = _format_deviation_percent_for_reply(row.get('deviation_percent'))
+                if deviation_percent:
+                    line += f' · {deviation_percent}'
             lines.append(line)
 
         if len(rows) > len(visible_rows):
             lines.append(f'И еще {len(rows) - len(visible_rows)} статей.')
 
-        total_line = f'🧾 💸{_format_compact_money(summary["total_actual"])}'
+        total_line = f'Итого — {_format_compact_money(summary["total_actual"])}'
         if summary.get('total_budget'):
-            if summary.get('total_deviation_percent'):
-                total_line += f' 📊{summary["total_deviation_percent"]}'
+            total_deviation_percent = _format_deviation_percent_for_reply(summary.get('total_deviation_percent'))
+            if total_deviation_percent:
+                total_line += f' · {total_deviation_percent}'
         lines.append(total_line)
         return '\n'.join(lines)
 

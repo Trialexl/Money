@@ -1250,8 +1250,8 @@ class ReceiptViewSet(OneCSyncSoftDeleteCompatibilityMixin, FinancialOperationLis
     def get_queryset(self):
         """Фильтрация неудаленных записей"""
         queryset = self.filter_soft_deleted(
-            self.queryset.select_related('wallet', 'cash_flow_item')
-        ).order_by('-date')
+            self.queryset.all().select_related('wallet', 'cash_flow_item')
+        ).order_by('-date', '-id')
 
         if getattr(self, 'action', None) != 'list':
             return queryset
@@ -1351,8 +1351,8 @@ class ExpenditureViewSet(OneCSyncSoftDeleteCompatibilityMixin, FinancialOperatio
     def get_queryset(self):
         """Фильтрация с возможностью фильтра по бюджету"""
         queryset = self.filter_soft_deleted(
-            self.queryset.select_related('wallet', 'cash_flow_item')
-        ).order_by('-date')
+            self.queryset.all().select_related('wallet', 'cash_flow_item')
+        ).order_by('-date', '-id')
 
         if getattr(self, 'action', None) != 'list':
             return queryset
@@ -1374,9 +1374,10 @@ class ExpenditureViewSet(OneCSyncSoftDeleteCompatibilityMixin, FinancialOperatio
             queryset = queryset.filter(amount__lte=filters['amount_max'])
         
         # Фильтр по включению в бюджет
-        include_in_budget = filters.get('include_in_budget')
-        if include_in_budget is not None:
-            queryset = queryset.filter(include_in_budget=include_in_budget)
+        if 'include_in_budget' in self.request.query_params:
+            include_in_budget = filters.get('include_in_budget')
+            if include_in_budget is not None:
+                queryset = queryset.filter(include_in_budget=include_in_budget)
             
         return queryset
 
@@ -1424,8 +1425,8 @@ class TransferViewSet(OneCSyncSoftDeleteCompatibilityMixin, FinancialOperationLi
     def get_queryset(self):
         """Фильтрация неудаленных переводов"""
         queryset = self.filter_soft_deleted(
-            self.queryset.select_related('wallet_out', 'wallet_in')
-        ).order_by('-date')
+            self.queryset.all().select_related('wallet_out', 'wallet_in')
+        ).order_by('-date', '-id')
 
         if getattr(self, 'action', None) != 'list':
             return queryset
@@ -1557,7 +1558,7 @@ class BudgetViewSet(OneCSyncSoftDeleteCompatibilityMixin, PlanningGraphicGenerat
     
     def get_queryset(self):
         """Фильтрация с возможностью фильтра по типу"""
-        queryset = self.filter_soft_deleted(self.queryset).order_by('-date')
+        queryset = self.filter_soft_deleted(self.queryset.all()).order_by('-date', '-id')
         
         # Фильтр по типу бюджета
         budget_type = self.request.query_params.get('type')
@@ -1595,7 +1596,7 @@ class AutoPaymentViewSet(OneCSyncSoftDeleteCompatibilityMixin, PlanningGraphicGe
     
     def get_queryset(self):
         """Фильтрация с возможностью фильтра по типу"""
-        queryset = self.filter_soft_deleted(self.queryset).order_by('-date')
+        queryset = self.filter_soft_deleted(self.queryset.all()).order_by('-date', '-id')
         
         # Фильтр по типу автоплатежа
         is_transfer = self.request.query_params.get('is_transfer')

@@ -72,3 +72,10 @@
 - [x] Add budget plan details below the chart as a table, and also support drill-down by clicking a cash flow item or chart segment to explain how the amount was formed.
 - [x] Replace free-form day range selection in the budget report with month-based period selection: budget periods should start at the beginning of a month and end at the end of a month, because selecting dates like 02.04 is not useful for budget planning.
 - [x] Make period selection convenient for yearly planning: quick current year, previous/next year, and custom month range controls should be available without manual day picking.
+
+## Backlog: Next Report, Chart, and Document UX Pass
+- [x] Use shorter date labels in charts so month/day axes stay readable on desktop and mobile.
+- [x] Add independent cash flow item selection and exclusion in report legends: click the item name to filter, click the eye control to exclude it from charts, tables, and report export in both monthly expenses and budget planning.
+- [x] Open document editing from dashboard/report contexts in a modal or return-preserving flow, so closing an edited receipt/expenditure/transfer keeps the user on the source page with filters intact.
+- [x] Improve Telegram bot expense report formatting: less detailed money icon, compact readable layout, and positive deviation display without a leading minus.
+- [x] Sort every document list by document date descending by default, so the newest receipts, expenditures, transfers, budgets, and auto-payments are shown first instead of old records.

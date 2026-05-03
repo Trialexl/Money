@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRef, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { ResponsiveBar } from "@nivo/bar"
 import { ResponsiveLine } from "@nivo/line"
@@ -11,6 +11,8 @@ import {
   BarChart3,
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
   Landmark,
   TrendingDown,
   TrendingUp,
@@ -32,6 +34,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { exportFormatters } from "@/lib/export-utils"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
+import { buildReturnToHref, withReturnToHref } from "@/lib/return-navigation"
 import { DashboardService, type DashboardWalletSummary } from "@/services/dashboard-service"
 import { ProjectService } from "@/services/project-service"
 import {
@@ -43,7 +46,7 @@ import {
 } from "@/services/report-service"
 
 type TimelineMode = "daily" | "monthly"
-type RangePreset = "week" | "month" | "quarter" | "year" | "ytd" | null
+type RangePreset = "month" | "quarter" | "year" | "ytd" | null
 type ReportTab = "cashflow" | "wallets" | "categories" | "budget"
 
 type BudgetPlanningRow = {
@@ -125,6 +128,8 @@ const REPORT_ITEM_COLORS = [
   "#fb923c",
 ]
 
+const SHORT_MONTH_LABELS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+
 function getDateKey(value?: string) {
   return value ? value.slice(0, 10) : ""
 }
@@ -138,6 +143,22 @@ function formatMonthLabel(value: string) {
     month: "short",
     year: "numeric",
   })
+}
+
+function formatShortMonthLabel(value: string) {
+  const [year, month] = value.split("-").map(Number)
+  if (!year || !month || month < 1 || month > 12) {
+    return value
+  }
+  return `${SHORT_MONTH_LABELS[month - 1]} ${String(year).slice(-2)}`
+}
+
+function formatShortDateLabel(value: string) {
+  const [year, month, day] = getDateKey(value).split("-").map(Number)
+  if (!year || !month || !day) {
+    return value
+  }
+  return `${day}.${String(month).padStart(2, "0")}`
 }
 
 function formatCompactCurrency(value: number) {
@@ -154,12 +175,6 @@ function formatCompactCurrency(value: number) {
   return Math.round(value).toLocaleString("ru-RU")
 }
 
-function shiftDays(days: number) {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return date
-}
-
 function getMonthInputValue(value: string) {
   return getDateKey(value).slice(0, 7) || formatDateForInput().slice(0, 7)
 }
@@ -173,11 +188,12 @@ function getMonthEndDate(monthValue: string) {
   return formatDateForInput(new Date(year, month, 0))
 }
 
-function getBudgetDocumentHref(row: BudgetReportDetail) {
+function getBudgetDocumentHref(row: BudgetReportDetail, returnToHref?: string) {
   if (!row.document_id || row.document_type !== "Budget") {
     return null
   }
-  return `/budgets/${row.document_id}/edit`
+  const href = `/budgets/${row.document_id}/edit`
+  return returnToHref ? withReturnToHref(href, returnToHref) : href
 }
 
 function renderNoData(title: string, description: string) {
@@ -193,27 +209,32 @@ function renderNoData(title: string, description: string) {
 
 export default function ReportsPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
   const today = formatDateForInput()
+  const currentYear = new Date().getFullYear()
+  const defaultDateFrom = `${currentYear}-01-01`
+  const defaultDateTo = `${currentYear}-12-31`
+  const hasExplicitPeriod = searchParams.has("date_from") || searchParams.has("date_to")
   const [timelineMode, setTimelineMode] = useState<TimelineMode>("daily")
   const [activeTab, setActiveTab] = useState<ReportTab>("cashflow")
-  const [selectedPreset, setSelectedPreset] = useState<RangePreset>("month")
-  const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || formatDateForInput(shiftDays(-30)))
-  const [dateTo, setDateTo] = useState(searchParams.get("date_to") || today)
+  const [selectedPreset, setSelectedPreset] = useState<RangePreset>(hasExplicitPeriod ? null : "year")
+  const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || defaultDateFrom)
+  const [dateTo, setDateTo] = useState(searchParams.get("date_to") || defaultDateTo)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
   const [collapsedMonthlyGroups, setCollapsedMonthlyGroups] = useState<Record<string, boolean>>({})
   const [selectedMonthlyExpenseItemKey, setSelectedMonthlyExpenseItemKey] = useState<string | null>(null)
   const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
-  const budgetFromMonth = getMonthInputValue(dateFrom)
-  const budgetToMonth = getMonthInputValue(dateTo)
-  const budgetDateFrom = getMonthStartDate(budgetFromMonth)
-  const budgetDateTo = getMonthEndDate(budgetToMonth)
-  const budgetYear = Number(budgetFromMonth.slice(0, 4)) || new Date().getFullYear()
+  const [hiddenMonthlyExpenseItemKeys, setHiddenMonthlyExpenseItemKeys] = useState<Record<string, boolean>>({})
+  const [hiddenBudgetPlanItemKeys, setHiddenBudgetPlanItemKeys] = useState<Record<string, boolean>>({})
+  const periodFromMonth = getMonthInputValue(dateFrom)
+  const periodToMonth = getMonthInputValue(dateTo)
   const cashFlowChartRef = useRef<HTMLDivElement>(null)
   const walletChartRef = useRef<HTMLDivElement>(null)
   const categoryChartRef = useRef<HTMLDivElement>(null)
   const budgetExpenseChartRef = useRef<HTMLDivElement>(null)
+  const returnToHref = buildReturnToHref(pathname, searchParams)
 
   const projectsQuery = useQuery({
     queryKey: ["projects", "reports-budget"],
@@ -224,15 +245,15 @@ export default function ReportsPage() {
   const reportsQuery = useQuery({
     queryKey: [
       "reports-analytics",
-      { dateFrom, dateTo, budgetDateFrom, budgetDateTo, budgetForecast, budgetProjectId },
+      { dateFrom, dateTo, budgetForecast, budgetProjectId },
     ],
     staleTime: 60_000,
     queryFn: async () => {
       const [cashFlow, budgetExpense, overview] = await Promise.all([
         ReportService.getCashFlowReport({ dateFrom, dateTo }),
         ReportService.getBudgetExpenseReport({
-          dateFrom: budgetDateFrom,
-          dateTo: budgetDateTo,
+          dateFrom,
+          dateTo,
           limitByToday: budgetForecast,
           project: budgetProjectId || undefined,
         }),
@@ -265,7 +286,7 @@ export default function ReportsPage() {
     router.replace(`/reports?${params.toString()}`, { scroll: false })
   }
 
-  const setBudgetMonthRange = (nextDateFromMonth: string, nextDateToMonth: string) => {
+  const setReportMonthRange = (nextDateFromMonth: string, nextDateToMonth: string) => {
     if (!nextDateFromMonth || !nextDateToMonth) {
       return
     }
@@ -276,50 +297,93 @@ export default function ReportsPage() {
     setDateFrom(nextDateFrom)
     setDateTo(nextDateTo)
     setSelectedPreset(null)
+    setSelectedMonthlyExpenseItemKey(null)
     setSelectedBudgetPlanItemKey(null)
+    setHiddenMonthlyExpenseItemKeys({})
+    setHiddenBudgetPlanItemKeys({})
     updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
   }
 
-  const setBudgetYearRange = (year: number) => {
-    const nextDateFrom = `${year}-01-01`
-    const nextDateTo = `${year}-12-31`
+  const setExactDateFrom = (nextDateFrom: string) => {
     setDateFrom(nextDateFrom)
+    setSelectedPreset(null)
+    setSelectedMonthlyExpenseItemKey(null)
+    setSelectedBudgetPlanItemKey(null)
+    setHiddenMonthlyExpenseItemKeys({})
+    setHiddenBudgetPlanItemKeys({})
+    updateReportUrl(nextDateFrom, dateTo, budgetForecast)
+  }
+
+  const setExactDateTo = (nextDateTo: string) => {
     setDateTo(nextDateTo)
     setSelectedPreset(null)
+    setSelectedMonthlyExpenseItemKey(null)
     setSelectedBudgetPlanItemKey(null)
-    updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
+    setHiddenMonthlyExpenseItemKeys({})
+    setHiddenBudgetPlanItemKeys({})
+    updateReportUrl(dateFrom, nextDateTo, budgetForecast)
   }
 
   const setPresetRange = (preset: Exclude<RangePreset, null>) => {
     const today = new Date()
-    const from = new Date(today)
-
-    if (preset === "week") {
-      from.setDate(today.getDate() - 7)
-    }
+    let from = new Date(today)
+    let to = new Date(today)
 
     if (preset === "month") {
-      from.setMonth(today.getMonth() - 1)
+      from = new Date(today.getFullYear(), today.getMonth(), 1)
+      to = new Date(today.getFullYear(), today.getMonth() + 1, 0)
     }
 
     if (preset === "quarter") {
-      from.setMonth(today.getMonth() - 3)
+      const quarterStartMonth = Math.floor(today.getMonth() / 3) * 3
+      from = new Date(today.getFullYear(), quarterStartMonth, 1)
+      to = new Date(today.getFullYear(), quarterStartMonth + 3, 0)
     }
 
     if (preset === "year") {
-      from.setFullYear(today.getFullYear() - 1)
+      from = new Date(today.getFullYear(), 0, 1)
+      to = new Date(today.getFullYear(), 11, 31)
     }
 
     if (preset === "ytd") {
-      from.setMonth(0, 1)
+      from = new Date(today.getFullYear(), 0, 1)
+      to = today
     }
 
     const nextDateFrom = formatDateForInput(from)
-    const nextDateTo = formatDateForInput(today)
+    const nextDateTo = formatDateForInput(to)
     setDateFrom(nextDateFrom)
     setDateTo(nextDateTo)
     setSelectedPreset(preset)
+    setSelectedMonthlyExpenseItemKey(null)
+    setSelectedBudgetPlanItemKey(null)
+    setHiddenMonthlyExpenseItemKeys({})
+    setHiddenBudgetPlanItemKeys({})
     updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
+  }
+
+  const toggleHiddenMonthlyExpenseItem = (itemKey: string) => {
+    setHiddenMonthlyExpenseItemKeys((current) => {
+      const next = { ...current }
+      if (next[itemKey]) {
+        delete next[itemKey]
+      } else {
+        next[itemKey] = true
+      }
+      return next
+    })
+  }
+
+  const toggleHiddenBudgetPlanItem = (itemKey: string) => {
+    setHiddenBudgetPlanItemKeys((current) => {
+      const next = { ...current }
+      if (next[itemKey]) {
+        delete next[itemKey]
+      } else {
+        next[itemKey] = true
+      }
+      return next
+    })
   }
 
   if (reportsQuery.isLoading) {
@@ -378,10 +442,14 @@ export default function ReportsPage() {
   }
 
   const timelineRows: TimelineRow[] = Array.from(timelineMap.values()).sort((left: TimelineRow, right: TimelineRow) => left.key.localeCompare(right.key))
+  const timelineChartRows = timelineRows.map((row) => ({
+    ...row,
+    chartLabel: timelineMode === "daily" ? formatShortDateLabel(row.key) : formatShortMonthLabel(row.key),
+  }))
   let runningNet = 0
-  const cumulativeLineData = timelineRows.map((row: TimelineRow) => {
+  const cumulativeLineData = timelineChartRows.map((row) => {
     runningNet += row.net
-    return { x: row.label, y: runningNet }
+    return { x: row.chartLabel, y: runningNet }
   })
 
   const cashFlowExportRows = timelineRows.map((row: TimelineRow) => ({
@@ -514,38 +582,46 @@ export default function ReportsPage() {
   }))
   const monthlyExpenseItemByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item]))
   const monthlyExpenseColorByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item.color]))
+  const hiddenMonthlyExpenseItemKeySet = new Set(
+    monthlyExpenseLegendItems.filter((item) => hiddenMonthlyExpenseItemKeys[item.key]).map((item) => item.key)
+  )
+  const hiddenMonthlyExpenseItemCount = hiddenMonthlyExpenseItemKeySet.size
   const activeSelectedMonthlyExpenseItemKey =
-    selectedMonthlyExpenseItemKey && monthlyExpenseItemTotals.has(selectedMonthlyExpenseItemKey)
+    selectedMonthlyExpenseItemKey &&
+    monthlyExpenseItemTotals.has(selectedMonthlyExpenseItemKey) &&
+    !hiddenMonthlyExpenseItemKeySet.has(selectedMonthlyExpenseItemKey)
       ? selectedMonthlyExpenseItemKey
       : null
   const selectedMonthlyExpenseItemName =
     activeSelectedMonthlyExpenseItemKey
       ? monthlyExpenseItems.find((item) => item.key === activeSelectedMonthlyExpenseItemKey)?.name ?? null
       : null
-  const visibleMonthlyCashFlowGroups = activeSelectedMonthlyExpenseItemKey
-    ? monthlyCashFlowGroups
-        .map((group) => ({
-          ...group,
-          income: group.rows
-            .filter((row) => row.itemKey === activeSelectedMonthlyExpenseItemKey)
-            .reduce((sum, row) => sum + row.income, 0),
-          expense: group.rows
-            .filter((row) => row.itemKey === activeSelectedMonthlyExpenseItemKey)
-            .reduce((sum, row) => sum + row.expense, 0),
-          rows: group.rows.filter((row) => row.itemKey === activeSelectedMonthlyExpenseItemKey),
-        }))
-        .map((group) => ({
-          ...group,
-          net: group.income - group.expense,
-        }))
-        .filter((group) => group.rows.length > 0)
-    : monthlyCashFlowGroups
-  const monthlyExpenseChartKeys = activeSelectedMonthlyExpenseItemKey
-    ? [activeSelectedMonthlyExpenseItemKey]
-    : monthlyExpenseLegendItems.map((item) => item.key)
+  const visibleMonthlyCashFlowGroups = monthlyCashFlowGroups
+    .map((group) => {
+      const rows = group.rows.filter((row) => {
+        if (hiddenMonthlyExpenseItemKeySet.has(row.itemKey)) {
+          return false
+        }
+        return activeSelectedMonthlyExpenseItemKey ? row.itemKey === activeSelectedMonthlyExpenseItemKey : true
+      })
+      const income = rows.reduce((sum, row) => sum + row.income, 0)
+      const expense = rows.reduce((sum, row) => sum + row.expense, 0)
+      return {
+        ...group,
+        income,
+        expense,
+        net: income - expense,
+        rows,
+      }
+    })
+    .filter((group) => group.rows.length > 0)
+  const monthlyExpenseChartKeys = monthlyExpenseLegendItems
+    .filter((item) => !hiddenMonthlyExpenseItemKeySet.has(item.key))
+    .filter((item) => (activeSelectedMonthlyExpenseItemKey ? item.key === activeSelectedMonthlyExpenseItemKey : true))
+    .map((item) => item.key)
   const monthlyExpenseChartRows = visibleMonthlyCashFlowGroups.map((group) => {
     const chartRow: Record<string, string | number> = {
-      month: group.label,
+      month: formatShortMonthLabel(group.key),
     }
     group.rows
       .filter((row) => row.expense > 0)
@@ -554,7 +630,7 @@ export default function ReportsPage() {
       })
     return chartRow
   })
-  const monthlyCashFlowExportRows = monthlyCashFlowItemRows.map((row) => ({
+  const monthlyCashFlowExportRows = visibleMonthlyCashFlowGroups.flatMap((group) => group.rows).map((row) => ({
     month: row.monthLabel,
     cashFlowItem: row.itemName,
     income: row.income,
@@ -622,23 +698,33 @@ export default function ReportsPage() {
   const budgetPlanItemByKey = new Map(budgetPlanLegendItems.map((item) => [item.key, item]))
   const budgetPlanColorByKey = new Map(budgetPlanLegendItems.map((item) => [item.key, item.color]))
   const budgetPlanMonthKeys = Array.from(new Set(budgetPlanningRows.map((row) => row.monthKey))).sort()
+  const hiddenBudgetPlanItemKeySet = new Set(
+    budgetPlanLegendItems.filter((item) => hiddenBudgetPlanItemKeys[item.key]).map((item) => item.key)
+  )
+  const hiddenBudgetPlanItemCount = hiddenBudgetPlanItemKeySet.size
   const activeSelectedBudgetPlanItemKey =
-    selectedBudgetPlanItemKey && budgetPlanItemTotals.has(selectedBudgetPlanItemKey)
+    selectedBudgetPlanItemKey &&
+    budgetPlanItemTotals.has(selectedBudgetPlanItemKey) &&
+    !hiddenBudgetPlanItemKeySet.has(selectedBudgetPlanItemKey)
       ? selectedBudgetPlanItemKey
       : null
   const selectedBudgetPlanItemName =
     activeSelectedBudgetPlanItemKey
       ? budgetPlanItems.find((item) => item.key === activeSelectedBudgetPlanItemKey)?.name ?? null
       : null
-  const visibleBudgetPlanningRows = activeSelectedBudgetPlanItemKey
-    ? budgetPlanningRows.filter((row) => row.itemKey === activeSelectedBudgetPlanItemKey)
-    : budgetPlanningRows
-  const budgetPlanChartKeys = activeSelectedBudgetPlanItemKey
-    ? [activeSelectedBudgetPlanItemKey]
-    : budgetPlanLegendItems.map((item) => item.key)
+  const visibleBudgetPlanningRows = budgetPlanningRows.filter((row) => {
+    if (hiddenBudgetPlanItemKeySet.has(row.itemKey)) {
+      return false
+    }
+    return activeSelectedBudgetPlanItemKey ? row.itemKey === activeSelectedBudgetPlanItemKey : true
+  })
+  const budgetPlanChartKeys = budgetPlanLegendItems
+    .filter((item) => !hiddenBudgetPlanItemKeySet.has(item.key))
+    .filter((item) => (activeSelectedBudgetPlanItemKey ? item.key === activeSelectedBudgetPlanItemKey : true))
+    .map((item) => item.key)
   const budgetPlanChartRows = budgetPlanMonthKeys.map((monthKey) => {
     const chartRow: Record<string, string | number> = {
-      month: formatMonthLabel(monthKey),
+      month: formatShortMonthLabel(monthKey),
     }
     visibleBudgetPlanningRows
       .filter((row) => row.monthKey === monthKey)
@@ -659,7 +745,7 @@ export default function ReportsPage() {
         itemKey,
         itemName: row.cash_flow_item_name || "Неизвестная статья",
         amount: row.amount,
-        documentHref: getBudgetDocumentHref(row),
+        documentHref: getBudgetDocumentHref(row, returnToHref),
       }
     })
     .sort((left, right) => {
@@ -669,10 +755,13 @@ export default function ReportsPage() {
       }
       return left.itemName.localeCompare(right.itemName, "ru")
     })
-  const visibleBudgetPlanDetailRows = activeSelectedBudgetPlanItemKey
-    ? budgetPlanDetailRows.filter((row) => row.itemKey === activeSelectedBudgetPlanItemKey)
-    : budgetPlanDetailRows
-  const budgetPlanExportRows = budgetPlanningRows.map((row) => ({
+  const visibleBudgetPlanDetailRows = budgetPlanDetailRows.filter((row) => {
+    if (hiddenBudgetPlanItemKeySet.has(row.itemKey)) {
+      return false
+    }
+    return activeSelectedBudgetPlanItemKey ? row.itemKey === activeSelectedBudgetPlanItemKey : true
+  })
+  const budgetPlanExportRows = visibleBudgetPlanningRows.map((row) => ({
     month: row.monthLabel,
     cashFlowItem: row.itemName,
     plannedAmount: row.plannedAmount,
@@ -688,171 +777,6 @@ export default function ReportsPage() {
         title="Отчеты"
         description="Срез периода по деньгам, кошелькам и бюджету."
       />
-
-      <Card>
-        <CardContent className="space-y-4 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">
-                {isBudgetTab ? "Период бюджета" : "Период анализа"}
-              </div>
-              <div className="text-sm leading-5 text-muted-foreground">
-                {isBudgetTab
-                  ? "Выбор только по месяцам: бюджет считается от начала до конца месяца."
-                  : "Быстрый диапазон или свой период."}
-              </div>
-            </div>
-            {isBudgetTab ? (
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => setBudgetYearRange(budgetYear - 1)}>
-                  {budgetYear - 1}
-                </Button>
-                <Button variant="default" size="sm" onClick={() => setBudgetYearRange(new Date().getFullYear())}>
-                  Текущий год
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setBudgetYearRange(budgetYear + 1)}>
-                  {budgetYear + 1}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button variant={selectedPreset === "week" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("week")}>
-                  7 дней
-                </Button>
-                <Button variant={selectedPreset === "month" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("month")}>
-                  Месяц
-                </Button>
-                <Button variant={selectedPreset === "quarter" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("quarter")}>
-                  Квартал
-                </Button>
-                <Button variant={selectedPreset === "year" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("year")}>
-                  Год
-                </Button>
-                <Button variant={selectedPreset === "ytd" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("ytd")}>
-                  С начала года
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {isBudgetTab ? (
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,0.8fr)]">
-              <div className="space-y-2">
-                <Label htmlFor="budget-period-month-from">Месяц с</Label>
-                <Input
-                  id="budget-period-month-from"
-                  type="month"
-                  value={budgetFromMonth}
-                  onChange={(event) => setBudgetMonthRange(event.target.value, budgetToMonth)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="budget-period-month-to">Месяц по</Label>
-                <Input
-                  id="budget-period-month-to"
-                  type="month"
-                  value={budgetToMonth}
-                  onChange={(event) => setBudgetMonthRange(budgetFromMonth, event.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="budget-project">Проект</Label>
-                <Select
-                  value={budgetProjectId || "none"}
-                  onValueChange={(value) => {
-                    const nextBudgetProjectId = value === "none" ? "" : value
-                    setBudgetProjectId(nextBudgetProjectId)
-                    setSelectedBudgetPlanItemKey(null)
-                    updateReportUrl(dateFrom, dateTo, budgetForecast, nextBudgetProjectId)
-                  }}
-                  disabled={projectsQuery.isLoading}
-                >
-                  <SelectTrigger id="budget-project">
-                    <SelectValue placeholder="Без проекта" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Без проекта</SelectItem>
-                    {budgetProjectOptions.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          ) : (
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-              <div className="space-y-2">
-                <Label htmlFor="reports-date-from">Дата с</Label>
-                <Input
-                  id="reports-date-from"
-                  type="date"
-                  value={dateFrom}
-                  onChange={(event) => {
-                    const nextDateFrom = event.target.value
-                    setDateFrom(nextDateFrom)
-                    setSelectedPreset(null)
-                    setSelectedBudgetPlanItemKey(null)
-                    updateReportUrl(nextDateFrom, dateTo, budgetForecast)
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reports-date-to">Дата по</Label>
-                <Input
-                  id="reports-date-to"
-                  type="date"
-                  value={dateTo}
-                  onChange={(event) => {
-                    const nextDateTo = event.target.value
-                    setDateTo(nextDateTo)
-                    setSelectedPreset(null)
-                    setSelectedBudgetPlanItemKey(null)
-                    updateReportUrl(dateFrom, nextDateTo, budgetForecast)
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {isBudgetTab ? (
-            <div className="flex flex-col gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <Label htmlFor="budget-forecast-mode" className="cursor-pointer">
-                  Прогноз бюджета
-                </Label>
-                <div className="text-sm leading-5 text-muted-foreground">
-                  План считается до конца выбранного месяца, факт ограничивается сегодняшним днем.
-                </div>
-              </div>
-              <Switch
-                id="budget-forecast-mode"
-                checked={budgetForecast}
-                onCheckedChange={(checked) => {
-                  const nextBudgetForecast = Boolean(checked)
-                  setBudgetForecast(nextBudgetForecast)
-                  updateReportUrl(dateFrom, dateTo, nextBudgetForecast)
-                }}
-              />
-            </div>
-          ) : null}
-
-          <div className="rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
-            {isBudgetTab ? (
-              <>
-                Период бюджета: с {formatDate(budgetDateFrom)} по {formatDate(budgetDateTo)} · проект:{" "}
-                {selectedBudgetProjectName}
-              </>
-            ) : (
-              <>
-                Период: с {formatDate(dateFrom)} по {formatDate(dateTo)}
-                {isFutureReportDate && budgetForecast ? " · прогноз по бюджету включен" : ""}
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
       <Card>
         <CardContent className="grid gap-3 p-4 md:grid-cols-3">
@@ -917,6 +841,128 @@ export default function ReportsPage() {
           </TabsTrigger>
         </TabsList>
 
+        <Card>
+          <CardContent className="space-y-4 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">Период отчета</div>
+                <div className="text-sm leading-5 text-muted-foreground">
+                  Быстрый выбор диапазона месяцев, точные даты можно уточнить ниже.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant={selectedPreset === "month" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("month")}>
+                  Месяц
+                </Button>
+                <Button variant={selectedPreset === "quarter" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("quarter")}>
+                  Квартал
+                </Button>
+                <Button variant={selectedPreset === "year" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("year")}>
+                  Год
+                </Button>
+                <Button variant={selectedPreset === "ytd" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("ytd")}>
+                  С начала года
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="space-y-2">
+                <Label htmlFor="reports-period-month-from">Месяц с</Label>
+                <Input
+                  id="reports-period-month-from"
+                  type="month"
+                  value={periodFromMonth}
+                  onChange={(event) => setReportMonthRange(event.target.value, periodToMonth)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reports-period-month-to">Месяц по</Label>
+                <Input
+                  id="reports-period-month-to"
+                  type="month"
+                  value={periodToMonth}
+                  onChange={(event) => setReportMonthRange(periodFromMonth, event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reports-date-from">Дата с</Label>
+                <Input
+                  id="reports-date-from"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setExactDateFrom(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reports-date-to">Дата по</Label>
+                <Input
+                  id="reports-date-to"
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setExactDateTo(event.target.value)}
+                />
+              </div>
+            </div>
+
+            {isBudgetTab ? (
+              <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1fr)]">
+                <div className="space-y-2">
+                  <Label htmlFor="budget-project">Проект бюджета</Label>
+                  <Select
+                    value={budgetProjectId || "none"}
+                    onValueChange={(value) => {
+                      const nextBudgetProjectId = value === "none" ? "" : value
+                      setBudgetProjectId(nextBudgetProjectId)
+                      setSelectedBudgetPlanItemKey(null)
+                      setHiddenBudgetPlanItemKeys({})
+                      updateReportUrl(dateFrom, dateTo, budgetForecast, nextBudgetProjectId)
+                    }}
+                    disabled={projectsQuery.isLoading}
+                  >
+                    <SelectTrigger id="budget-project">
+                      <SelectValue placeholder="Без проекта" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Без проекта</SelectItem>
+                      {budgetProjectOptions.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <Label htmlFor="budget-forecast-mode" className="cursor-pointer">
+                      Прогноз бюджета
+                    </Label>
+                    <div className="text-sm leading-5 text-muted-foreground">
+                      План до даты окончания, факт можно ограничить сегодняшним днем.
+                    </div>
+                  </div>
+                  <Switch
+                    id="budget-forecast-mode"
+                    checked={budgetForecast}
+                    onCheckedChange={(checked) => {
+                      const nextBudgetForecast = Boolean(checked)
+                      setBudgetForecast(nextBudgetForecast)
+                      updateReportUrl(dateFrom, dateTo, nextBudgetForecast)
+                    }}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
+              Период: с {formatDate(dateFrom)} по {formatDate(dateTo)}
+              {isBudgetTab ? ` · проект: ${selectedBudgetProjectName}` : ""}
+              {isBudgetTab && isFutureReportDate && budgetForecast ? " · прогноз по бюджету включен" : ""}
+            </div>
+          </CardContent>
+        </Card>
+
         <TabsContent value="cashflow" className="space-y-6">
           <Card>
             <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -960,9 +1006,9 @@ export default function ReportsPage() {
                 <CardContent>
                   <div className="h-[380px]" ref={cashFlowChartRef}>
                     <ResponsiveBar
-                      data={timelineRows}
+                      data={timelineChartRows}
                       keys={["income", "expense"]}
-                      indexBy="label"
+                      indexBy="chartLabel"
                       margin={{ top: 20, right: 20, bottom: 80, left: 48 }}
                       padding={0.3}
                       groupMode="grouped"
@@ -1092,9 +1138,9 @@ export default function ReportsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b text-left text-sm text-muted-foreground">
+                        <tr className="border-b text-left text-xs text-muted-foreground">
                           <th className="pb-3">Кошелек</th>
                           <th className="pb-3 text-right">Баланс</th>
                           <th className="pb-3 text-right">Доля</th>
@@ -1103,11 +1149,11 @@ export default function ReportsPage() {
                       <tbody>
                         {walletRows.map((wallet) => (
                           <tr key={wallet.id} className="border-b border-border/60">
-                            <td className="py-3">{wallet.name}</td>
-                            <td className={`py-3 text-right font-medium ${wallet.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                            <td className="py-2.5">{wallet.name}</td>
+                            <td className={`py-2.5 text-right font-medium ${wallet.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
                               {formatCurrency(wallet.balance)}
                             </td>
-                            <td className="py-3 text-right text-muted-foreground">{wallet.share.toFixed(1)}%</td>
+                            <td className="py-2.5 text-right text-muted-foreground">{wallet.share.toFixed(1)}%</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1154,21 +1200,28 @@ export default function ReportsPage() {
                   <div className="space-y-1">
                     <CardTitle>Расходы по месяцам и статьям</CardTitle>
                     <CardDescription>
-                      Цвета соответствуют легенде справа. Клик по статье фильтрует график и таблицу.
+                      Клик по названию статьи включает отбор. Кнопка с глазом исключает статью из графика и таблицы.
                     </CardDescription>
                   </div>
-                  {selectedMonthlyExpenseItemName ? (
-                    <Button variant="outline" size="sm" onClick={() => setSelectedMonthlyExpenseItemKey(null)}>
-                      Все статьи
-                    </Button>
-                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {selectedMonthlyExpenseItemName ? (
+                      <Button variant="outline" size="sm" onClick={() => setSelectedMonthlyExpenseItemKey(null)}>
+                        Снять отбор
+                      </Button>
+                    ) : null}
+                    {hiddenMonthlyExpenseItemCount > 0 ? (
+                      <Button variant="outline" size="sm" onClick={() => setHiddenMonthlyExpenseItemKeys({})}>
+                        Показать все
+                      </Button>
+                    ) : null}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
                     <div className="h-[420px] min-w-0" ref={categoryChartRef}>
                       {monthlyExpenseChartKeys.length === 0 ? (
                         <div className="flex h-full items-center justify-center rounded-[22px] border border-dashed border-border/70 text-sm text-muted-foreground">
-                          За выбранный период нет расходов по статьям.
+                          Нет видимых статей для графика. Сними отбор или верни скрытые статьи.
                         </div>
                       ) : (
                         <ResponsiveBar
@@ -1219,6 +1272,12 @@ export default function ReportsPage() {
                               </div>
                             )
                           }}
+                          onClick={(bar) => {
+                            const itemKey = String(bar.id)
+                            if (monthlyExpenseItemTotals.has(itemKey)) {
+                              setSelectedMonthlyExpenseItemKey((current) => (current === itemKey ? null : itemKey))
+                            }
+                          }}
                         />
                       )}
                     </div>
@@ -1227,12 +1286,19 @@ export default function ReportsPage() {
                         <div>
                           <div className="text-sm font-semibold tracking-[-0.02em]">Легенда расходных статей</div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            Клик по статье фильтрует график и таблицу.
+                            Название — отбор. Глаз — исключить из отчета.
                           </div>
                         </div>
-                        {selectedMonthlyExpenseItemName ? (
-                          <Button variant="ghost" size="sm" onClick={() => setSelectedMonthlyExpenseItemKey(null)}>
-                            Сброс
+                        {selectedMonthlyExpenseItemName || hiddenMonthlyExpenseItemCount > 0 ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedMonthlyExpenseItemKey(null)
+                              setHiddenMonthlyExpenseItemKeys({})
+                            }}
+                          >
+                            Сбросить
                           </Button>
                         ) : null}
                       </div>
@@ -1244,36 +1310,60 @@ export default function ReportsPage() {
                         ) : (
                           monthlyExpenseLegendItems.map((item) => {
                             const isSelected = activeSelectedMonthlyExpenseItemKey === item.key
+                            const isHidden = hiddenMonthlyExpenseItemKeySet.has(item.key)
                             return (
-                            <button
-                              key={item.key}
-                              type="button"
-                              className={`w-full rounded-2xl border px-3 py-2 text-left transition ${
-                                isSelected
-                                  ? "border-primary bg-primary/10"
-                                  : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
-                              }`}
-                              onClick={() =>
-                                setSelectedMonthlyExpenseItemKey((current) =>
-                                  current === item.key ? null : item.key
-                                )
-                              }
-                            >
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-3 w-3 shrink-0 rounded-full"
-                                  style={{ backgroundColor: item.color }}
-                                />
-                                <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
-                                <span className="text-sm font-semibold text-rose-600 dark:text-rose-300">
-                                  {formatCurrency(item.expense)}
-                                </span>
+                              <div
+                                key={item.key}
+                                className={`flex items-stretch gap-2 rounded-2xl border px-3 py-2 transition ${
+                                  isSelected
+                                    ? "border-primary bg-primary/10"
+                                    : isHidden
+                                      ? "border-border/40 bg-muted/30 opacity-60"
+                                      : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  className="min-w-0 flex-1 text-left"
+                                  onClick={() =>
+                                    setSelectedMonthlyExpenseItemKey((current) =>
+                                      current === item.key ? null : item.key
+                                    )
+                                  }
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="h-3 w-3 shrink-0 rounded-full"
+                                      style={{ backgroundColor: item.color }}
+                                    />
+                                    <span className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? "line-through" : ""}`}>
+                                      {item.name}
+                                    </span>
+                                    <span className="text-sm font-semibold text-rose-600 dark:text-rose-300">
+                                      {formatCurrency(item.expense)}
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {isHidden ? "Исключена" : `${item.share.toFixed(1)}% от расходов`}
+                                  </div>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition hover:border-primary/60 hover:text-primary"
+                                  aria-label={isHidden ? "Вернуть статью в отчет" : "Исключить статью из отчета"}
+                                  title={isHidden ? "Вернуть статью" : "Исключить статью"}
+                                  onClick={() => {
+                                    if (!isHidden && isSelected) {
+                                      setSelectedMonthlyExpenseItemKey(null)
+                                    }
+                                    toggleHiddenMonthlyExpenseItem(item.key)
+                                  }}
+                                >
+                                  {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
                               </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {item.share.toFixed(1)}% от расходов
-                              </div>
-                            </button>
-                          )})
+                            )
+                          })
                         )}
                       </div>
                     </div>
@@ -1291,12 +1381,20 @@ export default function ReportsPage() {
                   <CardDescription>
                     В каждой группе сначала итог месяца, затем строки статей с приходом, расходом и результатом.
                   </CardDescription>
+                  {hiddenMonthlyExpenseItemCount > 0 ? (
+                    <Badge variant="secondary">Исключено: {hiddenMonthlyExpenseItemCount}</Badge>
+                  ) : null}
                 </CardHeader>
                 <CardContent>
+                  {visibleMonthlyCashFlowGroups.length === 0 ? (
+                    <div className="rounded-[18px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                      Нет видимых строк. Сними отбор или верни скрытые статьи.
+                    </div>
+                  ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b text-left text-sm text-muted-foreground">
+                        <tr className="border-b text-left text-xs text-muted-foreground">
                           <th className="pb-3">Месяц / статья</th>
                           <th className="pb-3 text-right">Приход</th>
                           <th className="pb-3 text-right">Расход</th>
@@ -1309,7 +1407,7 @@ export default function ReportsPage() {
                         return (
                         <tbody key={group.key}>
                           <tr
-                            className="cursor-pointer border-b border-border bg-muted/40 text-sm font-semibold transition-colors hover:bg-muted/60"
+                            className="cursor-pointer border-b border-border bg-muted/40 font-semibold transition-colors hover:bg-muted/60"
                             onClick={() =>
                               setCollapsedMonthlyGroups((current) => ({
                                 ...current,
@@ -1317,7 +1415,7 @@ export default function ReportsPage() {
                               }))
                             }
                           >
-                            <td className="py-3">
+                            <td className="py-2.5">
                               <span className="flex items-center gap-2">
                                 {isCollapsed ? (
                                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -1330,26 +1428,26 @@ export default function ReportsPage() {
                                 </span>
                               </span>
                             </td>
-                            <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
+                            <td className="py-2.5 text-right text-emerald-600 dark:text-emerald-300">
                               {formatCurrency(group.income)}
                             </td>
-                            <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                            <td className="py-2.5 text-right text-rose-600 dark:text-rose-300">
                               {formatCurrency(group.expense)}
                             </td>
-                            <td className={`py-3 text-right ${group.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                            <td className={`py-2.5 text-right ${group.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
                               {formatCurrency(group.net)}
                             </td>
                           </tr>
                           {isCollapsed ? null : group.rows.map((row) => (
                             <tr key={row.key} className="border-b border-border/60">
-                              <td className="py-3 pl-5 font-medium">{row.itemName}</td>
-                              <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
+                              <td className="py-2.5 pl-5 font-medium">{row.itemName}</td>
+                              <td className="py-2.5 text-right text-emerald-600 dark:text-emerald-300">
                                 {row.income > 0 ? formatCurrency(row.income) : "—"}
                               </td>
-                              <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                              <td className="py-2.5 text-right text-rose-600 dark:text-rose-300">
                                 {row.expense > 0 ? formatCurrency(row.expense) : "—"}
                               </td>
-                              <td className={`py-3 text-right ${row.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                              <td className={`py-2.5 text-right ${row.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
                                 {formatCurrency(row.net)}
                               </td>
                             </tr>
@@ -1358,6 +1456,7 @@ export default function ReportsPage() {
                       )})}
                     </table>
                   </div>
+                  )}
                 </CardContent>
               </Card>
             </>
@@ -1370,7 +1469,7 @@ export default function ReportsPage() {
               <div className="space-y-1">
                 <CardTitle>План расходов по месяцам</CardTitle>
                 <CardDescription>
-                  Бюджетный отчет работает месячными периодами: от первого дня месяца до последнего.
+                  Месячный диапазон быстро выставляет границы, точные даты можно уточнить в периоде отчета.
                 </CardDescription>
               </div>
               <ExportReportButtons
@@ -1425,118 +1524,161 @@ export default function ReportsPage() {
                   <div className="space-y-1">
                     <CardTitle>График планируемых расходов: {selectedBudgetProjectName}</CardTitle>
                     <CardDescription>
-                      Месяцы собраны из статей расхода. Легенда справа фильтрует график и таблицы ниже.
+                      Клик по названию статьи включает отбор. Кнопка с глазом исключает статью из графика и таблиц.
                     </CardDescription>
                   </div>
-                  {selectedBudgetPlanItemName ? (
-                    <Button variant="outline" size="sm" onClick={() => setSelectedBudgetPlanItemKey(null)}>
-                      Все статьи
-                    </Button>
-                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {selectedBudgetPlanItemName ? (
+                      <Button variant="outline" size="sm" onClick={() => setSelectedBudgetPlanItemKey(null)}>
+                        Снять отбор
+                      </Button>
+                    ) : null}
+                    {hiddenBudgetPlanItemCount > 0 ? (
+                      <Button variant="outline" size="sm" onClick={() => setHiddenBudgetPlanItemKeys({})}>
+                        Показать все
+                      </Button>
+                    ) : null}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
                     <div className="h-[380px] min-w-0" ref={budgetExpenseChartRef}>
-                      <ResponsiveBar
-                        data={budgetPlanChartRows}
-                        keys={budgetPlanChartKeys}
-                        indexBy="month"
-                        margin={{ top: 12, right: 12, bottom: 44, left: 68 }}
-                        padding={0.34}
-                        axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: 0 }}
-                        axisLeft={{
-                          tickSize: 0,
-                          tickPadding: 8,
-                          format: (value) => formatCompactCurrency(Number(value)),
-                        }}
-                        enableLabel={false}
-                        colors={({ id }) => budgetPlanColorByKey.get(String(id)) || "#94a3b8"}
-                        colorBy="id"
-                        theme={{
-                          axis: {
-                            ticks: {
-                              text: {
-                                fill: "hsl(var(--muted-foreground))",
-                                fontSize: 11,
+                      {budgetPlanChartKeys.length === 0 ? (
+                        <div className="flex h-full items-center justify-center rounded-[22px] border border-dashed border-border/70 text-sm text-muted-foreground">
+                          Нет видимых статей для графика. Сними отбор или верни скрытые статьи.
+                        </div>
+                      ) : (
+                        <ResponsiveBar
+                          data={budgetPlanChartRows}
+                          keys={budgetPlanChartKeys}
+                          indexBy="month"
+                          margin={{ top: 12, right: 12, bottom: 44, left: 68 }}
+                          padding={0.34}
+                          axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: 0 }}
+                          axisLeft={{
+                            tickSize: 0,
+                            tickPadding: 8,
+                            format: (value) => formatCompactCurrency(Number(value)),
+                          }}
+                          enableLabel={false}
+                          colors={({ id }) => budgetPlanColorByKey.get(String(id)) || "#94a3b8"}
+                          colorBy="id"
+                          theme={{
+                            axis: {
+                              ticks: {
+                                text: {
+                                  fill: "hsl(var(--muted-foreground))",
+                                  fontSize: 11,
+                                },
                               },
                             },
-                          },
-                          grid: {
-                            line: {
-                              stroke: "hsl(var(--border))",
-                              strokeOpacity: 0.45,
+                            grid: {
+                              line: {
+                                stroke: "hsl(var(--border))",
+                                strokeOpacity: 0.45,
+                              },
                             },
-                          },
-                          tooltip: {
-                            container: {
-                              background: "hsl(var(--background))",
-                              color: "hsl(var(--foreground))",
-                              border: "1px solid hsl(var(--border))",
-                              borderRadius: 12,
-                              boxShadow: "0 12px 32px rgb(0 0 0 / 0.22)",
+                            tooltip: {
+                              container: {
+                                background: "hsl(var(--background))",
+                                color: "hsl(var(--foreground))",
+                                border: "1px solid hsl(var(--border))",
+                                borderRadius: 12,
+                                boxShadow: "0 12px 32px rgb(0 0 0 / 0.22)",
+                              },
                             },
-                          },
-                        }}
-                        tooltip={({ id, value, indexValue }) => {
-                          const item = budgetPlanItemByKey.get(String(id))
-                          return (
-                            <div className="px-2 py-1 text-xs">
-                              {String(indexValue)} / {item?.name || String(id)}: {formatCurrency(Number(value))}
-                            </div>
-                          )
-                        }}
-                        onClick={(bar) => {
-                          const itemKey = String(bar.id)
-                          if (budgetPlanItemTotals.has(itemKey)) {
-                            setSelectedBudgetPlanItemKey((current) => (current === itemKey ? null : itemKey))
-                          }
-                        }}
-                      />
+                          }}
+                          tooltip={({ id, value, indexValue }) => {
+                            const item = budgetPlanItemByKey.get(String(id))
+                            return (
+                              <div className="px-2 py-1 text-xs">
+                                {String(indexValue)} / {item?.name || String(id)}: {formatCurrency(Number(value))}
+                              </div>
+                            )
+                          }}
+                          onClick={(bar) => {
+                            const itemKey = String(bar.id)
+                            if (budgetPlanItemTotals.has(itemKey)) {
+                              setSelectedBudgetPlanItemKey((current) => (current === itemKey ? null : itemKey))
+                            }
+                          }}
+                        />
+                      )}
                     </div>
                     <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="text-sm font-semibold tracking-[-0.02em]">Легенда статей</div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            Клик по статье фильтрует таблицы.
+                            Название — отбор. Глаз — исключить из отчета.
                           </div>
                         </div>
-                        {selectedBudgetPlanItemName ? (
-                          <Button variant="ghost" size="sm" onClick={() => setSelectedBudgetPlanItemKey(null)}>
-                            Сброс
+                        {selectedBudgetPlanItemName || hiddenBudgetPlanItemCount > 0 ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedBudgetPlanItemKey(null)
+                              setHiddenBudgetPlanItemKeys({})
+                            }}
+                          >
+                            Сбросить
                           </Button>
                         ) : null}
                       </div>
                       <div className="mt-4 max-h-[300px] space-y-2 overflow-y-auto pr-1">
                         {budgetPlanLegendItems.map((item) => {
                           const isSelected = activeSelectedBudgetPlanItemKey === item.key
+                          const isHidden = hiddenBudgetPlanItemKeySet.has(item.key)
                           return (
-                            <button
+                            <div
                               key={item.key}
-                              type="button"
-                              className={`w-full rounded-2xl border px-3 py-2 text-left transition ${
+                              className={`flex items-stretch gap-2 rounded-2xl border px-3 py-2 transition ${
                                 isSelected
                                   ? "border-primary bg-primary/10"
-                                  : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
+                                  : isHidden
+                                    ? "border-border/40 bg-muted/30 opacity-60"
+                                    : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
                               }`}
-                              onClick={() =>
-                                setSelectedBudgetPlanItemKey((current) =>
-                                  current === item.key ? null : item.key
-                                )
-                              }
                             >
-                              <span className="flex items-center gap-2">
-                                <span
-                                  className="h-3 w-3 shrink-0 rounded-full"
-                                  style={{ backgroundColor: item.color }}
-                                />
-                                <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
-                                <span className="text-sm font-semibold">{formatCurrency(item.plannedAmount)}</span>
-                              </span>
-                              <span className="mt-1 block text-xs text-muted-foreground">
-                                {item.share.toFixed(1)}% от плана
-                              </span>
-                            </button>
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 text-left"
+                                onClick={() =>
+                                  setSelectedBudgetPlanItemKey((current) =>
+                                    current === item.key ? null : item.key
+                                  )
+                                }
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span
+                                    className="h-3 w-3 shrink-0 rounded-full"
+                                    style={{ backgroundColor: item.color }}
+                                  />
+                                  <span className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? "line-through" : ""}`}>
+                                    {item.name}
+                                  </span>
+                                  <span className="text-sm font-semibold">{formatCurrency(item.plannedAmount)}</span>
+                                </span>
+                                <span className="mt-1 block text-xs text-muted-foreground">
+                                  {isHidden ? "Исключена" : `${item.share.toFixed(1)}% от плана`}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition hover:border-primary/60 hover:text-primary"
+                                aria-label={isHidden ? "Вернуть статью в отчет" : "Исключить статью из отчета"}
+                                title={isHidden ? "Вернуть статью" : "Исключить статью"}
+                                onClick={() => {
+                                  if (!isHidden && isSelected) {
+                                    setSelectedBudgetPlanItemKey(null)
+                                  }
+                                  toggleHiddenBudgetPlanItem(item.key)
+                                }}
+                              >
+                                {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
                           )
                         })}
                       </div>
@@ -1557,13 +1699,23 @@ export default function ReportsPage() {
                       Проект: {selectedBudgetProjectName}. План, факт и остаток по каждой запланированной статье.
                     </CardDescription>
                   </div>
-                  {selectedBudgetPlanItemName ? <Badge variant="secondary">Фильтр по статье</Badge> : null}
+                  <div className="flex flex-wrap gap-2">
+                    {selectedBudgetPlanItemName ? <Badge variant="secondary">Фильтр по статье</Badge> : null}
+                    {hiddenBudgetPlanItemCount > 0 ? (
+                      <Badge variant="secondary">Исключено: {hiddenBudgetPlanItemCount}</Badge>
+                    ) : null}
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {visibleBudgetPlanningRows.length === 0 ? (
+                    <div className="rounded-[18px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                      Нет видимых строк. Сними отбор или верни скрытые статьи.
+                    </div>
+                  ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b text-left text-sm text-muted-foreground">
+                        <tr className="border-b text-left text-xs text-muted-foreground">
                           <th className="pb-3">Месяц</th>
                           <th className="pb-3">Статья</th>
                           <th className="pb-3 text-right">План</th>
@@ -1583,21 +1735,22 @@ export default function ReportsPage() {
                               )
                             }
                           >
-                            <td className="py-3">{row.monthLabel}</td>
-                            <td className="py-3 font-medium">{row.itemName}</td>
-                            <td className="py-3 text-right">{formatCurrency(row.plannedAmount)}</td>
-                            <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                            <td className="py-2.5">{row.monthLabel}</td>
+                            <td className="py-2.5 font-medium">{row.itemName}</td>
+                            <td className="py-2.5 text-right">{formatCurrency(row.plannedAmount)}</td>
+                            <td className="py-2.5 text-right text-rose-600 dark:text-rose-300">
                               {formatCurrency(row.actualAmount)}
                             </td>
-                            <td className={`py-3 text-right ${row.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                            <td className={`py-2.5 text-right ${row.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
                               {formatCurrency(row.balance)}
                             </td>
-                            <td className="py-3 text-right">{Math.round(row.executionPercent)}%</td>
+                            <td className="py-2.5 text-right">{Math.round(row.executionPercent)}%</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  )}
 
                   <div className="space-y-3">
                     <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">
@@ -1605,13 +1758,13 @@ export default function ReportsPage() {
                     </div>
                     {visibleBudgetPlanDetailRows.length === 0 ? (
                       <div className="rounded-[18px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
-                        Для выбранной статьи нет строк графика бюджета.
+                        Нет видимых строк графика бюджета. Сними отбор или верни скрытые статьи.
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full">
+                        <table className="w-full text-sm">
                           <thead>
-                            <tr className="border-b text-left text-sm text-muted-foreground">
+                            <tr className="border-b text-left text-xs text-muted-foreground">
                               <th className="pb-3">Месяц</th>
                               <th className="pb-3">Статья</th>
                               <th className="pb-3">Документ</th>
@@ -1621,9 +1774,9 @@ export default function ReportsPage() {
                           <tbody>
                             {visibleBudgetPlanDetailRows.map((row) => (
                               <tr key={row.key} className="border-b border-border/60">
-                                <td className="py-3">{row.monthLabel}</td>
-                                <td className="py-3">{row.itemName}</td>
-                                <td className="py-3">
+                                <td className="py-2.5">{row.monthLabel}</td>
+                                <td className="py-2.5">{row.itemName}</td>
+                                <td className="py-2.5">
                                   {row.documentHref ? (
                                     <Link className="text-primary hover:underline" href={row.documentHref}>
                                       Открыть
@@ -1632,7 +1785,7 @@ export default function ReportsPage() {
                                     <span className="text-muted-foreground">—</span>
                                   )}
                                 </td>
-                                <td className="py-3 text-right font-medium">{formatCurrency(row.amount)}</td>
+                                <td className="py-2.5 text-right font-medium">{formatCurrency(row.amount)}</td>
                               </tr>
                             ))}
                           </tbody>

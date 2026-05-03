@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import * as Dialog from "@radix-ui/react-dialog"
 import * as Popover from "@radix-ui/react-popover"
@@ -40,6 +40,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
+import { buildReturnToHref, withReturnToHref } from "@/lib/return-navigation"
 import { cn } from "@/lib/utils"
 import {
   DashboardService,
@@ -51,15 +52,23 @@ import {
 type ActivityFilter = "all" | "receipt" | "expenditure" | "transfer"
 type DashboardBlock = "wallets" | "activity" | "budget"
 
+function getActivityFilterFromParam(value: string | null): ActivityFilter {
+  return value === "receipt" || value === "expenditure" || value === "transfer" ? value : "all"
+}
+
 export default function DashboardPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
+  const initialActivityFilter = getActivityFilterFromParam(searchParams.get("activity"))
+  const highlightedDocumentId = searchParams.get("highlight") || ""
+  const shouldOpenActivityBlock = Boolean(highlightedDocumentId) || initialActivityFilter !== "all"
   const [showHiddenWallets, setShowHiddenWallets] = useState(false)
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false)
-  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all")
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>(initialActivityFilter)
   const [collapsedBlocks, setCollapsedBlocks] = useState<Record<DashboardBlock, boolean>>({
     wallets: false,
-    activity: true,
+    activity: !shouldOpenActivityBlock,
     budget: false,
   })
   const [selectedBudgetItemId, setSelectedBudgetItemId] = useState<string | null>(null)
@@ -76,6 +85,7 @@ export default function DashboardPage() {
   const dashboardWeekdayLabel = formatDateFns(selectedDashboardDate, "ccc", { locale: ru }).replace(".", "")
   const dashboardDayLabel = formatDateFns(selectedDashboardDate, "d MMMM", { locale: ru })
   const dashboardCompactDateLabel = formatDateFns(selectedDashboardDate, "d MMM", { locale: ru })
+  const returnToHref = buildReturnToHref(pathname, searchParams)
 
   const dashboardQuery = useQuery({
     queryKey: ["dashboard-overview", { selectedDate, showHiddenWallets }],
@@ -174,6 +184,18 @@ export default function DashboardPage() {
     setIsDatePickerOpen(false)
   }
 
+  const handleSetActivityFilter = (value: ActivityFilter) => {
+    setActivityFilter(value)
+    const params = new URLSearchParams(searchParams.toString())
+    if (value === "all") {
+      params.delete("activity")
+    } else {
+      params.set("activity", value)
+    }
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : "/dashboard", { scroll: false })
+  }
+
   const formatBudgetDetailType = (documentType?: string | null) => {
     if (!documentType) {
       return null
@@ -187,6 +209,17 @@ export default function DashboardPage() {
         Transfer: "Перевод",
       }[documentType] ?? documentType
     )
+  }
+
+  const getActivityEditHref = (operation: DashboardRecentActivity) => {
+    const path =
+      operation.kind === "receipt"
+        ? `/receipts/${operation.id}/edit`
+        : operation.kind === "expenditure"
+          ? `/expenditures/${operation.id}/edit`
+          : `/transfers/${operation.id}/edit`
+
+    return withReturnToHref(path, returnToHref)
   }
 
   const getActivityDuplicateHref = (operation: DashboardRecentActivity) => {
@@ -219,7 +252,7 @@ export default function DashboardPage() {
           ? "/expenditures/new"
           : "/transfers/new"
 
-    return `${path}?${params.toString()}`
+    return withReturnToHref(`${path}?${params.toString()}`, returnToHref)
   }
 
   const toggleBlock = (block: DashboardBlock) => {
@@ -553,24 +586,30 @@ export default function DashboardPage() {
                 {collapsedBlocks.activity ? null : (
                 <CardContent className="space-y-3">
                   <div className="flex flex-wrap gap-2">
-                    <Button variant={activityFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("all")}>
+                    <Button variant={activityFilter === "all" ? "default" : "outline"} size="sm" onClick={() => handleSetActivityFilter("all")}>
                       Все
                     </Button>
-                    <Button variant={activityFilter === "receipt" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("receipt")}>
+                    <Button variant={activityFilter === "receipt" ? "default" : "outline"} size="sm" onClick={() => handleSetActivityFilter("receipt")}>
                       Приходы
                     </Button>
-                    <Button variant={activityFilter === "expenditure" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("expenditure")}>
+                    <Button variant={activityFilter === "expenditure" ? "default" : "outline"} size="sm" onClick={() => handleSetActivityFilter("expenditure")}>
                       Расходы
                     </Button>
-                    <Button variant={activityFilter === "transfer" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("transfer")}>
+                    <Button variant={activityFilter === "transfer" ? "default" : "outline"} size="sm" onClick={() => handleSetActivityFilter("transfer")}>
                       Переводы
                     </Button>
                   </div>
                   {recentActivity.length > 0 ? (
-                    recentActivity.map((operation) => (
+                    recentActivity.map((operation) => {
+                      const isHighlighted = highlightedDocumentId === operation.id
+
+                      return (
                       <div
                         key={`${operation.kind}-${operation.id}`}
-                        className="flex items-start gap-3 rounded-[18px] border border-border/60 bg-background/75 px-3 py-3"
+                        className={cn(
+                          "flex items-start gap-3 rounded-[18px] border border-border/60 bg-background/75 px-3 py-3",
+                          isHighlighted && "border-primary/70 bg-primary/10 ring-2 ring-primary/25"
+                        )}
                       >
                         <Badge
                           className="shrink-0"
@@ -580,13 +619,7 @@ export default function DashboardPage() {
                         </Badge>
 
                         <Link
-                          href={
-                            operation.kind === "receipt"
-                              ? `/receipts/${operation.id}/edit`
-                              : operation.kind === "expenditure"
-                                ? `/expenditures/${operation.id}/edit`
-                                : `/transfers/${operation.id}/edit`
-                          }
+                          href={getActivityEditHref(operation)}
                           className="min-w-0 flex-1 transition-colors hover:text-foreground/80"
                         >
                           <div className="truncate text-sm font-medium text-foreground">
@@ -624,13 +657,7 @@ export default function DashboardPage() {
                           </Button>
                           <Button asChild variant="ghost" size="icon" className="h-8 w-8">
                             <Link
-                              href={
-                                operation.kind === "receipt"
-                                  ? `/receipts/${operation.id}/edit`
-                                  : operation.kind === "expenditure"
-                                    ? `/expenditures/${operation.id}/edit`
-                                    : `/transfers/${operation.id}/edit`
-                              }
+                              href={getActivityEditHref(operation)}
                               aria-label="Редактировать документ"
                               title="Редактировать"
                             >
@@ -639,7 +666,7 @@ export default function DashboardPage() {
                           </Button>
                         </div>
                       </div>
-                    ))
+                    )})
                   ) : (
                     <div className="rounded-[20px] border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
                       Операций пока нет. Создай первый приход или расход, чтобы увидеть движение денег.
