@@ -82,6 +82,23 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
   const baseCashFlowItemId = budget?.cash_flow_item || defaultCashFlowItemId || ""
   const effectiveCashFlowItemId = cashFlowItemId ?? baseCashFlowItemId
 
+  const buildDefaultPlanningRows = () => {
+    const parsedAmount = Number.parseFloat(amount)
+    const fallbackStartDate = dateStart || date
+
+    if (!fallbackStartDate || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      return [] as PlanningGraphicDraft[]
+    }
+
+    return [
+      {
+        id: `draft-default-budget-${fallbackStartDate}`,
+        date_start: fallbackStartDate,
+        amount: Math.round(parsedAmount * 100) / 100,
+      },
+    ]
+  }
+
   const budgetMutation = useMutation({
     mutationFn: async () => {
       const parsedAmount = Number.parseFloat(amount)
@@ -90,7 +107,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
         type,
         amount: parsedAmount,
         date,
-        date_start: dateStart || undefined,
+        date_start: dateStart || date,
         amount_month: parsedAmountMonth,
         cash_flow_item: effectiveCashFlowItemId,
         description: description.trim() || undefined,
@@ -103,10 +120,15 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
       return BudgetService.createBudget(payload)
     },
     onSuccess: async (savedBudget) => {
-      const shouldReplacePlanningRows = isEdit ? planningDraftRows !== null : Boolean(planningDraftRows?.length)
+      const rowsToReplace =
+        isEdit && planningDraftRows === null
+          ? null
+          : planningDraftRows && planningDraftRows.length > 0
+            ? planningDraftRows
+            : buildDefaultPlanningRows()
 
-      if (shouldReplacePlanningRows) {
-        await PlanningService.replaceGraphicsRows("budget", savedBudget.id, planningDraftRows ?? [])
+      if (rowsToReplace) {
+        await PlanningService.replaceGraphicsRows("budget", savedBudget.id, rowsToReplace)
         if (planningDraftStorageKey) {
           PlanningService.clearDraftRows(planningDraftStorageKey)
         }
@@ -128,7 +150,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
     const parsedAmountMonth = amountMonth ? Number.parseInt(amountMonth, 10) : null
 
     if (!effectiveCashFlowItemId || !date || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      setValidationError("Укажи тип, дату, статью и сумму бюджета. Сумма должна быть больше нуля.")
+      setValidationError("Укажи тип, дату, статью и общую сумму в расписании. Сумма должна быть больше нуля.")
       return
     }
 
@@ -164,8 +186,6 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
     { value: "unselected", label: "Не выбрано" },
     ...itemOptions.map(toCashFlowItemOption),
   ]
-  const parsedAmount = Number.parseFloat(amount)
-  const hasAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0
   const parsedAmountMonthForDistribution = Number.parseInt(amountMonth, 10)
   const hasAmountMonthForDistribution =
     !Number.isNaN(parsedAmountMonthForDistribution) && parsedAmountMonthForDistribution > 0
@@ -196,9 +216,9 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
 
       <div>
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-3">
             <CardTitle>Параметры бюджета</CardTitle>
-            <CardDescription>Главное здесь не форма ради формы, а быстрый ввод плановой суммы, типа и периода действия.</CardDescription>
+            <CardDescription>Тип, дата и статья. Сумма и период задаются ниже в расписании.</CardDescription>
           </CardHeader>
           <CardContent>
             {errorMessage ? (
@@ -212,42 +232,28 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                 Не удалось загрузить статьи для бюджета. Проверь backend API и попробуй обновить страницу.
               </div>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div className="space-y-3">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2.5">
                   <Label>Тип бюджета</Label>
-                  <RadioGroup value={type} onValueChange={(value) => setType(value as "income" | "expense")} className="grid gap-3 sm:grid-cols-2">
-                    <label className="flex cursor-pointer items-start gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3">
+                  <RadioGroup value={type} onValueChange={(value) => setType(value as "income" | "expense")} className="grid gap-2 sm:grid-cols-2">
+                    <label className="flex cursor-pointer items-start gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5">
                       <RadioGroupItem value="income" id="budget-income" className="mt-1" />
                       <div className="space-y-1">
                         <div className="font-medium text-foreground">Доходный бюджет</div>
-                        <div className="text-sm leading-5 text-muted-foreground">План по поступлениям: зарплата, продажи, возвраты, прочие входящие потоки.</div>
+                        <div className="text-sm leading-5 text-muted-foreground">План поступлений.</div>
                       </div>
                     </label>
-                    <label className="flex cursor-pointer items-start gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3">
+                    <label className="flex cursor-pointer items-start gap-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5">
                       <RadioGroupItem value="expense" id="budget-expense" className="mt-1" />
                       <div className="space-y-1">
                         <div className="font-medium text-foreground">Расходный бюджет</div>
-                        <div className="text-sm leading-5 text-muted-foreground">План по затратам: обязательные траты, переменные расходы, лимиты по категориям.</div>
+                        <div className="text-sm leading-5 text-muted-foreground">План затрат.</div>
                       </div>
                     </label>
                   </RadioGroup>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="budget-amount">Сумма</Label>
-                    <Input
-                      id="budget-amount"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                      placeholder="0.00"
-                      required
-                    />
-                  </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="budget-date">Дата бюджета</Label>
                     <Input
@@ -260,34 +266,23 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="budget-date-start">Дата начала периода</Label>
-                    <Input
-                      id="budget-date-start"
-                      type="date"
-                      value={dateStart}
-                      onChange={(event) => setDateStart(event.target.value)}
-                    />
+                    <Label htmlFor="budget-item">Статья бюджета</Label>
+                    {itemsQuery.isLoading ? (
+                      <div className="rounded-[16px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
+                        Загружаем статьи...
+                      </div>
+                    ) : (
+                      <SearchableSelect
+                        id="budget-item"
+                        value={effectiveCashFlowItemId || "unselected"}
+                        onValueChange={(value) => setCashFlowItemId(value === "unselected" ? "" : value)}
+                        options={cashFlowItemOptions}
+                        placeholder="Выбери статью бюджета"
+                        searchPlaceholder="Найти статью по названию или коду"
+                        emptyLabel="Статья не найдена"
+                      />
+                    )}
                   </div>
-
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="budget-item">Статья бюджета</Label>
-                  {itemsQuery.isLoading ? (
-                    <div className="rounded-[16px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
-                      Загружаем статьи...
-                    </div>
-                  ) : (
-                    <SearchableSelect
-                      id="budget-item"
-                      value={effectiveCashFlowItemId || "unselected"}
-                      onValueChange={(value) => setCashFlowItemId(value === "unselected" ? "" : value)}
-                      options={cashFlowItemOptions}
-                      placeholder="Выбери статью бюджета"
-                      searchPlaceholder="Найти статью по названию или коду"
-                      emptyLabel="Статья не найдена"
-                    />
-                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -326,9 +321,11 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
         draftStorageKey={planningDraftStorageKey}
         onDraftRowsChange={setPlanningDraftRows}
         onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
+        onTotalAmountInputChange={setAmount}
         onMonthCountChange={(nextMonthCount) => setAmountMonth(String(nextMonthCount))}
+        onStartDateChange={setDateStart}
         distributionSource={{
-          totalAmount: hasAmount ? parsedAmount : 0,
+          totalAmount: budget?.amount,
           monthCount: hasAmountMonthForDistribution ? parsedAmountMonthForDistribution : undefined,
           startDate: dateStart || date,
         }}

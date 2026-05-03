@@ -22,6 +22,7 @@ import {
 import { ru } from "date-fns/locale"
 import {
   CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -48,6 +49,7 @@ import {
 } from "@/services/dashboard-service"
 
 type ActivityFilter = "all" | "receipt" | "expenditure" | "transfer"
+type DashboardBlock = "wallets" | "activity" | "budget"
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -55,6 +57,11 @@ export default function DashboardPage() {
   const [showHiddenWallets, setShowHiddenWallets] = useState(false)
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false)
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all")
+  const [collapsedBlocks, setCollapsedBlocks] = useState<Record<DashboardBlock, boolean>>({
+    wallets: false,
+    activity: true,
+    budget: false,
+  })
   const [selectedBudgetItemId, setSelectedBudgetItemId] = useState<string | null>(null)
   const today = formatDateForInput()
   const selectedDate = searchParams.get("date") || today
@@ -215,6 +222,10 @@ export default function DashboardPage() {
     return `${path}?${params.toString()}`
   }
 
+  const toggleBlock = (block: DashboardBlock) => {
+    setCollapsedBlocks((current) => ({ ...current, [block]: !current[block] }))
+  }
+
   return (
     <div className="space-y-5">
       <section>
@@ -259,21 +270,38 @@ export default function DashboardPage() {
 
             <div className="hidden min-w-0 rounded-[24px] border border-border/60 bg-background/45 p-4 lg:flex lg:flex-col">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <div className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                   Остатки по кошелькам
                 </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 rounded-2xl"
-                  onClick={() => setShowHiddenWallets((value) => !value)}
-                  aria-label={showHiddenWallets ? "Скрыть скрытые кошельки" : "Показать скрытые кошельки"}
-                  title={showHiddenWallets ? "Скрыть скрытые кошельки" : "Показать скрытые кошельки"}
-                >
-                  {showHiddenWallets ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                </Button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-2xl"
+                    onClick={() => setShowHiddenWallets((value) => !value)}
+                    aria-label={showHiddenWallets ? "Скрыть скрытые кошельки" : "Показать скрытые кошельки"}
+                    title={showHiddenWallets ? "Скрыть скрытые кошельки" : "Показать скрытые кошельки"}
+                  >
+                    {showHiddenWallets ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-2xl"
+                    onClick={() => toggleBlock("wallets")}
+                    aria-expanded={!collapsedBlocks.wallets}
+                    aria-label={collapsedBlocks.wallets ? "Развернуть кошельки" : "Свернуть кошельки"}
+                    title={collapsedBlocks.wallets ? "Развернуть" : "Свернуть"}
+                  >
+                    {collapsedBlocks.wallets ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
-              {sortedWallets.length > 0 ? (
+              {collapsedBlocks.wallets ? (
+                <div className="rounded-[18px] border border-border/60 bg-card/50 px-3 py-3 text-sm text-muted-foreground">
+                  Скрыто · {sortedWallets.length} кош.
+                </div>
+              ) : sortedWallets.length > 0 ? (
                 <div className="grid max-h-[230px] gap-2 overflow-y-auto pr-1 xl:grid-cols-2">
                   {sortedWallets.map((wallet) => (
                     <Link
@@ -444,9 +472,17 @@ export default function DashboardPage() {
           <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.4fr)_380px]">
             <div className="min-w-0 space-y-5">
               <Card className="lg:hidden">
-                <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border/60 pb-4">
-                  <CardTitle>Кошельки</CardTitle>
-                  <div className="flex shrink-0 items-center">
+                <CardHeader
+                  className={cn(
+                    "flex flex-row items-center justify-between gap-3 pb-4",
+                    !collapsedBlocks.wallets && "border-b border-border/60"
+                  )}
+                >
+                  <div className="min-w-0">
+                    <CardTitle>Кошельки</CardTitle>
+                    <div className="mt-1 text-xs text-muted-foreground">{sortedWallets.length} кош.</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
                     <Button
                       variant="outline"
                       size="icon"
@@ -456,38 +492,65 @@ export default function DashboardPage() {
                     >
                       {showHiddenWallets ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => toggleBlock("wallets")}
+                      aria-expanded={!collapsedBlocks.wallets}
+                      aria-label={collapsedBlocks.wallets ? "Развернуть кошельки" : "Свернуть кошельки"}
+                      title={collapsedBlocks.wallets ? "Развернуть" : "Свернуть"}
+                    >
+                      {collapsedBlocks.wallets ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
                   </div>
                 </CardHeader>
-                <CardContent className="p-0">
-                  <div className="max-h-[440px] overflow-y-auto">
-                    {sortedWallets.map((wallet) => (
-                      <Link
-                        key={wallet.wallet_id}
-                        href={`/wallets/${wallet.wallet_id}`}
-                        className="grid grid-cols-[minmax(0,1.3fr)_160px] gap-3 border-b border-border/60 px-5 py-3 text-sm transition-colors hover:bg-background/60"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate font-medium text-foreground">{wallet.wallet_name}</div>
-                        </div>
-                        <div
-                          className={
-                            wallet.balance >= 0
-                              ? "font-semibold text-emerald-600 dark:text-emerald-300"
-                              : "font-semibold text-rose-600 dark:text-rose-300"
-                          }
+                {collapsedBlocks.wallets ? null : (
+                  <CardContent className="p-0">
+                    <div className="max-h-[440px] overflow-y-auto">
+                      {sortedWallets.map((wallet) => (
+                        <Link
+                          key={wallet.wallet_id}
+                          href={`/wallets/${wallet.wallet_id}`}
+                          className="grid grid-cols-[minmax(0,1.3fr)_160px] gap-3 border-b border-border/60 px-5 py-3 text-sm transition-colors hover:bg-background/60"
                         >
-                          {formatCurrency(wallet.balance)}
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </CardContent>
+                          <div className="min-w-0">
+                            <div className="truncate font-medium text-foreground">{wallet.wallet_name}</div>
+                          </div>
+                          <div
+                            className={
+                              wallet.balance >= 0
+                                ? "font-semibold text-emerald-600 dark:text-emerald-300"
+                                : "font-semibold text-rose-600 dark:text-rose-300"
+                            }
+                          >
+                            {formatCurrency(wallet.balance)}
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </CardContent>
+                )}
               </Card>
 
               <Card>
-                <CardHeader className="pb-4">
-                  <CardTitle>Последние документы</CardTitle>
+                <CardHeader className="flex flex-row items-center justify-between gap-3 pb-4">
+                  <div className="min-w-0">
+                    <CardTitle>Последние документы</CardTitle>
+                    <div className="mt-1 text-xs text-muted-foreground">{recentActivity.length} строк</div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => toggleBlock("activity")}
+                    aria-expanded={!collapsedBlocks.activity}
+                    aria-label={collapsedBlocks.activity ? "Развернуть последние документы" : "Свернуть последние документы"}
+                    title={collapsedBlocks.activity ? "Развернуть" : "Свернуть"}
+                  >
+                    {collapsedBlocks.activity ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
                 </CardHeader>
+                {collapsedBlocks.activity ? null : (
                 <CardContent className="space-y-3">
                   <div className="flex flex-wrap gap-2">
                     <Button variant={activityFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setActivityFilter("all")}>
@@ -583,17 +646,32 @@ export default function DashboardPage() {
                     </div>
                   )}
                 </CardContent>
+                )}
               </Card>
             </div>
 
             <div className="min-w-0">
               <Card className="min-w-0 overflow-hidden">
-                <CardHeader className="pb-4">
-                  <CardTitle>Бюджет текущего месяца</CardTitle>
-                  <CardDescription className="max-w-full">
-                    Остатки и перерасходы по всем статьям расходного бюджета.
-                  </CardDescription>
+                <CardHeader className="flex flex-row items-start justify-between gap-3 pb-4">
+                  <div className="min-w-0">
+                    <CardTitle>Бюджет текущего месяца</CardTitle>
+                    <CardDescription className="max-w-full">
+                      Остатки и перерасходы по всем статьям расходного бюджета.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => toggleBlock("budget")}
+                    aria-expanded={!collapsedBlocks.budget}
+                    aria-label={collapsedBlocks.budget ? "Развернуть бюджет" : "Свернуть бюджет"}
+                    title={collapsedBlocks.budget ? "Развернуть" : "Свернуть"}
+                  >
+                    {collapsedBlocks.budget ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
                 </CardHeader>
+                {collapsedBlocks.budget ? null : (
                 <CardContent className="space-y-3">
                   <div className="rounded-[20px] border border-border/60 bg-background/75 p-4">
                     <div className="flex items-center justify-between gap-3 text-sm">
@@ -679,6 +757,7 @@ export default function DashboardPage() {
                     </div>
                   )}
                 </CardContent>
+                )}
               </Card>
             </div>
           </div>

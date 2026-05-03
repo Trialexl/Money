@@ -1304,7 +1304,7 @@ export default function ReportsPage() {
                         </tr>
                       </thead>
                       {visibleMonthlyCashFlowGroups.map((group) => {
-                        const isCollapsed = collapsedMonthlyGroups[group.key] ?? false
+                        const isCollapsed = collapsedMonthlyGroups[group.key] ?? true
 
                         return (
                         <tbody key={group.key}>
@@ -1313,7 +1313,7 @@ export default function ReportsPage() {
                             onClick={() =>
                               setCollapsedMonthlyGroups((current) => ({
                                 ...current,
-                                [group.key]: !(current[group.key] ?? false),
+                                [group.key]: !(current[group.key] ?? true),
                               }))
                             }
                           >

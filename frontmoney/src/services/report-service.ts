@@ -82,9 +82,21 @@ export interface BudgetReportResponse {
 function buildCommonParams(filters?: BaseReportFilters) {
   return {
     ...(filters?.dateFrom ? { date_from: toApiDateTime(filters.dateFrom) } : {}),
-    ...(filters?.dateTo ? { date_to: toApiDateTime(filters.dateTo) } : {}),
+    ...(filters?.dateTo ? { date_to: toApiEndOfDayDateTime(filters.dateTo) } : {}),
     ...(typeof filters?.limitByToday === "boolean" ? { limit_by_today: filters.limitByToday } : {}),
   }
+}
+
+function toApiEndOfDayDateTime(dateInput?: string): string | undefined {
+  if (!dateInput) {
+    return undefined
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    return `${dateInput}T23:59:59.999Z`
+  }
+
+  return dateInput
 }
 
 function mapCashFlowReport(raw: any): CashFlowReportResponse {

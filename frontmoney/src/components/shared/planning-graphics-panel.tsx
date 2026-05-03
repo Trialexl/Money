@@ -19,8 +19,10 @@ interface PlanningGraphicsPanelProps {
   draftStorageKey?: string
   onDraftRowsChange?: (rows: PlanningGraphicDraft[]) => void
   onTotalAmountChange?: (amount: number) => void
+  onTotalAmountInputChange?: (amount: string) => void
   onMonthlyAmountChange?: (amount: number) => void
   onMonthCountChange?: (monthCount: number) => void
+  onStartDateChange?: (date: string) => void
   distributionSource?: {
     totalAmount?: number
     monthlyAmount?: number
@@ -69,8 +71,10 @@ export function PlanningGraphicsPanel({
   draftStorageKey,
   onDraftRowsChange,
   onTotalAmountChange,
+  onTotalAmountInputChange,
   onMonthlyAmountChange,
   onMonthCountChange,
+  onStartDateChange,
   distributionSource,
 }: PlanningGraphicsPanelProps) {
   const [dateStart, setDateStart] = useState(formatDateForInput())
@@ -205,7 +209,9 @@ export function PlanningGraphicsPanel({
 
       const parsedMonthlyAmount = Number.parseFloat(distributionMonthlyAmount)
       if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0) {
-        setDistributionTotalAmount(formatAmountInput(parsedMonthlyAmount * parsedMonths))
+        const nextTotalAmount = formatAmountInput(parsedMonthlyAmount * parsedMonths)
+        setDistributionTotalAmount(nextTotalAmount)
+        onTotalAmountInputChange?.(nextTotalAmount)
       }
     }
   }
@@ -216,8 +222,20 @@ export function PlanningGraphicsPanel({
     const parsedMonthlyAmount = Number.parseFloat(value)
     const parsedMonths = Number.parseInt(distributionMonthCount, 10)
     if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0 && Number.isFinite(parsedMonths) && parsedMonths > 0) {
-      setDistributionTotalAmount(formatAmountInput(parsedMonthlyAmount * parsedMonths))
+      const nextTotalAmount = formatAmountInput(parsedMonthlyAmount * parsedMonths)
+      setDistributionTotalAmount(nextTotalAmount)
+      onTotalAmountInputChange?.(nextTotalAmount)
     }
+  }
+
+  const handleDistributionTotalAmountChange = (value: string) => {
+    setDistributionTotalAmount(value)
+    onTotalAmountInputChange?.(value)
+  }
+
+  const handleDistributionStartDateChange = (value: string) => {
+    setDistributionStartDate(value)
+    onStartDateChange?.(value)
   }
 
   const handleDistributionTotalBlur = () => {
@@ -313,7 +331,7 @@ export function PlanningGraphicsPanel({
                 id={`${kind}-distribution-date`}
                 type="date"
                 value={distributionStartDate}
-                onChange={(event) => setDistributionStartDate(event.target.value)}
+                onChange={(event) => handleDistributionStartDateChange(event.target.value)}
               />
             </div>
             <div className="space-y-2">
@@ -325,7 +343,7 @@ export function PlanningGraphicsPanel({
                 step="0.01"
                 value={distributionTotalAmount}
                 onBlur={handleDistributionTotalBlur}
-                onChange={(event) => setDistributionTotalAmount(event.target.value)}
+                onChange={(event) => handleDistributionTotalAmountChange(event.target.value)}
                 placeholder="0.00"
               />
             </div>
