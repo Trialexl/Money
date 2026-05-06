@@ -79,3 +79,12 @@
 - [x] Open document editing from dashboard/report contexts in a modal or return-preserving flow, so closing an edited receipt/expenditure/transfer keeps the user on the source page with filters intact.
 - [x] Improve Telegram bot expense report formatting: less detailed money icon, compact readable layout, and positive deviation display without a leading minus.
 - [x] Sort every document list by document date descending by default, so the newest receipts, expenditures, transfers, budgets, and auto-payments are shown first instead of old records.
+
+## Backlog: Report, Dashboard, and Document Fixes
+- [x] Fix wallet balance checks in receipt/expenditure/transfer create and edit forms: balances are calculated incorrectly now, so valid documents can be blocked with a negative balance warning.
+- [x] Replace the report month picker with a convenient month range selector; selecting a single month is not enough for planning and comparison.
+- [x] Add the same monthly grouping to the budget report table as in the expenses report, including collapsed-by-default month groups and manual expand/collapse.
+- [x] Reorder the Reports section so Expenses and Budget are first; by default the Expenses report should open for the current year.
+- [x] Add a grand total row at the bottom of every report table, not only subtotals inside groups.
+- [x] Rework dashboard widgets: review what `Свободный остаток` and `Результат месяца` mean, consider replacing them with `Расходы за месяц`, and make click-through open the Expenses report.
+- [x] Investigate why wallet `ВТБ` with zero balance is displayed; zero-balance wallets should stay hidden wherever the product rule says empty wallets are not shown.

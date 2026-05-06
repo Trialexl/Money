@@ -1,5 +1,5 @@
 import { createElement } from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -65,6 +65,10 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@/hooks/use-reference-data", () => ({
   useActiveWalletsQuery: (...args: any[]) => useActiveWalletsQueryMock(...args),
   useWalletBalanceQuery: (...args: any[]) => useWalletBalanceQueryMock(...args),
+}))
+
+vi.mock("@/components/shared/planning-graphics-panel", () => ({
+  PlanningGraphicsPanel: () => null,
 }))
 
 vi.mock("@/services/wallet-service", () => ({
@@ -168,5 +172,39 @@ describe("shared forms", () => {
 
     expect(await screen.findByText("Недостаточно средств. Сейчас на кошельке доступно 100.")).toBeInTheDocument()
     expect(createTransferMock).not.toHaveBeenCalled()
+  })
+
+  it("allows editing a transfer when the current document amount already reduced the source balance", async () => {
+    updateTransferMock.mockResolvedValue({
+      id: "transfer-3",
+    })
+
+    const user = userEvent.setup()
+    render(
+      createElement(TransferForm, {
+        isEdit: true,
+        transfer: {
+          id: "transfer-3",
+          number: "TR-003",
+          date: "2026-03-10",
+          amount: 150,
+          wallet_from: "wallet-1",
+          wallet_to: "wallet-2",
+        },
+      })
+    )
+
+    await user.click(screen.getByRole("button", { name: /Сохранить/ }))
+
+    await waitFor(() => {
+      expect(updateTransferMock).toHaveBeenCalledWith("transfer-3", {
+        amount: 150,
+        date: "2026-03-10",
+        description: undefined,
+        wallet_from: "wallet-1",
+        wallet_to: "wallet-2",
+      })
+    })
+    expect(screen.queryByText(/Недостаточно средств/)).not.toBeInTheDocument()
   })
 })

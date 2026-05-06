@@ -47,6 +47,7 @@ import {
   type DashboardBudgetExpenseBreakdown,
   type DashboardBudgetExpenseItem,
   type DashboardRecentActivity,
+  type DashboardWalletSummary,
 } from "@/services/dashboard-service"
 
 type ActivityFilter = "all" | "receipt" | "expenditure" | "transfer"
@@ -139,10 +140,14 @@ export default function DashboardPage() {
   const currentMonthIncome = overview.month_comparison.current_month.income
   const currentMonthExpense = overview.month_comparison.current_month.expense
   const currentMonthNet = currentMonthIncome - currentMonthExpense
-  const previousMonthNet =
-    overview.month_comparison.previous_month.income - overview.month_comparison.previous_month.expense
-  const freeCash = overview.cash_with_budget
-  const sortedWallets = [...overview.wallets].sort((left, right) => right.balance - left.balance)
+  const previousMonthExpense = overview.month_comparison.previous_month.expense
+  const dashboardMonthStart = formatDateForInput(startOfMonth(selectedDashboardDate))
+  const dashboardMonthEnd = formatDateForInput(endOfMonth(selectedDashboardDate))
+  const monthlyExpensesReportHref = `/reports?tab=expenses&date_from=${dashboardMonthStart}&date_to=${dashboardMonthEnd}`
+  const monthlyCashFlowReportHref = `/reports?tab=cashflow&date_from=${dashboardMonthStart}&date_to=${dashboardMonthEnd}`
+  const sortedWallets: DashboardWalletSummary[] = overview.wallets
+    .filter((wallet: DashboardWalletSummary) => Math.round(wallet.balance) !== 0)
+    .sort((left: DashboardWalletSummary, right: DashboardWalletSummary) => right.balance - left.balance)
   const budgetItems = [...overview.budget_expense.items].sort((left, right) => {
     const leftHasOverrun = left.overrun > 0
     const rightHasOverrun = right.overrun > 0
@@ -272,22 +277,24 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <div className="border-t border-border/60 pt-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Свободный остаток</div>
-                  <div
-                    className={
-                      freeCash >= 0
-                        ? "mt-1 text-lg font-semibold tracking-[-0.04em] text-emerald-600 dark:text-emerald-300 sm:mt-1.5 sm:text-xl"
-                        : "mt-1 text-lg font-semibold tracking-[-0.04em] text-rose-600 dark:text-rose-300 sm:mt-1.5 sm:text-xl"
-                    }
-                  >
-                    {formatCurrency(freeCash)}
+                <Link
+                  href={monthlyExpensesReportHref}
+                  className="block border-t border-border/60 pt-3 transition-colors hover:text-foreground/80"
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Расходы за месяц</div>
+                  <div className="mt-1 text-lg font-semibold tracking-[-0.04em] text-rose-600 dark:text-rose-300 sm:mt-1.5 sm:text-xl">
+                    {formatCurrency(currentMonthExpense)}
                   </div>
-                  <div className="mt-1 text-xs leading-4 text-muted-foreground">С учетом бюджета</div>
-                </div>
+                  <div className="mt-1 text-xs leading-4 text-muted-foreground">
+                    Прошлый: {formatCurrency(previousMonthExpense)}
+                  </div>
+                </Link>
 
-                <div className="border-t border-border/60 pt-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Результат месяца</div>
+                <Link
+                  href={monthlyCashFlowReportHref}
+                  className="block border-t border-border/60 pt-3 transition-colors hover:text-foreground/80"
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Чистый поток месяца</div>
                   <div
                     className={
                       currentMonthNet >= 0
@@ -297,8 +304,8 @@ export default function DashboardPage() {
                   >
                     {formatCurrency(currentMonthNet)}
                   </div>
-                  <div className="mt-1 text-xs leading-4 text-muted-foreground">Прошлый: {formatCurrency(previousMonthNet)}</div>
-                </div>
+                  <div className="mt-1 text-xs leading-4 text-muted-foreground">Открыть поток денег</div>
+                </Link>
             </div>
 
             <div className="hidden min-w-0 rounded-[24px] border border-border/60 bg-background/45 p-4 lg:flex lg:flex-col">

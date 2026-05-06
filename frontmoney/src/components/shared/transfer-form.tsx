@@ -69,6 +69,17 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   const effectiveWalletFromId = walletFromId ?? baseWalletFromId
   const effectiveWalletToId = walletToId ?? baseWalletToId
   const balanceQuery = useWalletBalanceQuery(effectiveWalletFromId)
+  const baseAvailableBalance =
+    typeof balanceQuery.data?.balance === "number" ? balanceQuery.data.balance : null
+  const editSourceWalletAdjustment =
+    isEdit &&
+    transfer &&
+    transfer.wallet_from === effectiveWalletFromId &&
+    typeof transfer.amount === "number"
+      ? transfer.amount
+      : 0
+  const effectiveAvailableBalance =
+    baseAvailableBalance === null ? null : baseAvailableBalance + editSourceWalletAdjustment
 
   const transferMutation = useMutation({
     mutationFn: async () => {
@@ -122,9 +133,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
       return
     }
 
-    const availableBalance = balanceQuery.data?.balance
-    if (typeof availableBalance === "number" && parsedAmount > availableBalance) {
-      setValidationError(`Недостаточно средств. Сейчас на кошельке доступно ${formatCurrency(availableBalance)}.`)
+    if (typeof effectiveAvailableBalance === "number" && parsedAmount > effectiveAvailableBalance) {
+      setValidationError(`Недостаточно средств. Сейчас на кошельке доступно ${formatCurrency(effectiveAvailableBalance)}.`)
       return
     }
 
@@ -259,8 +269,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
                     <div className="text-xs leading-4 text-muted-foreground">
                       {balanceQuery.isLoading
                         ? "Проверяем доступный баланс..."
-                        : typeof balanceQuery.data?.balance === "number"
-                          ? `Доступно: ${formatCurrency(balanceQuery.data.balance)}`
+                        : typeof effectiveAvailableBalance === "number"
+                          ? `Доступно: ${formatCurrency(effectiveAvailableBalance)}`
                           : "Баланс будет показан после выбора кошелька"}
                     </div>
                   </div>

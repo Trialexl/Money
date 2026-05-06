@@ -71,6 +71,16 @@ type BudgetPlanDetailRow = {
   documentHref: string | null
 }
 
+type BudgetPlanningGroup = {
+  key: string
+  label: string
+  plannedAmount: number
+  actualAmount: number
+  balance: number
+  executionPercent: number
+  rows: BudgetPlanningRow[]
+}
+
 type TimelineRow = {
   key: string
   label: string
@@ -188,6 +198,20 @@ function getMonthEndDate(monthValue: string) {
   return formatDateForInput(new Date(year, month, 0))
 }
 
+function getReportTabFromParam(value: string | null): ReportTab {
+  if (value === "expenses" || value === "categories") {
+    return "categories"
+  }
+  if (value === "budget" || value === "cashflow" || value === "wallets") {
+    return value
+  }
+  return "categories"
+}
+
+function getReportTabParam(value: ReportTab) {
+  return value === "categories" ? "expenses" : value
+}
+
 function getBudgetDocumentHref(row: BudgetReportDetail, returnToHref?: string) {
   if (!row.document_id || row.document_type !== "Budget") {
     return null
@@ -217,13 +241,14 @@ export default function ReportsPage() {
   const defaultDateTo = `${currentYear}-12-31`
   const hasExplicitPeriod = searchParams.has("date_from") || searchParams.has("date_to")
   const [timelineMode, setTimelineMode] = useState<TimelineMode>("daily")
-  const [activeTab, setActiveTab] = useState<ReportTab>("cashflow")
+  const [activeTab, setActiveTab] = useState<ReportTab>(getReportTabFromParam(searchParams.get("tab")))
   const [selectedPreset, setSelectedPreset] = useState<RangePreset>(hasExplicitPeriod ? null : "year")
   const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || defaultDateFrom)
   const [dateTo, setDateTo] = useState(searchParams.get("date_to") || defaultDateTo)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
   const [collapsedMonthlyGroups, setCollapsedMonthlyGroups] = useState<Record<string, boolean>>({})
+  const [collapsedBudgetPlanGroups, setCollapsedBudgetPlanGroups] = useState<Record<string, boolean>>({})
   const [selectedMonthlyExpenseItemKey, setSelectedMonthlyExpenseItemKey] = useState<string | null>(null)
   const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
   const [hiddenMonthlyExpenseItemKeys, setHiddenMonthlyExpenseItemKeys] = useState<Record<string, boolean>>({})
@@ -275,6 +300,7 @@ export default function ReportsPage() {
     nextBudgetProjectId = budgetProjectId
   ) => {
     const params = new URLSearchParams(searchParams.toString())
+    params.set("tab", getReportTabParam(activeTab))
     params.set("date_from", nextDateFrom)
     params.set("date_to", nextDateTo)
     params.set("budget_forecast", nextBudgetForecast ? "true" : "false")
@@ -283,6 +309,14 @@ export default function ReportsPage() {
     } else {
       params.delete("budget_project")
     }
+    router.replace(`/reports?${params.toString()}`, { scroll: false })
+  }
+
+  const handleSetActiveTab = (value: string) => {
+    const nextTab = getReportTabFromParam(value)
+    setActiveTab(nextTab)
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("tab", getReportTabParam(nextTab))
     router.replace(`/reports?${params.toString()}`, { scroll: false })
   }
 
@@ -615,6 +649,9 @@ export default function ReportsPage() {
       }
     })
     .filter((group) => group.rows.length > 0)
+  const visibleMonthlyIncomeTotal = visibleMonthlyCashFlowGroups.reduce((sum, group) => sum + group.income, 0)
+  const visibleMonthlyExpenseTotal = visibleMonthlyCashFlowGroups.reduce((sum, group) => sum + group.expense, 0)
+  const visibleMonthlyNetTotal = visibleMonthlyIncomeTotal - visibleMonthlyExpenseTotal
   const monthlyExpenseChartKeys = monthlyExpenseLegendItems
     .filter((item) => !hiddenMonthlyExpenseItemKeySet.has(item.key))
     .filter((item) => (activeSelectedMonthlyExpenseItemKey ? item.key === activeSelectedMonthlyExpenseItemKey : true))
@@ -718,6 +755,33 @@ export default function ReportsPage() {
     }
     return activeSelectedBudgetPlanItemKey ? row.itemKey === activeSelectedBudgetPlanItemKey : true
   })
+  const visibleBudgetPlanningGroupMap = new Map<string, BudgetPlanningGroup>()
+  visibleBudgetPlanningRows.forEach((row) => {
+    const group = visibleBudgetPlanningGroupMap.get(row.monthKey) || {
+      key: row.monthKey,
+      label: row.monthLabel,
+      plannedAmount: 0,
+      actualAmount: 0,
+      balance: 0,
+      executionPercent: 0,
+      rows: [],
+    }
+    group.plannedAmount += row.plannedAmount
+    group.actualAmount += row.actualAmount
+    group.balance = group.plannedAmount - group.actualAmount
+    group.executionPercent =
+      group.plannedAmount > 0 ? (group.actualAmount / group.plannedAmount) * 100 : 0
+    group.rows.push(row)
+    visibleBudgetPlanningGroupMap.set(row.monthKey, group)
+  })
+  const visibleBudgetPlanningGroups = Array.from(visibleBudgetPlanningGroupMap.values()).sort((left, right) =>
+    left.key.localeCompare(right.key)
+  )
+  const visibleBudgetPlannedTotal = visibleBudgetPlanningRows.reduce((sum, row) => sum + row.plannedAmount, 0)
+  const visibleBudgetActualTotal = visibleBudgetPlanningRows.reduce((sum, row) => sum + row.actualAmount, 0)
+  const visibleBudgetBalanceTotal = visibleBudgetPlannedTotal - visibleBudgetActualTotal
+  const visibleBudgetExecutionPercent =
+    visibleBudgetPlannedTotal > 0 ? (visibleBudgetActualTotal / visibleBudgetPlannedTotal) * 100 : 0
   const budgetPlanChartKeys = budgetPlanLegendItems
     .filter((item) => !hiddenBudgetPlanItemKeySet.has(item.key))
     .filter((item) => (activeSelectedBudgetPlanItemKey ? item.key === activeSelectedBudgetPlanItemKey : true))
@@ -761,6 +825,7 @@ export default function ReportsPage() {
     }
     return activeSelectedBudgetPlanItemKey ? row.itemKey === activeSelectedBudgetPlanItemKey : true
   })
+  const visibleBudgetPlanDetailTotal = visibleBudgetPlanDetailRows.reduce((sum, row) => sum + row.amount, 0)
   const budgetPlanExportRows = visibleBudgetPlanningRows.map((row) => ({
     month: row.monthLabel,
     cashFlowItem: row.itemName,
@@ -823,21 +888,21 @@ export default function ReportsPage() {
 
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as ReportTab)}
+        onValueChange={handleSetActiveTab}
         className="space-y-5"
       >
         <TabsList className="grid h-auto grid-cols-2 gap-2 rounded-[18px] bg-muted/60 p-1.5 xl:grid-cols-4">
+          <TabsTrigger value="categories" className="rounded-[14px] py-2.5">
+            Расходы
+          </TabsTrigger>
+          <TabsTrigger value="budget" className="rounded-[14px] py-2.5">
+            Бюджет
+          </TabsTrigger>
           <TabsTrigger value="cashflow" className="rounded-[14px] py-2.5">
             Поток денег
           </TabsTrigger>
           <TabsTrigger value="wallets" className="rounded-[14px] py-2.5">
             Кошельки
-          </TabsTrigger>
-          <TabsTrigger value="categories" className="rounded-[14px] py-2.5">
-            Статьи по месяцам
-          </TabsTrigger>
-          <TabsTrigger value="budget" className="rounded-[14px] py-2.5">
-            План бюджета
           </TabsTrigger>
         </TabsList>
 
@@ -1138,7 +1203,7 @@ export default function ReportsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-[13px] sm:text-sm">
                       <thead>
                         <tr className="border-b text-left text-xs text-muted-foreground">
                           <th className="pb-3">Кошелек</th>
@@ -1157,6 +1222,15 @@ export default function ReportsPage() {
                           </tr>
                         ))}
                       </tbody>
+                      <tfoot>
+                        <tr className="border-t bg-muted/40 text-sm font-semibold">
+                          <td className="py-3">Итого по отчету</td>
+                          <td className={`py-3 text-right ${totalWalletBalance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                            {formatCurrency(totalWalletBalance)}
+                          </td>
+                          <td className="py-3 text-right text-muted-foreground">100%</td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 </CardContent>
@@ -1392,7 +1466,7 @@ export default function ReportsPage() {
                     </div>
                   ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-[13px] sm:text-sm">
                       <thead>
                         <tr className="border-b text-left text-xs text-muted-foreground">
                           <th className="pb-3">Месяц / статья</th>
@@ -1454,6 +1528,20 @@ export default function ReportsPage() {
                           ))}
                         </tbody>
                       )})}
+                      <tfoot>
+                        <tr className="border-t bg-muted/40 text-sm font-semibold">
+                          <td className="py-3">Итого по отчету</td>
+                          <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
+                            {formatCurrency(visibleMonthlyIncomeTotal)}
+                          </td>
+                          <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                            {formatCurrency(visibleMonthlyExpenseTotal)}
+                          </td>
+                          <td className={`py-3 text-right ${visibleMonthlyNetTotal >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                            {formatCurrency(visibleMonthlyNetTotal)}
+                          </td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                   )}
@@ -1707,47 +1795,95 @@ export default function ReportsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {visibleBudgetPlanningRows.length === 0 ? (
+                  {visibleBudgetPlanningGroups.length === 0 ? (
                     <div className="rounded-[18px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
                       Нет видимых строк. Сними отбор или верни скрытые статьи.
                     </div>
                   ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-[13px] sm:text-sm">
                       <thead>
                         <tr className="border-b text-left text-xs text-muted-foreground">
-                          <th className="pb-3">Месяц</th>
-                          <th className="pb-3">Статья</th>
+                          <th className="pb-3">Месяц / статья</th>
                           <th className="pb-3 text-right">План</th>
                           <th className="pb-3 text-right">Факт</th>
                           <th className="pb-3 text-right">Остаток</th>
                           <th className="pb-3 text-right">Исполнение</th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {visibleBudgetPlanningRows.map((row) => (
-                          <tr
-                            key={row.key}
-                            className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40"
-                            onClick={() =>
-                              setSelectedBudgetPlanItemKey((current) =>
-                                current === row.itemKey ? null : row.itemKey
-                              )
-                            }
-                          >
-                            <td className="py-2.5">{row.monthLabel}</td>
-                            <td className="py-2.5 font-medium">{row.itemName}</td>
-                            <td className="py-2.5 text-right">{formatCurrency(row.plannedAmount)}</td>
-                            <td className="py-2.5 text-right text-rose-600 dark:text-rose-300">
-                              {formatCurrency(row.actualAmount)}
-                            </td>
-                            <td className={`py-2.5 text-right ${row.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
-                              {formatCurrency(row.balance)}
-                            </td>
-                            <td className="py-2.5 text-right">{Math.round(row.executionPercent)}%</td>
-                          </tr>
-                        ))}
-                      </tbody>
+                      {visibleBudgetPlanningGroups.map((group) => {
+                        const isCollapsed = collapsedBudgetPlanGroups[group.key] ?? true
+
+                        return (
+                          <tbody key={group.key}>
+                            <tr
+                              className="cursor-pointer border-b border-border bg-muted/40 font-semibold transition-colors hover:bg-muted/60"
+                              onClick={() =>
+                                setCollapsedBudgetPlanGroups((current) => ({
+                                  ...current,
+                                  [group.key]: !(current[group.key] ?? true),
+                                }))
+                              }
+                            >
+                              <td className="py-2.5">
+                                <span className="flex items-center gap-2 text-sm font-semibold">
+                                  {isCollapsed ? (
+                                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                  <span>{group.label}</span>
+                                  <span className="text-xs font-medium text-muted-foreground">
+                                    {group.rows.length} стат.
+                                  </span>
+                                </span>
+                              </td>
+                              <td className="py-2.5 text-right">{formatCurrency(group.plannedAmount)}</td>
+                              <td className="py-2.5 text-right text-rose-600 dark:text-rose-300">
+                                {formatCurrency(group.actualAmount)}
+                              </td>
+                              <td className={`py-2.5 text-right ${group.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                                {formatCurrency(group.balance)}
+                              </td>
+                              <td className="py-2.5 text-right">{Math.round(group.executionPercent)}%</td>
+                            </tr>
+                            {isCollapsed ? null : group.rows.map((row) => (
+                              <tr
+                                key={row.key}
+                                className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40"
+                                onClick={() =>
+                                  setSelectedBudgetPlanItemKey((current) =>
+                                    current === row.itemKey ? null : row.itemKey
+                                  )
+                                }
+                              >
+                                <td className="py-2.5 pl-5 font-medium">{row.itemName}</td>
+                                <td className="py-2.5 text-right">{formatCurrency(row.plannedAmount)}</td>
+                                <td className="py-2.5 text-right text-rose-600 dark:text-rose-300">
+                                  {formatCurrency(row.actualAmount)}
+                                </td>
+                                <td className={`py-2.5 text-right ${row.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                                  {formatCurrency(row.balance)}
+                                </td>
+                                <td className="py-2.5 text-right">{Math.round(row.executionPercent)}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        )
+                      })}
+                      <tfoot>
+                        <tr className="border-t bg-muted/40 text-sm font-semibold">
+                          <td className="py-3">Итого по отчету</td>
+                          <td className="py-3 text-right">{formatCurrency(visibleBudgetPlannedTotal)}</td>
+                          <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                            {formatCurrency(visibleBudgetActualTotal)}
+                          </td>
+                          <td className={`py-3 text-right ${visibleBudgetBalanceTotal >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                            {formatCurrency(visibleBudgetBalanceTotal)}
+                          </td>
+                          <td className="py-3 text-right">{Math.round(visibleBudgetExecutionPercent)}%</td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                   )}
@@ -1762,7 +1898,7 @@ export default function ReportsPage() {
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="w-full text-[13px] sm:text-sm">
                           <thead>
                             <tr className="border-b text-left text-xs text-muted-foreground">
                               <th className="pb-3">Месяц</th>
@@ -1789,6 +1925,14 @@ export default function ReportsPage() {
                               </tr>
                             ))}
                           </tbody>
+                          <tfoot>
+                            <tr className="border-t bg-muted/40 text-sm font-semibold">
+                              <td className="py-3" colSpan={3}>
+                                Итого по строкам
+                              </td>
+                              <td className="py-3 text-right">{formatCurrency(visibleBudgetPlanDetailTotal)}</td>
+                            </tr>
+                          </tfoot>
                         </table>
                       </div>
                     )}
