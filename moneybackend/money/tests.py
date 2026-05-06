@@ -348,6 +348,89 @@ class OneCSyncApiTests(TestCase):
             ],
         )
 
+    def test_onec_sync_create_expenditure_conducts_registers(self):
+        response = self.client.post(
+            '/api/v1/expenditures/',
+            {
+                'amount': '750.00',
+                'date': self.make_dt(6).isoformat(),
+                'wallet': str(self.wallet.id),
+                'cash_flow_item': str(self.item.id),
+                'include_in_budget': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        document_id = response.data['id']
+        self.assertEqual(
+            list(
+                FlowOfFunds.objects.filter(document_id=document_id)
+                .values_list('period', 'amount')
+            ),
+            [(self.make_dt(6), Decimal('-750.00'))],
+        )
+        self.assertEqual(
+            list(
+                BudgetExpense.objects.filter(document_id=document_id)
+                .values_list('period', 'amount')
+            ),
+            [(self.make_dt(6), Decimal('750.00'))],
+        )
+
+    def test_onec_sync_update_expenditure_rebuilds_registers(self):
+        expenditure = Expenditure.objects.create(
+            amount=Decimal('500.00'),
+            wallet=self.wallet,
+            cash_flow_item=self.item,
+            include_in_budget=True,
+            date=self.make_dt(7),
+        )
+
+        response = self.client.patch(
+            f'/api/v1/expenditures/{expenditure.id}/',
+            {
+                'amount': '900.00',
+                'date': self.make_dt(8).isoformat(),
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            list(
+                FlowOfFunds.objects.filter(document_id=expenditure.id)
+                .values_list('period', 'amount')
+            ),
+            [(self.make_dt(8), Decimal('-900.00'))],
+        )
+        self.assertEqual(
+            list(
+                BudgetExpense.objects.filter(document_id=expenditure.id)
+                .values_list('period', 'amount')
+            ),
+            [(self.make_dt(8), Decimal('900.00'))],
+        )
+
+    def test_onec_sync_deleted_expenditure_clears_registers(self):
+        expenditure = Expenditure.objects.create(
+            amount=Decimal('500.00'),
+            wallet=self.wallet,
+            cash_flow_item=self.item,
+            include_in_budget=True,
+            date=self.make_dt(7),
+        )
+
+        response = self.client.patch(
+            f'/api/v1/expenditures/{expenditure.id}/',
+            {'deleted': True},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(FlowOfFunds.objects.filter(document_id=expenditure.id).exists())
+        self.assertFalse(BudgetExpense.objects.filter(document_id=expenditure.id).exists())
+
     def test_onec_sync_can_replace_transfer_graphics_via_document_endpoint(self):
         transfer = Transfer.objects.create(
             amount=Decimal('1000.00'),
@@ -400,6 +483,57 @@ class OneCSyncApiTests(TestCase):
                 (self.make_dt(10), Decimal('400.00')),
                 (self.make_dt(20), Decimal('600.00')),
             ],
+        )
+
+    def test_onec_sync_budget_transfer_requires_cash_flow_item_and_conducts_with_item(self):
+        reserve_wallet = Wallet.objects.create(name='Резервный кошелек для 1С')
+
+        invalid_response = self.client.post(
+            '/api/v1/transfers/',
+            {
+                'amount': '300.00',
+                'date': self.make_dt(9).isoformat(),
+                'wallet_out': str(self.wallet.id),
+                'wallet_in': str(reserve_wallet.id),
+                'include_in_budget': True,
+            },
+            format='json',
+        )
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertIn('cash_flow_item', invalid_response.data)
+
+        valid_response = self.client.post(
+            '/api/v1/transfers/',
+            {
+                'amount': '300.00',
+                'date': self.make_dt(9).isoformat(),
+                'wallet_out': str(self.wallet.id),
+                'wallet_in': str(reserve_wallet.id),
+                'cash_flow_item': str(self.item.id),
+                'include_in_budget': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(valid_response.status_code, 201)
+        document_id = valid_response.data['id']
+        self.assertEqual(
+            list(
+                FlowOfFunds.objects.filter(document_id=document_id)
+                .order_by('amount')
+                .values_list('period', 'amount')
+            ),
+            [
+                (self.make_dt(9), Decimal('-300.00')),
+                (self.make_dt(9), Decimal('300.00')),
+            ],
+        )
+        self.assertEqual(
+            list(
+                BudgetExpense.objects.filter(document_id=document_id)
+                .values_list('period', 'amount')
+            ),
+            [(self.make_dt(9), Decimal('300.00'))],
         )
 
     def test_onec_sync_replace_graphics_ignores_timezone_offset_for_periods(self):
@@ -1869,6 +2003,23 @@ class DashboardOverviewTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.admin_user)
         self.selected_at = self.make_dt(2024, 3, 15)
+
+    def test_wallet_balance_can_be_limited_to_document_date(self):
+        response = self.client.get(
+            f'/api/v1/wallets/{self.visible_wallet.id}/balance/',
+            {'date': '2024-03-02'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['balance'], 1000.0)
+
+    def test_wallet_balance_rejects_invalid_date_filter(self):
+        response = self.client.get(
+            f'/api/v1/wallets/{self.visible_wallet.id}/balance/',
+            {'date': 'not-a-date'},
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_dashboard_overview_matches_1c_style_metrics(self):
         response = self.client.get(
@@ -3483,11 +3634,7 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(third_response.status_code, 201)
         self.assertEqual(third_response.data['status'], 'created')
         self.assertEqual(len(third_response.data['created_objects']), 2)
-        self.assertIn('Создано документов: 2.', third_response.data['reply_text'])
-        self.assertIn('🔴 342.00', third_response.data['reply_text'])
-        self.assertIn('🔴 465.75', third_response.data['reply_text'])
-        self.assertIn('👛 Альфа', third_response.data['reply_text'])
-        self.assertIn('🏷 Продукты', third_response.data['reply_text'])
+        self.assertEqual(third_response.data['reply_text'], 'Документы созданы.')
         self.assertNotIn('0.00 | Без комментария', third_response.data['reply_text'])
         self.assertNotIn('комм.', third_response.data['reply_text'])
         expenditures = list(
@@ -4117,6 +4264,65 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('/bottelegram-bot-token/sendMessage', send_request.full_url)
         self.assertEqual(json.loads(send_request.data.decode('utf-8'))['chat_id'], 701)
 
+    @override_settings(AI_TELEGRAM_BOT_TOKEN='telegram-bot-token')
+    def test_ai_telegram_webhook_sends_expense_report_with_html_parse_mode(self):
+        client = APIClient()
+        current_dt = timezone.make_aware(datetime(2026, 4, 25, 12, 0, 0))
+        month_start = timezone.make_aware(datetime(2026, 4, 1, 0, 0, 0))
+
+        class _FakeResponse:
+            def __init__(self, body):
+                self._body = body
+                self.headers = None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return self._body
+
+        Budget.objects.create(
+            amount=Decimal('1000.00'),
+            cash_flow_item=self.expense_item,
+            type_of_budget=False,
+            date=month_start,
+            date_start=month_start,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('500.00'),
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 10, 12, 0, 0)),
+        )
+
+        send_message_response = _FakeResponse(json.dumps({'ok': True, 'result': {'message_id': 112}}).encode('utf-8'))
+
+        with patch('money.ai_service.timezone.now', return_value=current_dt):
+            with patch('money.views.urlrequest.urlopen', return_value=send_message_response) as mocked_urlopen:
+                response = client.post(
+                    '/api/v1/ai/telegram-webhook/',
+                    {
+                        'update_id': 502,
+                        'message': {
+                            'message_id': 602,
+                            'text': 'расходы апрель',
+                            'chat': {'id': 702},
+                            'from': {'id': 802, 'username': 'trialex'},
+                        },
+                    },
+                    format='json',
+                    HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                )
+
+        self.assertEqual(response.status_code, 200)
+        send_request = mocked_urlopen.call_args.args[0]
+        payload = json.loads(send_request.data.decode('utf-8'))
+        self.assertEqual(payload['parse_mode'], 'HTML')
+        self.assertIn('<pre>', payload['text'])
+
     def test_ai_telegram_webhook_auto_binds_user_by_matching_username(self):
         client = APIClient()
         response = client.post(
@@ -4353,17 +4559,62 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'info')
         self.assertEqual(response.data['intent'], 'get_month_expenses_by_item')
+        self.assertEqual(response.data['reply_parse_mode'], 'HTML')
         self.assertIn('📊 апрель 2026', response.data['reply_text'])
+        self.assertIn('<pre>', response.data['reply_text'])
         self.assertNotIn('⏱', response.data['reply_text'])
         self.assertNotIn('🎯', response.data['reply_text'])
         self.assertNotIn('💸', response.data['reply_text'])
         self.assertNotIn('-46%', response.data['reply_text'])
-        self.assertIn('Продукты — 542 ₽ · 46%', response.data['reply_text'])
-        self.assertIn('Итого — 542 ₽ · 46%', response.data['reply_text'])
+        self.assertIn('Продукты', response.data['reply_text'])
+        self.assertIn('542 ₽', response.data['reply_text'])
+        self.assertIn('54%', response.data['reply_text'])
+        self.assertIn('Σ', response.data['reply_text'])
         self.assertNotIn('842', response.data['reply_text'])
         self.assertEqual(response.data['expense_summary']['total_actual'], '542.00')
         self.assertEqual(response.data['expense_summary']['total_budget'], '1000.00')
         self.assertEqual(response.data['expense_summary']['total_deviation_percent'], '-46%')
+        self.assertEqual(response.data['expense_summary']['total_budget_usage_percent'], '54%')
+
+    def test_ai_telegram_webhook_reports_budget_usage_percent_not_remaining_percent(self):
+        client = APIClient()
+        current_dt = timezone.make_aware(datetime(2026, 4, 25, 12, 0, 0))
+        month_start = timezone.make_aware(datetime(2026, 4, 1, 0, 0, 0))
+
+        Budget.objects.create(
+            amount=Decimal('7000.00'),
+            cash_flow_item=self.expense_item,
+            type_of_budget=False,
+            date=month_start,
+            date_start=month_start,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('5600.00'),
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 10, 12, 0, 0)),
+        )
+
+        with patch('money.ai_service.timezone.now', return_value=current_dt):
+            response = client.post(
+                '/api/v1/ai/telegram-webhook/',
+                {
+                    'update_id': 4318,
+                    'message': {
+                        'message_id': 4319,
+                        'text': 'Расходы апрель',
+                        'chat': {'id': 4320},
+                        'from': {'id': 4321, 'username': 'trialex'},
+                    },
+                },
+                format='json',
+                HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('80%', response.data['reply_text'])
+        self.assertNotIn('20%', response.data['reply_text'])
+        self.assertEqual(response.data['expense_summary']['total_budget_usage_percent'], '80%')
 
     def test_ai_telegram_webhook_reports_requested_month_expenses_by_item(self):
         client = APIClient()
@@ -4424,7 +4675,9 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.data['status'], 'info')
         self.assertEqual(response.data['intent'], 'get_month_expenses_by_item')
         self.assertIn('📊 апрель 2026', response.data['reply_text'])
-        self.assertIn('Продукты — 642 ₽ · 36%', response.data['reply_text'])
+        self.assertIn('Продукты', response.data['reply_text'])
+        self.assertIn('642 ₽', response.data['reply_text'])
+        self.assertIn('64%', response.data['reply_text'])
         self.assertNotIn('999', response.data['reply_text'])
         self.assertEqual(response.data['expense_summary']['period_label'], 'апрель 2026')
         self.assertEqual(response.data['expense_summary']['total_actual'], '642.00')

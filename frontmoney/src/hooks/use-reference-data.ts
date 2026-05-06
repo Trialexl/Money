@@ -64,11 +64,13 @@ export function useWalletsWithBalancesQuery() {
   })
 }
 
-export function useWalletBalanceQuery(walletId: string) {
+export function useWalletBalanceQuery(walletId: string, date?: string) {
+  const balanceDate = date?.trim() || undefined
+
   return useQuery({
-    queryKey: walletId ? queryKeys.wallets.balance(walletId) : ["wallet-balance", "idle"],
+    queryKey: walletId ? queryKeys.wallets.balance(walletId, balanceDate) : ["wallet-balance", "idle"],
     enabled: Boolean(walletId),
-    queryFn: () => WalletService.getWalletBalance(walletId),
+    queryFn: () => WalletService.getWalletBalance(walletId, balanceDate ? { date: balanceDate } : undefined),
   })
 }
 

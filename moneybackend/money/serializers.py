@@ -727,6 +727,7 @@ class AiAssistantResponseSerializer(serializers.Serializer):
     provider = serializers.CharField()
     confidence = serializers.FloatField()
     reply_text = serializers.CharField()
+    reply_parse_mode = serializers.CharField(required=False)
     missing_fields = serializers.ListField(child=serializers.CharField(), required=False)
     missing_fields_by_item = AiAssistantMissingFieldByItemSerializer(many=True, required=False)
     created_object = AiAssistantCreatedObjectSerializer(required=False)

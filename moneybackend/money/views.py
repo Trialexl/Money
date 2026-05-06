@@ -1,6 +1,6 @@
 from calendar import monthrange
 import base64
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 import hashlib
 import json
@@ -23,7 +23,7 @@ from rest_framework.response import Response
 from django.db.models import Sum, Count, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from drf_spectacular.utils import extend_schema
 
 from .ai_service import AiOperationService, FINAL_CONFIRMATION_FIELD
@@ -84,6 +84,27 @@ def _parse_dashboard_selected_at(raw_value, fallback):
     if timezone.is_naive(parsed):
         return timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
+
+
+def _parse_wallet_balance_as_of(raw_value):
+    if not raw_value:
+        return None
+
+    raw_text = str(raw_value)
+    parsed = parse_datetime(raw_text)
+    if parsed is not None:
+        if timezone.is_naive(parsed):
+            return timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    parsed_day = parse_date(raw_text)
+    if parsed_day is None:
+        return None
+
+    return timezone.make_aware(
+        datetime.combine(parsed_day, time.max),
+        timezone.get_current_timezone(),
+    )
 
 
 def _flow_period_totals(date_from, date_to):
@@ -342,15 +363,21 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
     )
     @action(detail=True, methods=['get'])
     def balance(self, request, pk=None):
-        """Получить баланс кошелька на основе регистра движения средств"""
+        """Получить баланс кошелька на основе регистра движения средств."""
         wallet = self.get_object()
-        
-        # Подсчитываем баланс из регистра FlowOfFunds
-        balance = FlowOfFunds.objects.filter(
-            wallet=wallet
-        ).aggregate(
-            total=Sum('amount')
-        )['total'] or 0
+
+        flows = FlowOfFunds.objects.filter(wallet=wallet)
+        balance_date = request.query_params.get('date')
+        if balance_date:
+            as_of = _parse_wallet_balance_as_of(balance_date)
+            if as_of is None:
+                return Response(
+                    {'date': 'Передай дату в формате YYYY-MM-DD или ISO datetime.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            flows = flows.filter(period__lte=as_of)
+
+        balance = flows.aggregate(total=Sum('amount'))['total'] or 0
         
         return Response({
             'wallet_id': str(wallet.id),
@@ -2195,6 +2222,8 @@ class AiAssistantViewSet(viewsets.ViewSet):
             'chat_id': chat_id,
             'text': reply_text,
         }
+        if result.get('reply_parse_mode'):
+            payload['parse_mode'] = result['reply_parse_mode']
         reply_markup = self._telegram_reply_markup(result)
         if reply_markup is not None:
             payload['reply_markup'] = reply_markup

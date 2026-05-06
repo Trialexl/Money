@@ -12,6 +12,7 @@ const {
   createTransferMock,
   updateTransferMock,
   useActiveWalletsQueryMock,
+  useActiveCashFlowItemsQueryMock,
   useWalletBalanceQueryMock,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -22,6 +23,7 @@ const {
   createTransferMock: vi.fn(),
   updateTransferMock: vi.fn(),
   useActiveWalletsQueryMock: vi.fn(),
+  useActiveCashFlowItemsQueryMock: vi.fn(),
   useWalletBalanceQueryMock: vi.fn(),
 }))
 
@@ -64,6 +66,7 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@/hooks/use-reference-data", () => ({
   useActiveWalletsQuery: (...args: any[]) => useActiveWalletsQueryMock(...args),
+  useActiveCashFlowItemsQuery: (...args: any[]) => useActiveCashFlowItemsQueryMock(...args),
   useWalletBalanceQuery: (...args: any[]) => useWalletBalanceQueryMock(...args),
 }))
 
@@ -109,6 +112,18 @@ describe("shared forms", () => {
     useWalletBalanceQueryMock.mockReturnValue({
       data: { balance: 100 },
       isLoading: false,
+    })
+    useActiveCashFlowItemsQueryMock.mockReturnValue({
+      data: [
+        {
+          id: "item-1",
+          name: "Budget item",
+          code: null,
+          deleted: false,
+        },
+      ],
+      isLoading: false,
+      isError: false,
     })
   })
 
@@ -194,6 +209,9 @@ describe("shared forms", () => {
       })
     )
 
+    await waitFor(() => {
+      expect(useWalletBalanceQueryMock).toHaveBeenCalledWith("wallet-1", "2026-03-10")
+    })
     await user.click(screen.getByRole("button", { name: /Сохранить/ }))
 
     await waitFor(() => {
@@ -203,8 +221,73 @@ describe("shared forms", () => {
         description: undefined,
         wallet_from: "wallet-1",
         wallet_to: "wallet-2",
+        cash_flow_item: undefined,
+        include_in_budget: false,
       })
     })
     expect(screen.queryByText(/Недостаточно средств/)).not.toBeInTheDocument()
+  })
+
+  it("does not add back the edited transfer amount outside the selected balance date", async () => {
+    const user = userEvent.setup()
+    render(
+      createElement(TransferForm, {
+        isEdit: true,
+        transfer: {
+          id: "transfer-5",
+          number: "TR-005",
+          date: "2026-03-10",
+          amount: 150,
+          wallet_from: "wallet-1",
+          wallet_to: "wallet-2",
+        },
+      })
+    )
+
+    await user.clear(screen.getByLabelText("Дата перевода"))
+    await user.type(screen.getByLabelText("Дата перевода"), "2026-03-09")
+    await user.click(screen.getByRole("button", { name: /Сохранить/ }))
+
+    expect(await screen.findByText("Недостаточно средств. Сейчас на кошельке доступно 100.")).toBeInTheDocument()
+    expect(updateTransferMock).not.toHaveBeenCalled()
+  })
+
+  it("saves a budget transfer with the selected cash flow item", async () => {
+    updateTransferMock.mockResolvedValue({
+      id: "transfer-4",
+    })
+
+    const user = userEvent.setup()
+    render(
+      createElement(TransferForm, {
+        isEdit: true,
+        transfer: {
+          id: "transfer-4",
+          number: "TR-004",
+          date: "2026-03-10",
+          amount: 50,
+          wallet_from: "wallet-1",
+          wallet_to: "wallet-2",
+          include_in_budget: true,
+          cash_flow_item: "item-1",
+          cash_flow_item_name: "Budget item",
+        },
+      })
+    )
+
+    expect(screen.getByText("Статья движения")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Сохранить/ }))
+
+    await waitFor(() => {
+      expect(updateTransferMock).toHaveBeenCalledWith("transfer-4", {
+        amount: 50,
+        date: "2026-03-10",
+        description: undefined,
+        wallet_from: "wallet-1",
+        wallet_to: "wallet-2",
+        cash_flow_item: "item-1",
+        include_in_budget: true,
+      })
+    })
   })
 })

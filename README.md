@@ -16,6 +16,17 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+## Backup базы
+
+```bash
+./backup-db.sh backup
+./backup-db.sh list
+./backup-db.sh restore backups/postgres/money-postgres-YYYYMMDD-HHMMSS.dump.gz
+./backup-db.sh cleanup 30
+```
+
+Скрипт сохраняет дампы PostgreSQL в `backups/postgres/`, требует явное подтверждение `RESTORE` перед восстановлением и не удаляет Docker volumes.
+
 ## Git
 
 Этот корневой репозиторий создан как отдельный repo для объединённого проекта.

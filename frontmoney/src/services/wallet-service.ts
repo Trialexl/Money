@@ -100,8 +100,10 @@ export const WalletService = {
     await api.delete(`/wallets/${id}/`)
   },
 
-  getWalletBalance: async (id: string) => {
-    const { data } = await api.get<any>(`/wallets/${id}/balance/`)
+  getWalletBalance: async (id: string, options?: { date?: string }) => {
+    const { data } = await api.get<any>(`/wallets/${id}/balance/`, {
+      params: options?.date ? { date: options.date } : undefined,
+    })
 
     return {
       wallet_id: data?.wallet_id ?? id,

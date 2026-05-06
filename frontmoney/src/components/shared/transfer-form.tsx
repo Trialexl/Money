@@ -6,17 +6,18 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRightLeft, Save, X } from "lucide-react"
 
-import { useActiveWalletsQuery, useWalletBalanceQuery } from "@/hooks/use-reference-data"
+import { useActiveCashFlowItemsQuery, useActiveWalletsQuery, useWalletBalanceQuery } from "@/hooks/use-reference-data"
 import { PageHeader } from "@/components/shared/page-header"
 import { PlanningGraphicsPanel } from "@/components/shared/planning-graphics-panel"
-import { Badge } from "@/components/ui/badge"
+import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/searchable-select"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
+import { formatCurrency, formatDateForInput } from "@/lib/formatters"
 import { resolveReturnHref } from "@/lib/return-navigation"
 import { Transfer, TransferService } from "@/services/financial-operations-service"
 import { PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
@@ -26,6 +27,21 @@ interface TransferFormProps {
   isEdit?: boolean
 }
 
+function dateKey(value?: string | null) {
+  return value ? value.slice(0, 10) : ""
+}
+
+function isIncludedInBalanceSnapshot(documentDate?: string | null, snapshotDate?: string | null) {
+  const documentDateKey = dateKey(documentDate)
+  const snapshotDateKey = dateKey(snapshotDate)
+
+  if (!documentDateKey || !snapshotDateKey) {
+    return true
+  }
+
+  return documentDateKey <= snapshotDateKey
+}
+
 export default function TransferForm({ transfer, isEdit = false }: TransferFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -33,6 +49,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   const duplicateId = searchParams.get("duplicate")
   const defaultWalletFromId = searchParams.get("wallet_from") || ""
   const defaultWalletToId = searchParams.get("wallet_to") || ""
+  const defaultCashFlowItemId = searchParams.get("cash_flow_item") || ""
   const returnToHref = searchParams.get("return_to")
   const cancelHref = resolveReturnHref(returnToHref, "/transfers")
   const isDuplicateMode = Boolean(duplicateId) && !isEdit
@@ -42,6 +59,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   const [description, setDescription] = useState("")
   const [walletFromId, setWalletFromId] = useState<string | undefined>(undefined)
   const [walletToId, setWalletToId] = useState<string | undefined>(undefined)
+  const [cashFlowItemId, setCashFlowItemId] = useState<string | undefined>(undefined)
+  const [includeInBudget, setIncludeInBudget] = useState(false)
   const [planningDraftRows, setPlanningDraftRows] = useState<PlanningGraphicDraft[] | null>(isEdit ? null : [])
   const [validationError, setValidationError] = useState<string | null>(null)
 
@@ -51,8 +70,10 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
     setDescription(transfer?.description || "")
     setWalletFromId(undefined)
     setWalletToId(undefined)
+    setCashFlowItemId(undefined)
+    setIncludeInBudget(Boolean(transfer?.include_in_budget))
     setValidationError(null)
-  }, [defaultWalletFromId, defaultWalletToId, isDuplicateMode, transfer])
+  }, [defaultCashFlowItemId, defaultWalletFromId, defaultWalletToId, isDuplicateMode, transfer])
 
   useEffect(() => {
     if (!planningDraftStorageKey) {
@@ -64,18 +85,22 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   }, [isEdit, planningDraftStorageKey])
 
   const walletsQuery = useActiveWalletsQuery()
+  const cashFlowItemsQuery = useActiveCashFlowItemsQuery()
   const baseWalletFromId = transfer?.wallet_from || defaultWalletFromId || ""
   const baseWalletToId = transfer?.wallet_to || defaultWalletToId || ""
+  const baseCashFlowItemId = transfer?.cash_flow_item || defaultCashFlowItemId || ""
   const effectiveWalletFromId = walletFromId ?? baseWalletFromId
   const effectiveWalletToId = walletToId ?? baseWalletToId
-  const balanceQuery = useWalletBalanceQuery(effectiveWalletFromId)
+  const effectiveCashFlowItemId = cashFlowItemId ?? baseCashFlowItemId
+  const balanceQuery = useWalletBalanceQuery(effectiveWalletFromId, date)
   const baseAvailableBalance =
     typeof balanceQuery.data?.balance === "number" ? balanceQuery.data.balance : null
   const editSourceWalletAdjustment =
     isEdit &&
     transfer &&
     transfer.wallet_from === effectiveWalletFromId &&
-    typeof transfer.amount === "number"
+    typeof transfer.amount === "number" &&
+    isIncludedInBalanceSnapshot(transfer.date, date)
       ? transfer.amount
       : 0
   const effectiveAvailableBalance =
@@ -90,6 +115,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
         description: description.trim() || undefined,
         wallet_from: effectiveWalletFromId,
         wallet_to: effectiveWalletToId,
+        cash_flow_item: includeInBudget ? effectiveCashFlowItemId : undefined,
+        include_in_budget: includeInBudget,
       }
 
       if (isEdit && transfer) {
@@ -112,6 +139,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
         queryClient.invalidateQueries({ queryKey: ["transfers"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
         queryClient.invalidateQueries({ queryKey: ["wallets"] }),
+        queryClient.invalidateQueries({ queryKey: ["wallet-balance"] }),
       ])
       router.push(resolveReturnHref(returnToHref, "/transfers", savedTransfer.id || transfer?.id, { resetPage: !isEdit }))
     },
@@ -133,6 +161,11 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
       return
     }
 
+    if (includeInBudget && !effectiveCashFlowItemId) {
+      setValidationError("Для бюджетного перевода нужно указать статью.")
+      return
+    }
+
     if (typeof effectiveAvailableBalance === "number" && parsedAmount > effectiveAvailableBalance) {
       setValidationError(`Недостаточно средств. Сейчас на кошельке доступно ${formatCurrency(effectiveAvailableBalance)}.`)
       return
@@ -144,6 +177,32 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   }
 
   const wallets = walletsQuery.data || []
+  const cashFlowItems = useMemo(() => {
+    const options = [...(cashFlowItemsQuery.data || [])]
+
+    if (effectiveCashFlowItemId && !options.some((item) => item.id === effectiveCashFlowItemId)) {
+      options.push({
+        id: effectiveCashFlowItemId,
+        name: transfer?.cash_flow_item_name || "Загружаем статью",
+        code: null,
+        include_in_budget: null,
+        created_at: "",
+        updated_at: "",
+        deleted: false,
+      })
+    }
+
+    return options.sort((left, right) => (left.name ?? "").localeCompare(right.name ?? "", "ru"))
+  }, [cashFlowItemsQuery.data, effectiveCashFlowItemId, transfer?.cash_flow_item_name])
+  const cashFlowItemOptions: SearchableSelectOption[] = [
+    { value: "unselected", label: "Не выбрано" },
+    ...cashFlowItems.map((item) => ({
+      value: item.id,
+      label: item.name || "Без названия",
+      description: item.code ? `Код ${item.code}` : undefined,
+      keywords: [item.code ?? ""],
+    })),
+  ]
   const walletOptions = useMemo(() => {
     const options = [...wallets]
 
@@ -171,6 +230,9 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
     ? walletOptions.find((wallet) => wallet.id === effectiveWalletToId)?.name || "Загружаем кошелек"
     : "Выбери назначение"
   const parsedAmount = Number.parseFloat(amount)
+  const selectedCashFlowItemLabel = effectiveCashFlowItemId
+    ? cashFlowItems.find((item) => item.id === effectiveCashFlowItemId)?.name || transfer?.cash_flow_item_name || "Загружаем статью"
+    : "Выбери статью"
   const errorMessage =
     validationError ||
     (transferMutation.error as any)?.response?.data?.detail ||
@@ -209,9 +271,9 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
               </div>
             ) : null}
 
-            {walletsQuery.isError ? (
+            {walletsQuery.isError || cashFlowItemsQuery.isError ? (
               <div className="rounded-[18px] border border-destructive/20 bg-destructive/10 px-3 py-3 text-sm leading-5 text-destructive">
-                Не удалось загрузить список кошельков для перевода. Проверь backend API и попробуй обновить страницу.
+                Не удалось загрузить справочники для перевода. Проверь backend API и попробуй обновить страницу.
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-5">
@@ -307,6 +369,46 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
                   </div>
                 </div>
 
+                <div className="space-y-3 rounded-[18px] border border-border/70 bg-background/70 px-3 py-3">
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      id="transfer-budget"
+                      checked={includeInBudget}
+                      onCheckedChange={(value) => setIncludeInBudget(Boolean(value))}
+                      className="mt-1"
+                    />
+                    <div>
+                      <Label htmlFor="transfer-budget" className="cursor-pointer">
+                        Включать в бюджет
+                      </Label>
+                      <p className="mt-1 text-xs leading-4 text-muted-foreground">
+                        Если перевод должен участвовать в бюджете, нужна статья движения.
+                      </p>
+                    </div>
+                  </div>
+
+                  {includeInBudget ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="transfer-cash-flow-item">Статья движения</Label>
+                      {cashFlowItemsQuery.isLoading ? (
+                        <div className="rounded-[16px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
+                          Загружаем статьи...
+                        </div>
+                      ) : (
+                        <SearchableSelect
+                          id="transfer-cash-flow-item"
+                          value={effectiveCashFlowItemId || "unselected"}
+                          onValueChange={(value) => setCashFlowItemId(value === "unselected" ? "" : value)}
+                          options={cashFlowItemOptions}
+                          placeholder={selectedCashFlowItemLabel}
+                          searchPlaceholder="Найти статью по названию или коду"
+                          emptyLabel="Статья не найдена"
+                        />
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="transfer-description">Комментарий</Label>
                   <Textarea
@@ -319,7 +421,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
                 </div>
 
                 <div className="flex flex-wrap gap-3">
-                  <Button type="submit" disabled={transferMutation.isPending || walletsQuery.isLoading || walletsQuery.isError}>
+                  <Button type="submit" disabled={transferMutation.isPending || walletsQuery.isLoading || walletsQuery.isError || cashFlowItemsQuery.isError}>
                     <Save className="h-4 w-4" />
                     {transferMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать перевод и выйти"}
                   </Button>

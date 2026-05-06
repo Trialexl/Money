@@ -70,6 +70,9 @@ export interface Expenditure extends FinancialOperation {
 export interface Transfer extends FinancialOperation {
   wallet_from: string
   wallet_to: string
+  cash_flow_item?: string
+  include_in_budget?: boolean
+  cash_flow_item_name?: string
 }
 
 export type PageSizeOption = 20 | 50 | 100
@@ -213,6 +216,9 @@ function mapTransfer(raw: any): Transfer {
     graphic_contract: raw.graphic_contract ?? null,
     wallet_from: fromApiRelationId(raw.wallet_out),
     wallet_to: fromApiRelationId(raw.wallet_in),
+    cash_flow_item: fromApiRelationId(raw.cash_flow_item ?? raw.cash_flow_item_id) || undefined,
+    include_in_budget: !!raw.include_in_budget,
+    cash_flow_item_name: fromApiRelationName(raw.cash_flow_item, raw.cash_flow_item_name),
     deleted: raw.deleted,
   }
 }
@@ -435,6 +441,8 @@ export const TransferService = {
       comment: data.description,
       wallet_out: data.wallet_from,
       wallet_in: data.wallet_to,
+      cash_flow_item: data.cash_flow_item || null,
+      include_in_budget: !!data.include_in_budget,
     }
     const response = await api.post<any>("/transfers/", payload)
     return TransferService.getTransfer(response.data.id)
@@ -448,6 +456,8 @@ export const TransferService = {
       comment: data.description,
       wallet_out: data.wallet_from,
       wallet_in: data.wallet_to,
+      cash_flow_item: data.cash_flow_item || null,
+      include_in_budget: !!data.include_in_budget,
     }
     await api.patch<any>(`/transfers/${id}/`, payload)
     return TransferService.getTransfer(id)

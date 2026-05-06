@@ -8,7 +8,7 @@ export const queryKeys = {
     withBalances: ["wallets", "with-balances"] as const,
     detail: (id: string) => ["wallet", id] as const,
     duplicate: (id: string) => ["wallet-duplicate", id] as const,
-    balance: (id: string) => ["wallet-balance", id] as const,
+    balance: (id: string, date?: string) => ["wallet-balance", id, date ?? "current"] as const,
   },
   projects: {
     all: ["projects"] as const,

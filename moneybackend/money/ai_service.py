@@ -1,4 +1,5 @@
 import base64
+import html
 import json
 import mimetypes
 import re
@@ -350,6 +351,15 @@ def _format_deviation_percent_for_reply(value):
     if not value:
         return None
     return str(value).strip().lstrip('+-')
+
+
+def _format_budget_usage_percent(*, actual, budget):
+    actual_amount = _parse_amount(actual) or ZERO_AMOUNT
+    budget_amount = _parse_amount(budget)
+    if budget_amount is None or budget_amount <= ZERO_AMOUNT:
+        return None
+    percent = (actual_amount / budget_amount * Decimal('100')).quantize(Decimal('1'))
+    return f'{percent:.0f}%'
 
 
 def _detect_month_expenses_period(text, *, at_time=None):
@@ -1254,6 +1264,7 @@ def _month_expenses_by_item(*, at_time=None, month_start=None):
             total_budget += planned
         deviation = actual - planned if planned is not None else None
         deviation_percent = _format_budget_deviation_percent(actual=actual, budget=planned)
+        budget_usage_percent = _format_budget_usage_percent(actual=actual, budget=planned)
         rows.append({
             'cash_flow_item_id': row['cash_flow_item_id'],
             'cash_flow_item_name': row['cash_flow_item_name'],
@@ -1261,6 +1272,7 @@ def _month_expenses_by_item(*, at_time=None, month_start=None):
             'budget': _serialize_decimal(planned) if planned is not None and planned > ZERO_AMOUNT else None,
             'deviation': _serialize_decimal(deviation) if deviation is not None else None,
             'deviation_percent': deviation_percent,
+            'budget_usage_percent': budget_usage_percent,
             'overrun': _serialize_decimal(max(deviation, ZERO_AMOUNT)) if deviation is not None else None,
             'remaining': _serialize_decimal(max(planned - actual, ZERO_AMOUNT)) if planned is not None else None,
         })
@@ -1268,6 +1280,7 @@ def _month_expenses_by_item(*, at_time=None, month_start=None):
     rows.sort(key=lambda item: (-Decimal(item['actual']), item['cash_flow_item_name']))
     total_deviation = total_actual - total_budget if total_budget > ZERO_AMOUNT else None
     total_deviation_percent = _format_budget_deviation_percent(actual=total_actual, budget=total_budget)
+    total_budget_usage_percent = _format_budget_usage_percent(actual=total_actual, budget=total_budget)
     return {
         'period_start': month_start.isoformat(),
         'period_end': next_month_start.isoformat(),
@@ -1279,6 +1292,7 @@ def _month_expenses_by_item(*, at_time=None, month_start=None):
         'total_budget': _serialize_decimal(total_budget) if total_budget > ZERO_AMOUNT else None,
         'total_deviation': _serialize_decimal(total_deviation) if total_deviation is not None else None,
         'total_deviation_percent': total_deviation_percent,
+        'total_budget_usage_percent': total_budget_usage_percent,
         'total_overrun': _serialize_decimal(max(total_deviation, ZERO_AMOUNT)) if total_deviation is not None else None,
         'total_remaining': _serialize_decimal(max(total_budget - total_actual, ZERO_AMOUNT)) if total_deviation is not None else None,
     }
@@ -1885,18 +1899,7 @@ class AiOperationService:
         }
 
     def _build_batch_created_reply(self, created_results):
-        count = len(created_results)
-        lines = [f'Создано документов: {count}.']
-        preview_lines = []
-        for result in created_results[:10]:
-            preview = result.get('preview') or self._build_preview_for_item(result.get('parsed') or {})
-            amount = preview.get('amount') or '0.00'
-            comment = preview.get('comment') or 'Без комментария'
-            preview_lines.append(self._build_final_confirmation_line(preview))
-        lines.extend(preview_lines)
-        if count > len(preview_lines):
-            lines.append(f'И еще {count - len(preview_lines)} документ(ов).')
-        return '\n'.join(lines)
+        return 'Документы созданы.'
 
     def _build_batch_confirmation_reply(self, count):
         return f'Недостаточно данных для автоматического создания {count} документов.'
@@ -2143,6 +2146,7 @@ class AiOperationService:
                 'provider': provider_name,
                 'confidence': normalized['confidence'],
                 'reply_text': self._build_month_expenses_by_item_reply(summary),
+                'reply_parse_mode': 'HTML',
                 'expense_summary': summary,
                 'parsed': normalized,
             }
@@ -2774,25 +2778,24 @@ class AiOperationService:
         if not rows:
             return f'Расходов за {summary.get("period_label", "текущий месяц")} по статьям не найдено.'
 
-        lines = [f'📊 {summary["period_label"]}']
+        lines = [f'📊 {html.escape(summary["period_label"])}']
         visible_rows = rows[:15]
+        table_lines = ['N  Статья             Факт      📊']
         for index, row in enumerate(visible_rows, start=1):
-            line = f'{index}. {row["cash_flow_item_name"]} — {_format_compact_money(row["actual"])}'
-            if row.get('budget'):
-                deviation_percent = _format_deviation_percent_for_reply(row.get('deviation_percent'))
-                if deviation_percent:
-                    line += f' · {deviation_percent}'
-            lines.append(line)
+            item_name = (row.get('cash_flow_item_name') or 'Без статьи')[:18]
+            usage_percent = row.get('budget_usage_percent') or ''
+            table_lines.append(
+                f'{index:<2} {item_name:<18} {_format_compact_money(row["actual"]):>10} {usage_percent:>4}'
+            )
 
         if len(rows) > len(visible_rows):
-            lines.append(f'И еще {len(rows) - len(visible_rows)} статей.')
+            table_lines.append(f'+{len(rows) - len(visible_rows)} статей')
 
-        total_line = f'Итого — {_format_compact_money(summary["total_actual"])}'
-        if summary.get('total_budget'):
-            total_deviation_percent = _format_deviation_percent_for_reply(summary.get('total_deviation_percent'))
-            if total_deviation_percent:
-                total_line += f' · {total_deviation_percent}'
-        lines.append(total_line)
+        total_usage_percent = summary.get('total_budget_usage_percent') or ''
+        table_lines.append(
+            f'Σ  {"Итого":<18} {_format_compact_money(summary["total_actual"]):>10} {total_usage_percent:>4}'
+        )
+        lines.append(f'<pre>{html.escape(chr(10).join(table_lines))}</pre>')
         return '\n'.join(lines)
 
     def _build_confirmation_reply(self, reply_text, options, missing_fields=None, missing_fields_by_item=None):
