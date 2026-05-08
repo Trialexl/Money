@@ -2,10 +2,12 @@
 
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowDownRight, ArrowUpRight, PencilLine, Wallet2 } from "lucide-react"
 
 import { EmptyState } from "@/components/shared/empty-state"
+import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
 import { StatCard } from "@/components/shared/stat-card"
@@ -18,6 +20,7 @@ import { WalletService, type WalletRecentOperation } from "@/services/wallet-ser
 export default function WalletDetailPage() {
   const params = useParams()
   const idParam = Array.isArray((params as any)?.id) ? (params as any).id[0] : (params as any)?.id
+  const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
 
   const walletQuery = useQuery({
     queryKey: ["wallet", idParam],
@@ -133,7 +136,12 @@ export default function WalletDetailPage() {
           <CardContent className="space-y-3">
             {summary.recent_operations.length > 0 ? (
               summary.recent_operations.map((operation: WalletRecentOperation) => (
-                <div key={`${operation.kind}-${operation.id}`} className="flex items-start justify-between gap-4 rounded-[22px] border border-border/60 bg-background/70 px-4 py-3">
+                <button
+                  key={`${operation.kind}-${operation.id}`}
+                  type="button"
+                  onClick={() => setEditingDocument({ kind: operation.kind === "receipt" ? "receipt" : "expenditure", id: operation.id })}
+                  className="flex w-full items-start justify-between gap-4 rounded-[22px] border border-border/60 bg-background/70 px-4 py-3 text-left transition-colors hover:bg-muted/50"
+                >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Badge variant={operation.kind === "receipt" ? "success" : "outline"}>
@@ -151,7 +159,7 @@ export default function WalletDetailPage() {
                       {formatCurrency(operation.amount)}
                     </div>
                   </div>
-                </div>
+                </button>
               ))
             ) : (
               <div className="rounded-[22px] border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
@@ -161,6 +169,15 @@ export default function WalletDetailPage() {
           </CardContent>
         </Card>
       </div>
+      <DocumentEditDialog
+        document={editingDocument}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDocument(null)
+          }
+        }}
+        onSaved={() => walletQuery.refetch()}
+      />
     </div>
   )
 }

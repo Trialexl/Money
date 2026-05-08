@@ -290,4 +290,40 @@ describe("shared forms", () => {
       })
     })
   })
+
+  it("saves transfer amount from an arithmetic expression", async () => {
+    createTransferMock.mockResolvedValue({
+      id: "transfer-6",
+    })
+    useWalletBalanceQueryMock.mockReturnValue({
+      data: { balance: 3000 },
+      isLoading: false,
+    })
+
+    const user = userEvent.setup()
+    render(
+      createElement(TransferForm, {
+        transfer: {
+          id: "transfer-6",
+          number: "TR-006",
+          date: "2026-03-10",
+          amount: 50,
+          wallet_from: "wallet-1",
+          wallet_to: "wallet-2",
+        },
+      })
+    )
+
+    await user.clear(screen.getByLabelText("Сумма"))
+    await user.type(screen.getByLabelText("Сумма"), "6000-4000")
+    await user.click(screen.getByRole("button", { name: /Создать перевод/ }))
+
+    await waitFor(() => {
+      expect(createTransferMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 2000,
+        })
+      )
+    })
+  })
 })

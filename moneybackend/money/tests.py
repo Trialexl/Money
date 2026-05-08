@@ -4683,6 +4683,94 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(response.data['expense_summary']['total_actual'], '642.00')
         self.assertEqual(response.data['expense_summary']['total_budget'], '1000.00')
 
+    def test_ai_telegram_webhook_reports_month_range_expenses_by_item(self):
+        client = APIClient()
+        current_dt = timezone.make_aware(datetime(2026, 5, 20, 12, 0, 0))
+        april_start = timezone.make_aware(datetime(2026, 4, 1, 0, 0, 0))
+        may_start = timezone.make_aware(datetime(2026, 5, 1, 0, 0, 0))
+
+        Budget.objects.create(
+            amount=Decimal('1000.00'),
+            cash_flow_item=self.expense_item,
+            type_of_budget=False,
+            date=april_start,
+            date_start=april_start,
+        )
+        Budget.objects.create(
+            amount=Decimal('500.00'),
+            cash_flow_item=self.expense_item,
+            type_of_budget=False,
+            date=may_start,
+            date_start=may_start,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('342.00'),
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 10, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('465.75'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 4, 20, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('100.49'),
+            wallet=self.wallet_alpha,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 5, 5, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('200.40'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 5, 10, 12, 0, 0)),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('900.00'),
+            wallet=self.wallet_sber,
+            cash_flow_item=self.expense_item,
+            date=timezone.make_aware(datetime(2026, 5, 25, 12, 0, 0)),
+        )
+
+        for text in ('расходы апрель май', 'апрель-май расходы'):
+            with self.subTest(text=text):
+                with patch('money.ai_service.timezone.now', return_value=current_dt):
+                    response = client.post(
+                        '/api/v1/ai/telegram-webhook/',
+                        {
+                            'update_id': 4322,
+                            'message': {
+                                'message_id': 4323,
+                                'text': text,
+                                'chat': {'id': 4324},
+                                'from': {'id': 4325, 'username': 'trialex'},
+                            },
+                        },
+                        format='json',
+                        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+                    )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data['status'], 'info')
+                self.assertEqual(response.data['intent'], 'get_month_expenses_by_item')
+                self.assertIn('📊 апрель-май 2026', response.data['reply_text'])
+                self.assertIn('апрель 2026', response.data['reply_text'])
+                self.assertIn('май 2026', response.data['reply_text'])
+                self.assertIn('808 ₽', response.data['reply_text'])
+                self.assertIn('301 ₽', response.data['reply_text'])
+                self.assertNotIn('900 ₽', response.data['reply_text'])
+                self.assertNotIn('.75', response.data['reply_text'])
+                self.assertNotIn('.89', response.data['reply_text'])
+                self.assertEqual(response.data['expense_summary']['period_label'], 'апрель-май 2026')
+                self.assertEqual(response.data['expense_summary']['period_month_from'], '2026-04')
+                self.assertEqual(response.data['expense_summary']['period_month_to'], '2026-05')
+                self.assertEqual(response.data['expense_summary']['total_actual'], '1108.64')
+                self.assertEqual(response.data['expense_summary']['total_budget'], '1500.00')
+                self.assertEqual(response.data['expense_summary']['total_budget_usage_percent'], '74%')
+                self.assertEqual(len(response.data['expense_summary']['months']), 2)
+
     def test_ai_telegram_webhook_can_select_option_by_number(self):
         client = APIClient()
         first_response = client.post(

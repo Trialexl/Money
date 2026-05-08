@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRightLeft, Copy, PencilLine, Search, SlidersHorizontal, Trash2, Wallet2, X } from "lucide-react"
 
 import { CatalogPaginationControls } from "@/components/shared/catalog-pagination-controls"
+import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
@@ -75,12 +76,20 @@ export default function TransferCatalog() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [page, setPage] = useState(() => parsePage(searchParams.get("page")))
   const [pageSize, setPageSize] = useState<PageSizeOption>(() => parsePageSize(searchParams.get("page_size")))
+  const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
   const deferredSearch = useDeferredValue(searchTerm)
   const normalizedSearch = deferredSearch.trim()
   const walletsQuery = useActiveWalletsQuery()
   const highlightedTransferId = searchParams.get("highlight") || ""
   const returnToHref = buildReturnToHref(pathname, searchParams)
   const createHref = withReturnToHref("/transfers/new", returnToHref)
+
+  const handleDocumentSaved = (document: { kind: EditableDocumentKind; id: string }) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("highlight", document.id)
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }
 
   useEffect(() => {
     if (!didMountFilterReset.current) {
@@ -504,14 +513,15 @@ export default function TransferCatalog() {
                     </div>
 
                     <div className="flex flex-wrap gap-1">
-                      <Button asChild variant="ghost" size="icon">
-                        <Link
-                          href={withReturnToHref(`/transfers/${transfer.id}/edit`, returnToHref)}
-                          aria-label="Редактировать"
-                          title="Редактировать"
-                        >
-                          <PencilLine className="h-4 w-4" />
-                        </Link>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setEditingDocument({ kind: "transfer", id: transfer.id })}
+                        aria-label="Редактировать"
+                        title="Редактировать"
+                      >
+                        <PencilLine className="h-4 w-4" />
                       </Button>
                       <Button asChild variant="ghost" size="icon">
                         <Link
@@ -575,14 +585,15 @@ export default function TransferCatalog() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex justify-end gap-1">
-                            <Button asChild variant="ghost" size="icon">
-                              <Link
-                                href={withReturnToHref(`/transfers/${transfer.id}/edit`, returnToHref)}
-                                aria-label="Редактировать"
-                                title="Редактировать"
-                              >
-                                <PencilLine className="h-4 w-4" />
-                              </Link>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setEditingDocument({ kind: "transfer", id: transfer.id })}
+                              aria-label="Редактировать"
+                              title="Редактировать"
+                            >
+                              <PencilLine className="h-4 w-4" />
                             </Button>
                             <Button asChild variant="ghost" size="icon">
                               <Link
@@ -620,6 +631,15 @@ export default function TransferCatalog() {
           </CardContent>
         </Card>
       )}
+      <DocumentEditDialog
+        document={editingDocument}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDocument(null)
+          }
+        }}
+        onSaved={handleDocumentSaved}
+      />
     </div>
   )
 }

@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
+import { normalizeAmountExpressionInput, parseAmountExpression } from "@/lib/amount-expression"
 import { formatDateForInput } from "@/lib/formatters"
 import { resolveReturnHref } from "@/lib/return-navigation"
 import { Budget, BudgetService } from "@/services/financial-operations-service"
@@ -24,6 +25,9 @@ import { PlanningGraphicDraft, PlanningService } from "@/services/planning-servi
 interface BudgetFormProps {
   budget?: Budget
   isEdit?: boolean
+  embedded?: boolean
+  onCancel?: () => void
+  onSaved?: (budget: Budget) => void
 }
 
 function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
@@ -35,7 +39,7 @@ function toCashFlowItemOption(item: { id: string; name?: string | null; code?: s
   }
 }
 
-export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) {
+export default function BudgetForm({ budget, isEdit = false, embedded = false, onCancel, onSaved }: BudgetFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
@@ -86,10 +90,10 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
   const effectiveCashFlowItemId = cashFlowItemId ?? baseCashFlowItemId
 
   const buildDefaultPlanningRows = () => {
-    const parsedAmount = Number.parseFloat(amount)
+    const parsedAmount = parseAmountExpression(amount)
     const fallbackStartDate = dateStart || date
 
-    if (!fallbackStartDate || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (!fallbackStartDate || parsedAmount === null || parsedAmount <= 0) {
       return [] as PlanningGraphicDraft[]
     }
 
@@ -104,7 +108,7 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
 
   const budgetMutation = useMutation({
     mutationFn: async () => {
-      const parsedAmount = Number.parseFloat(amount)
+      const parsedAmount = parseAmountExpression(amount) ?? 0
       const parsedAmountMonth = amountMonth ? Number.parseInt(amountMonth, 10) : undefined
       const payload: Partial<Budget> = {
         type,
@@ -141,6 +145,11 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
         queryClient.invalidateQueries({ queryKey: ["budgets"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
       ])
+      if (onSaved) {
+        onSaved(savedBudget)
+        return
+      }
+
       router.push(resolveReturnHref(returnToHref, "/budgets", savedBudget.id || budget?.id, { resetPage: !isEdit }))
     },
   })
@@ -149,10 +158,10 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
     event.preventDefault()
     setValidationError(null)
 
-    const parsedAmount = Number.parseFloat(amount)
+    const parsedAmount = parseAmountExpression(amount)
     const parsedAmountMonth = amountMonth ? Number.parseInt(amountMonth, 10) : null
 
-    if (!effectiveCashFlowItemId || !date || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (!effectiveCashFlowItemId || !date || parsedAmount === null || parsedAmount <= 0) {
       setValidationError("Укажи тип, дату, статью и общую сумму в расписании. Сумма должна быть больше нуля.")
       return
     }
@@ -161,6 +170,8 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
       setValidationError("Количество месяцев должно быть положительным числом.")
       return
     }
+
+    setAmount(String(parsedAmount))
 
     try {
       await budgetMutation.mutateAsync()
@@ -200,7 +211,8 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      {embedded ? null : (
+        <PageHeader
         eyebrow="Планирование"
         title={isEdit ? "Редактирование бюджета" : "Новый бюджет"}
         description={
@@ -215,7 +227,8 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
             </Link>
           </Button>
         }
-      />
+        />
+      )}
 
       <div>
         <Card>
@@ -304,11 +317,17 @@ export default function BudgetForm({ budget, isEdit = false }: BudgetFormProps) 
                     <Save className="h-4 w-4" />
                     {budgetMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать бюджет и выйти"}
                   </Button>
-                  <Button asChild variant="outline" size="icon">
-                    <Link href={cancelHref} aria-label="Отмена" title="Отмена">
+                  {embedded ? (
+                    <Button type="button" variant="outline" size="icon" onClick={onCancel} aria-label="Отмена" title="Отмена">
                       <X className="h-4 w-4" />
-                    </Link>
-                  </Button>
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline" size="icon">
+                      <Link href={cancelHref} aria-label="Отмена" title="Отмена">
+                        <X className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </form>
             )}

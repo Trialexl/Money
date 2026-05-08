@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { normalizeAmountExpressionInput, parseAmountExpression } from "@/lib/amount-expression"
 import { formatCurrency, formatDateForInput } from "@/lib/formatters"
 import { AutoPayment, AutoPaymentService } from "@/services/financial-operations-service"
 import { PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
@@ -24,6 +25,9 @@ import { PlanningGraphicDraft, PlanningService } from "@/services/planning-servi
 interface AutoPaymentFormProps {
   autoPayment?: AutoPayment
   isEdit?: boolean
+  embedded?: boolean
+  onCancel?: () => void
+  onSaved?: (autoPayment: AutoPayment) => void
 }
 
 function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
@@ -35,7 +39,7 @@ function toCashFlowItemOption(item: { id: string; name?: string | null; code?: s
   }
 }
 
-export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPaymentFormProps) {
+export default function AutoPaymentForm({ autoPayment, isEdit = false, embedded = false, onCancel, onSaved }: AutoPaymentFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
@@ -94,7 +98,7 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
 
   const autoPaymentMutation = useMutation({
     mutationFn: async () => {
-      const parsedAmount = Number.parseFloat(amount)
+      const parsedAmount = parseAmountExpression(amount) ?? 0
       const parsedAmountMonth = Number.parseInt(amountMonth, 10)
       const payload: Partial<AutoPayment> = {
         amount: parsedAmount,
@@ -127,6 +131,11 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
         queryClient.invalidateQueries({ queryKey: ["auto-payments"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
       ])
+      if (onSaved) {
+        onSaved(savedAutoPayment)
+        return
+      }
+
       router.push("/auto-payments")
     },
   })
@@ -135,10 +144,10 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
     event.preventDefault()
     setValidationError(null)
 
-    const parsedAmount = Number.parseFloat(amount)
+    const parsedAmount = parseAmountExpression(amount)
     const parsedAmountMonth = Number.parseInt(amountMonth, 10)
 
-    if (!effectiveWalletFromId || !dateStart || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (!effectiveWalletFromId || !dateStart || parsedAmount === null || parsedAmount <= 0) {
       setValidationError("Укажи источник, следующую дату и сумму. Сумма должна быть больше нуля.")
       return
     }
@@ -162,6 +171,8 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
       setValidationError("Кошелек отправления и кошелек назначения должны отличаться.")
       return
     }
+
+    setAmount(String(parsedAmount))
 
     try {
       await autoPaymentMutation.mutateAsync()
@@ -206,8 +217,8 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
       },
     ]
   }, [effectiveCashFlowItemId, cashFlowItems])
-  const parsedAmount = Number.parseFloat(amount)
-  const hasAmount = !Number.isNaN(parsedAmount) && parsedAmount > 0
+  const parsedAmount = parseAmountExpression(amount)
+  const hasAmount = parsedAmount !== null && parsedAmount > 0
   const parsedAmountMonth = Number.parseInt(amountMonth, 10)
   const hasAmountMonth = !Number.isNaN(parsedAmountMonth) && parsedAmountMonth > 0
   const destinationWallets = walletOptions.filter((wallet) => wallet.id !== effectiveWalletFromId)
@@ -229,7 +240,8 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      {embedded ? null : (
+        <PageHeader
         eyebrow="Регулярные правила"
         title={isEdit ? "Редактирование автоплатежа" : "Новый автоплатеж"}
         description={
@@ -244,7 +256,8 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
             </Link>
           </Button>
         }
-      />
+        />
+      )}
 
       <div>
         <Card>
@@ -294,11 +307,11 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
                     <Label htmlFor="autopayment-amount">Сумма</Label>
                     <Input
                       id="autopayment-amount"
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={amount}
                       onChange={(event) => setAmount(event.target.value)}
+                      onBlur={() => setAmount((current) => normalizeAmountExpressionInput(current))}
                       placeholder="0.00"
                       required
                     />
@@ -412,11 +425,17 @@ export default function AutoPaymentForm({ autoPayment, isEdit = false }: AutoPay
                     <Save className="h-4 w-4" />
                     {autoPaymentMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать автоплатеж и выйти"}
                   </Button>
-                  <Button asChild variant="outline" size="icon">
-                    <Link href="/auto-payments" aria-label="Отмена" title="Отмена">
+                  {embedded ? (
+                    <Button type="button" variant="outline" size="icon" onClick={onCancel} aria-label="Отмена" title="Отмена">
                       <X className="h-4 w-4" />
-                    </Link>
-                  </Button>
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline" size="icon">
+                      <Link href="/auto-payments" aria-label="Отмена" title="Отмена">
+                        <X className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </form>
             )}

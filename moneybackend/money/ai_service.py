@@ -5,7 +5,7 @@ import mimetypes
 import re
 import uuid
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib import error, request
 
 from django.conf import settings
@@ -281,7 +281,8 @@ def _detect_month_expenses_by_item_intent(text):
     if not normalized:
         return None
 
-    period_month = _detect_month_expenses_period(text)
+    period_range = _detect_month_expenses_period_range(text)
+    period_month = period_range.get('period_month') if period_range else None
     has_expense_word = any(
         token in normalized
         for token in (
@@ -312,6 +313,8 @@ def _detect_month_expenses_by_item_intent(text):
             'intent': INTENT_GET_MONTH_EXPENSES_BY_ITEM,
             'confidence': 0.98,
             'period_month': period_month,
+            'period_month_from': period_range.get('period_month_from') if period_range else None,
+            'period_month_to': period_range.get('period_month_to') if period_range else None,
             'comment': text,
         }
 
@@ -335,6 +338,14 @@ def _format_compact_money(value):
     if amount == amount.to_integral_value():
         return f'{int(amount):,}'.replace(',', ' ') + ' ₽'
     return f'{amount:,.2f}'.replace(',', ' ') + ' ₽'
+
+
+def _format_compact_money_whole(value):
+    amount = _parse_amount(value)
+    if amount is None:
+        return '0 ₽'
+    amount = amount.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    return f'{int(amount):,}'.replace(',', ' ') + ' ₽'
 
 
 def _format_budget_deviation_percent(*, actual, budget):
@@ -362,7 +373,7 @@ def _format_budget_usage_percent(*, actual, budget):
     return f'{percent:.0f}%'
 
 
-def _detect_month_expenses_period(text, *, at_time=None):
+def _detect_month_expenses_period_range(text, *, at_time=None):
     normalized = _normalize_text(text)
     if not normalized:
         return None
@@ -373,18 +384,61 @@ def _detect_month_expenses_period(text, *, at_time=None):
 
     if re.search(r'\b(прошл|предыдущ)\w*\s+месяц\w*\b', normalized):
         if current_month == 1:
-            return f'{current_year - 1}-12'
-        return f'{current_year}-{current_month - 1:02d}'
+            period_month = f'{current_year - 1}-12'
+        else:
+            period_month = f'{current_year}-{current_month - 1:02d}'
+        return {
+            'period_month': period_month,
+            'period_month_from': period_month,
+            'period_month_to': period_month,
+        }
 
     if re.search(r'\b(текущ|эт|нынешн)\w*\s+месяц\w*\b', normalized):
-        return f'{current_year}-{current_month:02d}'
+        period_month = f'{current_year}-{current_month:02d}'
+        return {
+            'period_month': period_month,
+            'period_month_from': period_month,
+            'period_month_to': period_month,
+        }
 
     year_match = re.search(r'\b(19\d{2}|20\d{2})\b', normalized)
     year = int(year_match.group(1)) if year_match else current_year
+    month_matches = []
     for month_name, month_number in sorted(MONTH_NAME_TO_NUMBER.items(), key=lambda item: len(item[0]), reverse=True):
         pattern = rf'(?<![0-9a-zа-я]){re.escape(month_name)}(?![0-9a-zа-я])'
-        if re.search(pattern, normalized):
-            return f'{year}-{month_number:02d}'
+        for match in re.finditer(pattern, normalized):
+            month_matches.append({
+                'start': match.start(),
+                'end': match.end(),
+                'month': month_number,
+            })
+
+    if not month_matches:
+        return None
+
+    deduplicated = {}
+    for month_match in month_matches:
+        deduplicated[(month_match['start'], month_match['end'])] = month_match
+    ordered_matches = sorted(deduplicated.values(), key=lambda item: (item['start'], item['end']))
+
+    start_month = ordered_matches[0]['month']
+    end_month = ordered_matches[-1]['month']
+    start_year = year
+    end_year = year + 1 if len(ordered_matches) > 1 and end_month < start_month else year
+    period_month_from = f'{start_year}-{start_month:02d}'
+    period_month_to = f'{end_year}-{end_month:02d}'
+    return {
+        'period_month': period_month_from,
+        'period_month_from': period_month_from,
+        'period_month_to': period_month_to,
+    }
+
+
+def _detect_month_expenses_period(text, *, at_time=None):
+    period_range = _detect_month_expenses_period_range(text, at_time=at_time)
+    if not period_range:
+        return None
+    return period_range.get('period_month')
 
     return None
 
@@ -839,6 +893,8 @@ class OpenRouterIntentProvider:
             'верни intent=help_capabilities. '
             'Если пользователь спрашивает расходы, траты или списания текущего месяца по статьям/категориям '
             'или просит отклонение от бюджета, верни intent=get_month_expenses_by_item. '
+            'Для такого отчета можешь вернуть period_month="YYYY-MM" или диапазон '
+            'period_month_from="YYYY-MM", period_month_to="YYYY-MM". '
             'Если уверенности нет, ставь intent=unknown или оставляй поля null. '
             'Схема JSON: '
             '{"intent": "...", "confidence": 0.0, "amount": "0.00" | null, '
@@ -846,6 +902,7 @@ class OpenRouterIntentProvider:
             '"cash_flow_item_hint": null, "merchant": null, "bank_name": null, '
             '"description": null, "occurred_at": null, "operation_sign": null, '
             '"comment": null, "include_in_budget": false, '
+            '"period_month": null, "period_month_from": null, "period_month_to": null, '
             '"operations": [{"source_index": 1, "intent": "...", "amount": "0.00", "merchant": "..."}] | null}. '
             'operation_sign может быть incoming, outgoing, transfer или null. '
             'amount возвращай числом без знака валюты и без символа ₽, а направление отражай в operation_sign. '
@@ -1241,7 +1298,7 @@ def _month_expenses_by_item(*, at_time=None, month_start=None):
         }
         for row in base_queryset.filter(
             type_of_document__in=EXPENSE_ACTUAL_DOCUMENT_TYPES,
-            period__lte=actual_period_end,
+            period__lt=actual_period_end,
         )
         .values('cash_flow_item_id', 'cash_flow_item__name')
         .annotate(actual=Sum('amount'))
@@ -1298,6 +1355,81 @@ def _month_expenses_by_item(*, at_time=None, month_start=None):
     }
 
 
+def _iter_month_starts(month_start, month_end):
+    current = month_start
+    while current <= month_end:
+        yield current
+        current = _next_month_start(current)
+
+
+def _format_month_range_label(month_start, month_end):
+    if month_start.year == month_end.year and month_start.month == month_end.month:
+        return _format_month_label(month_start)
+    start_label = MONTH_LABELS.get(month_start.month, month_start.strftime('%m'))
+    end_label = MONTH_LABELS.get(month_end.month, month_end.strftime('%m'))
+    if month_start.year == month_end.year:
+        return f'{start_label}-{end_label} {month_start.year}'
+    return f'{start_label} {month_start.year}-{end_label} {month_end.year}'
+
+
+def _normalize_month_start(month_start, *, at_time=None):
+    if month_start is None:
+        current_month_start, _ = _current_month_bounds(at_time=at_time)
+        return current_month_start
+    month_start = timezone.localtime(month_start)
+    return month_start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _month_expenses_by_item_range(*, at_time=None, month_start=None, month_end=None):
+    selected_at = timezone.localtime(at_time or timezone.now())
+    month_start = _normalize_month_start(month_start, at_time=selected_at)
+    month_end = _normalize_month_start(month_end, at_time=selected_at) if month_end is not None else month_start
+    if month_end < month_start:
+        month_end = month_start
+
+    months = [
+        _month_expenses_by_item(at_time=selected_at, month_start=current_month)
+        for current_month in _iter_month_starts(month_start, month_end)
+    ]
+    if len(months) == 1:
+        summary = dict(months[0])
+        summary['months'] = [dict(months[0])]
+        summary['period_month_from'] = month_start.strftime('%Y-%m')
+        summary['period_month_to'] = month_end.strftime('%Y-%m')
+        return summary
+
+    total_actual = sum((_parse_amount(month.get('total_actual')) or ZERO_AMOUNT) for month in months).quantize(Decimal('0.01'))
+    total_budget = sum((_parse_amount(month.get('total_budget')) or ZERO_AMOUNT) for month in months).quantize(Decimal('0.01'))
+    total_deviation = total_actual - total_budget if total_budget > ZERO_AMOUNT else None
+    total_deviation_percent = _format_budget_deviation_percent(actual=total_actual, budget=total_budget)
+    total_budget_usage_percent = _format_budget_usage_percent(actual=total_actual, budget=total_budget)
+    items = []
+    for month in months:
+        for row in month.get('items') or []:
+            items.append({
+                **row,
+                'period_label': month.get('period_label'),
+                'period_start': month.get('period_start'),
+            })
+
+    return {
+        'period_start': month_start.isoformat(),
+        'period_end': _next_month_start(month_end).isoformat(),
+        'period_label': _format_month_range_label(month_start, month_end),
+        'period_month_from': month_start.strftime('%Y-%m'),
+        'period_month_to': month_end.strftime('%Y-%m'),
+        'months': months,
+        'items': items,
+        'total_actual': _serialize_decimal(total_actual),
+        'total_budget': _serialize_decimal(total_budget) if total_budget > ZERO_AMOUNT else None,
+        'total_deviation': _serialize_decimal(total_deviation) if total_deviation is not None else None,
+        'total_deviation_percent': total_deviation_percent,
+        'total_budget_usage_percent': total_budget_usage_percent,
+        'total_overrun': _serialize_decimal(max(total_deviation, ZERO_AMOUNT)) if total_deviation is not None else None,
+        'total_remaining': _serialize_decimal(max(total_budget - total_actual, ZERO_AMOUNT)) if total_deviation is not None else None,
+    }
+
+
 class AiOperationService:
     def transcribe_audio(self, *, audio_bytes, audio_mime_type=None, file_name=None):
         transcription_service = _get_transcription_service()
@@ -1325,6 +1457,7 @@ class AiOperationService:
             'перевод сбер альфа 12000',
             'остатки по кошелькам',
             'расходы по статьям',
+            'расходы апрель май',
         ]
         if include_telegram_link_hint:
             lines.append('Если Telegram еще не привязан, сгенерируйте код в web API и отправьте команду /link CODE.')
@@ -2136,9 +2269,12 @@ class AiOperationService:
 
         if intent == INTENT_GET_MONTH_EXPENSES_BY_ITEM:
             selected_at = timezone.now()
-            summary = _month_expenses_by_item(
+            month_start = _parse_period_month(normalized.get('period_month_from') or normalized.get('period_month'))
+            month_end = _parse_period_month(normalized.get('period_month_to') or normalized.get('period_month'))
+            summary = _month_expenses_by_item_range(
                 at_time=selected_at,
-                month_start=_parse_period_month(normalized.get('period_month')),
+                month_start=month_start,
+                month_end=month_end,
             )
             return {
                 'status': 'info',
@@ -2464,6 +2600,8 @@ class AiOperationService:
                 source_text=source_text,
             )
 
+        period_range = _detect_month_expenses_period_range(source_text)
+
         return {
             'intent': intent,
             'confidence': float(parsed.get('confidence') or 0.0),
@@ -2481,7 +2619,9 @@ class AiOperationService:
             'occurred_at': occurred_at,
             'operation_sign': operation_sign,
             'source_index': parsed.get('source_index'),
-            'period_month': parsed.get('period_month') or _detect_month_expenses_period(source_text),
+            'period_month': parsed.get('period_month') or (period_range or {}).get('period_month'),
+            'period_month_from': parsed.get('period_month_from') or (period_range or {}).get('period_month_from'),
+            'period_month_to': parsed.get('period_month_to') or (period_range or {}).get('period_month_to'),
             'raw': parsed,
         }
 
@@ -2530,6 +2670,9 @@ class AiOperationService:
             'occurred_at': occurred_at_value,
             'operation_sign': normalized.get('operation_sign'),
             'source_index': normalized.get('source_index'),
+            'period_month': normalized.get('period_month'),
+            'period_month_from': normalized.get('period_month_from'),
+            'period_month_to': normalized.get('period_month_to'),
             'raw': normalized.get('raw', fallback_raw),
         }
 
@@ -2548,6 +2691,9 @@ class AiOperationService:
             'occurred_at': _parse_datetime_value(payload.get('occurred_at')),
             'operation_sign': payload.get('operation_sign'),
             'source_index': payload.get('source_index'),
+            'period_month': payload.get('period_month'),
+            'period_month_from': payload.get('period_month_from'),
+            'period_month_to': payload.get('period_month_to'),
             'raw': payload.get('raw', {}),
         }
 
@@ -2779,21 +2925,40 @@ class AiOperationService:
             return f'Расходов за {summary.get("period_label", "текущий месяц")} по статьям не найдено.'
 
         lines = [f'📊 {html.escape(summary["period_label"])}']
-        visible_rows = rows[:15]
-        table_lines = ['N  Статья             Факт      📊']
-        for index, row in enumerate(visible_rows, start=1):
-            item_name = (row.get('cash_flow_item_name') or 'Без статьи')[:18]
-            usage_percent = row.get('budget_usage_percent') or ''
-            table_lines.append(
-                f'{index:<2} {item_name:<18} {_format_compact_money(row["actual"]):>10} {usage_percent:>4}'
-            )
+        months = summary.get('months') or []
+        table_lines = ['Период/статья      Факт      📊']
+        if len(months) > 1:
+            for month in months:
+                month_rows = month.get('items') or []
+                month_label = (month.get('period_label') or '')[:18]
+                month_usage_percent = month.get('total_budget_usage_percent') or ''
+                table_lines.append(
+                    f'{month_label:<18} {_format_compact_money_whole(month["total_actual"]):>10} {month_usage_percent:>4}'
+                )
+                visible_month_rows = month_rows[:10]
+                for row in visible_month_rows:
+                    item_name = (row.get('cash_flow_item_name') or 'Без статьи')[:16]
+                    usage_percent = row.get('budget_usage_percent') or ''
+                    table_lines.append(
+                        f'  {item_name:<16} {_format_compact_money_whole(row["actual"]):>10} {usage_percent:>4}'
+                    )
+                if len(month_rows) > len(visible_month_rows):
+                    table_lines.append(f'  +{len(month_rows) - len(visible_month_rows)} статей')
+        else:
+            visible_rows = rows[:15]
+            for index, row in enumerate(visible_rows, start=1):
+                item_name = (row.get('cash_flow_item_name') or 'Без статьи')[:18]
+                usage_percent = row.get('budget_usage_percent') or ''
+                table_lines.append(
+                    f'{index:<2} {item_name:<18} {_format_compact_money_whole(row["actual"]):>10} {usage_percent:>4}'
+                )
 
-        if len(rows) > len(visible_rows):
-            table_lines.append(f'+{len(rows) - len(visible_rows)} статей')
+            if len(rows) > len(visible_rows):
+                table_lines.append(f'+{len(rows) - len(visible_rows)} статей')
 
         total_usage_percent = summary.get('total_budget_usage_percent') or ''
         table_lines.append(
-            f'Σ  {"Итого":<18} {_format_compact_money(summary["total_actual"]):>10} {total_usage_percent:>4}'
+            f'Σ  {"Итого":<18} {_format_compact_money_whole(summary["total_actual"]):>10} {total_usage_percent:>4}'
         )
         lines.append(f'<pre>{html.escape(chr(10).join(table_lines))}</pre>')
         return '\n'.join(lines)

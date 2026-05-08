@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useMemo, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import {
@@ -18,6 +17,7 @@ import {
 } from "lucide-react"
 
 import { EmptyState } from "@/components/shared/empty-state"
+import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { StatCard } from "@/components/shared/stat-card"
 import { Badge } from "@/components/ui/badge"
@@ -84,11 +84,11 @@ function getStatusLabel(status: AiAssistantResponse["status"]) {
   return status
 }
 
-function modelToRoute(model?: string) {
+function modelToEditableKind(model?: string): EditableDocumentKind | null {
   const normalized = (model ?? "").toLowerCase()
-  if (normalized === "receipt") return "receipts"
-  if (normalized === "expenditure") return "expenditures"
-  if (normalized === "transfer") return "transfers"
+  if (normalized === "receipt") return "receipt"
+  if (normalized === "expenditure") return "expenditure"
+  if (normalized === "transfer") return "transfer"
   return null
 }
 
@@ -151,6 +151,7 @@ export default function AssistantPage() {
   const [telegramToken, setTelegramToken] = useState<TelegramLinkTokenResponse | null>(null)
   const [copyState, setCopyState] = useState<"idle" | "done">("idle")
   const [dataView, setDataView] = useState<"preview" | "parsed">("preview")
+  const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
 
   const wallets = walletsQuery.data ?? []
   const selectedWallet = wallets.find((wallet) => wallet.id === walletId)
@@ -589,15 +590,19 @@ export default function AssistantPage() {
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       {latestCreatedObjects.slice(0, 5).map((item) => {
-                        const route = modelToRoute(item.model)
-                        if (!route) {
+                        const editableKind = modelToEditableKind(item.model)
+                        if (!editableKind) {
                           return null
                         }
                         return (
-                          <Button key={item.id} asChild variant="outline" size="sm">
-                            <Link href={`/${route}/${item.id}/edit`}>
-                              {latestCreatedObjects.length === 1 ? "Открыть документ" : `#${item.number}`}
-                            </Link>
+                          <Button
+                            key={item.id}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setEditingDocument({ kind: editableKind, id: item.id })}
+                          >
+                            {latestCreatedObjects.length === 1 ? "Открыть документ" : `#${item.number}`}
                           </Button>
                         )
                       })}
@@ -711,6 +716,14 @@ export default function AssistantPage() {
           )}
         </CardContent>
       </Card>
+      <DocumentEditDialog
+        document={editingDocument}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDocument(null)
+          }
+        }}
+      />
     </div>
   )
 }

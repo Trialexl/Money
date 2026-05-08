@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { normalizeAmountExpressionInput, parseAmountExpression } from "@/lib/amount-expression"
 import { formatDateForInput } from "@/lib/formatters"
 import { resolveReturnHref } from "@/lib/return-navigation"
 import { CashFlowItemService } from "@/services/cash-flow-item-service"
@@ -36,6 +37,9 @@ interface FinancialOperationFormProps {
   mode: OperationMode
   operation?: OperationEntity
   isEdit?: boolean
+  embedded?: boolean
+  onCancel?: () => void
+  onSaved?: (operation: OperationEntity) => void
 }
 
 const FORM_CONFIG = {
@@ -105,6 +109,9 @@ export default function FinancialOperationForm({
   mode,
   operation,
   isEdit = false,
+  embedded = false,
+  onCancel,
+  onSaved,
 }: FinancialOperationFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -307,7 +314,7 @@ export default function FinancialOperationForm({
 
   const operationMutation = useMutation({
     mutationFn: async () => {
-      const parsedAmount = Number.parseFloat(amount)
+      const parsedAmount = parseAmountExpression(amount) ?? 0
 
       if (mode === "receipt") {
         const payload: Partial<Receipt> = {
@@ -356,6 +363,11 @@ export default function FinancialOperationForm({
         queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
         queryClient.invalidateQueries({ queryKey: ["wallets"] }),
       ])
+      if (onSaved) {
+        onSaved(savedOperation)
+        return
+      }
+
       router.push(resolveReturnHref(returnToHref, config.routeHref, savedOperation.id || operation?.id, { resetPage: !isEdit }))
     },
   })
@@ -364,20 +376,22 @@ export default function FinancialOperationForm({
     event.preventDefault()
     setValidationError(null)
 
-    const parsedAmount = Number.parseFloat(amount)
+    const parsedAmount = parseAmountExpression(amount)
 
-    if (!effectiveWalletId || !effectiveCashFlowItemId || !date || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (!effectiveWalletId || !effectiveCashFlowItemId || !date || parsedAmount === null || parsedAmount <= 0) {
       setValidationError("Укажи дату, сумму, кошелек и статью. Сумма должна быть больше нуля.")
       return
     }
+
+    setAmount(String(parsedAmount))
 
     try {
       await operationMutation.mutateAsync()
     } catch {}
   }
 
-  const numericAmount = Number.parseFloat(amount)
-  const hasAmount = !Number.isNaN(numericAmount) && numericAmount > 0
+  const numericAmount = parseAmountExpression(amount)
+  const hasAmount = numericAmount !== null && numericAmount > 0
   const errorMessage =
     validationError ||
     (operationMutation.error as any)?.response?.data?.detail ||
@@ -386,7 +400,8 @@ export default function FinancialOperationForm({
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      {embedded ? null : (
+        <PageHeader
         eyebrow={config.pageEyebrow}
         title={isEdit ? `Редактирование ${mode === "receipt" ? "прихода" : "расхода"}` : config.newTitle}
         description={isEdit ? config.previewHint : config.newDescription}
@@ -397,7 +412,8 @@ export default function FinancialOperationForm({
             </Link>
           </Button>
         }
-      />
+        />
+      )}
 
       <div>
         <Card>
@@ -422,11 +438,11 @@ export default function FinancialOperationForm({
                     <Label htmlFor={`${mode}-amount`}>Сумма</Label>
                     <Input
                       id={`${mode}-amount`}
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={amount}
                       onChange={(event) => setAmount(event.target.value)}
+                      onBlur={() => setAmount((current) => normalizeAmountExpressionInput(current))}
                       placeholder="0.00"
                       required
                     />
@@ -532,11 +548,17 @@ export default function FinancialOperationForm({
                           ? "Создать приход и выйти"
                           : "Создать расход и выйти"}
                   </Button>
-                  <Button asChild variant="outline" size="icon">
-                    <Link href={cancelHref} aria-label="Отмена" title="Отмена">
+                  {embedded ? (
+                    <Button type="button" variant="outline" size="icon" onClick={onCancel} aria-label="Отмена" title="Отмена">
                       <X className="h-4 w-4" />
-                    </Link>
-                  </Button>
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline" size="icon">
+                      <Link href={cancelHref} aria-label="Отмена" title="Отмена">
+                        <X className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </form>
             )}

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { normalizeAmountExpressionInput, parseAmountExpression } from "@/lib/amount-expression"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
 import { PlanningDocumentKind, PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
 
@@ -174,8 +175,8 @@ export function PlanningGraphicsPanel({
     event.preventDefault()
     setValidationError(null)
 
-    const parsedAmount = Number.parseFloat(amount)
-    if (Number.isNaN(parsedAmount) || parsedAmount <= 0 || !dateStart) {
+    const parsedAmount = parseAmountExpression(amount)
+    if (parsedAmount === null || parsedAmount <= 0 || !dateStart) {
       setValidationError("Укажи дату строки графика и положительную сумму.")
       return
     }
@@ -207,8 +208,8 @@ export function PlanningGraphicsPanel({
     if (Number.isFinite(parsedMonths) && parsedMonths > 0) {
       onMonthCountChange?.(parsedMonths)
 
-      const parsedMonthlyAmount = Number.parseFloat(distributionMonthlyAmount)
-      if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0) {
+      const parsedMonthlyAmount = parseAmountExpression(distributionMonthlyAmount)
+      if (parsedMonthlyAmount !== null && parsedMonthlyAmount > 0) {
         const nextTotalAmount = formatAmountInput(parsedMonthlyAmount * parsedMonths)
         setDistributionTotalAmount(nextTotalAmount)
         onTotalAmountInputChange?.(nextTotalAmount)
@@ -219,9 +220,9 @@ export function PlanningGraphicsPanel({
   const handleDistributionMonthlyAmountChange = (value: string) => {
     setDistributionMonthlyAmount(value)
 
-    const parsedMonthlyAmount = Number.parseFloat(value)
+    const parsedMonthlyAmount = parseAmountExpression(value)
     const parsedMonths = Number.parseInt(distributionMonthCount, 10)
-    if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0 && Number.isFinite(parsedMonths) && parsedMonths > 0) {
+    if (parsedMonthlyAmount !== null && parsedMonthlyAmount > 0 && Number.isFinite(parsedMonths) && parsedMonths > 0) {
       const nextTotalAmount = formatAmountInput(parsedMonthlyAmount * parsedMonths)
       setDistributionTotalAmount(nextTotalAmount)
       onTotalAmountInputChange?.(nextTotalAmount)
@@ -239,8 +240,9 @@ export function PlanningGraphicsPanel({
   }
 
   const handleDistributionTotalBlur = () => {
-    const parsedTotalAmount = Number.parseFloat(distributionTotalAmount)
-    if (!Number.isNaN(parsedTotalAmount) && parsedTotalAmount > 0 && !onMonthlyAmountChange) {
+    const parsedTotalAmount = parseAmountExpression(distributionTotalAmount)
+    if (parsedTotalAmount !== null && parsedTotalAmount > 0 && !onMonthlyAmountChange) {
+      setDistributionTotalAmount(formatAmountInput(parsedTotalAmount))
       onTotalAmountChange?.(Math.round(parsedTotalAmount * 100) / 100)
     }
   }
@@ -249,8 +251,8 @@ export function PlanningGraphicsPanel({
     setValidationError(null)
 
     const parsedMonths = Number.parseInt(distributionMonthCount, 10)
-    const parsedTotalAmount = Number.parseFloat(distributionTotalAmount)
-    const parsedMonthlyAmount = Number.parseFloat(distributionMonthlyAmount)
+    const parsedTotalAmount = parseAmountExpression(distributionTotalAmount)
+    const parsedMonthlyAmount = parseAmountExpression(distributionMonthlyAmount)
 
     if (!Number.isFinite(parsedMonths) || parsedMonths <= 0) {
       setValidationError("Укажи положительное количество месяцев.")
@@ -258,14 +260,14 @@ export function PlanningGraphicsPanel({
     }
 
     const builtRows =
-      !Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0
+      parsedMonthlyAmount !== null && parsedMonthlyAmount > 0
         ? PlanningService.buildMonthlyRows({
             monthlyAmount: parsedMonthlyAmount,
             startDate: distributionStartDate,
             monthCount: parsedMonths,
           })
         : PlanningService.buildDistributedRows({
-            totalAmount: parsedTotalAmount,
+            totalAmount: parsedTotalAmount ?? 0,
             startDate: distributionStartDate,
             monthCount: parsedMonths,
           })
@@ -276,14 +278,14 @@ export function PlanningGraphicsPanel({
     }
 
     commitRows(builtRows)
-    if (!Number.isNaN(parsedMonthlyAmount) && parsedMonthlyAmount > 0) {
+    if (parsedMonthlyAmount !== null && parsedMonthlyAmount > 0) {
       const nextTotalAmount = Math.round(parsedMonthlyAmount * parsedMonths * 100) / 100
       setDistributionTotalAmount(formatAmountInput(nextTotalAmount))
       onMonthlyAmountChange?.(parsedMonthlyAmount)
       if (!onMonthlyAmountChange) {
         onTotalAmountChange?.(nextTotalAmount)
       }
-    } else if (!Number.isNaN(parsedTotalAmount) && parsedTotalAmount > 0) {
+    } else if (parsedTotalAmount !== null && parsedTotalAmount > 0) {
       const nextTotalAmount = Math.round(parsedTotalAmount * 100) / 100
       const averageMonthlyAmount = Math.round((nextTotalAmount / parsedMonths) * 100) / 100
       onTotalAmountChange?.(nextTotalAmount)
@@ -293,7 +295,9 @@ export function PlanningGraphicsPanel({
   }
 
   const hasContract = Object.keys(graphicContract ?? {}).length > 0
-  const canAutoFill = Number.parseFloat(distributionTotalAmount) > 0 || Number.parseFloat(distributionMonthlyAmount) > 0
+  const canAutoFill =
+    (parseAmountExpression(distributionTotalAmount) ?? 0) > 0 ||
+    (parseAmountExpression(distributionMonthlyAmount) ?? 0) > 0
 
   return (
     <Card>
@@ -338,9 +342,8 @@ export function PlanningGraphicsPanel({
               <Label htmlFor={`${kind}-distribution-total`}>Общая сумма</Label>
               <Input
                 id={`${kind}-distribution-total`}
-                type="number"
-                min="0"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 value={distributionTotalAmount}
                 onBlur={handleDistributionTotalBlur}
                 onChange={(event) => handleDistributionTotalAmountChange(event.target.value)}
@@ -351,10 +354,10 @@ export function PlanningGraphicsPanel({
               <Label htmlFor={`${kind}-distribution-monthly`}>Сумма в месяц</Label>
               <Input
                 id={`${kind}-distribution-monthly`}
-                type="number"
-                min="0"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 value={distributionMonthlyAmount}
+                onBlur={() => setDistributionMonthlyAmount((current) => normalizeAmountExpressionInput(current))}
                 onChange={(event) => handleDistributionMonthlyAmountChange(event.target.value)}
                 placeholder="0.00"
               />
@@ -404,11 +407,11 @@ export function PlanningGraphicsPanel({
               <Label htmlFor={`${kind}-graphic-amount`}>Сумма периода</Label>
               <Input
                 id={`${kind}-graphic-amount`}
-                type="number"
-                min="0"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}
+                onBlur={() => setAmount((current) => normalizeAmountExpressionInput(current))}
                 placeholder="0.00"
               />
             </div>
@@ -451,11 +454,13 @@ export function PlanningGraphicsPanel({
                   <Label htmlFor={`${kind}-row-${graphic.id}-amount`} className="text-xs">Сумма</Label>
                   <Input
                     id={`${kind}-row-${graphic.id}-amount`}
-                    type="number"
-                    min="0"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={Number.isFinite(graphic.amount) ? graphic.amount : ""}
-                    onChange={(event) => handleRowChange(graphic.id, { amount: Number.parseFloat(event.target.value) })}
+                    onChange={(event) => {
+                      const parsedAmount = parseAmountExpression(event.target.value)
+                      handleRowChange(graphic.id, { amount: parsedAmount ?? 0 })
+                    }}
                   />
                 </div>
                 <div className="flex items-end gap-2 md:justify-end">

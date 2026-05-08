@@ -1,8 +1,7 @@
 "use client"
 
-import Link from "next/link"
-import { useRef, useState } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { ResponsiveBar } from "@nivo/bar"
 import { ResponsiveLine } from "@nivo/line"
@@ -10,6 +9,7 @@ import { ResponsivePie } from "@nivo/pie"
 import {
   BarChart3,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Eye,
   EyeOff,
@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 
 import ExportReportButtons from "@/components/reports/export-report-buttons"
+import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
@@ -34,7 +35,6 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { exportFormatters } from "@/lib/export-utils"
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/formatters"
-import { buildReturnToHref, withReturnToHref } from "@/lib/return-navigation"
 import { DashboardService, type DashboardWalletSummary } from "@/services/dashboard-service"
 import { ProjectService } from "@/services/project-service"
 import {
@@ -68,7 +68,7 @@ type BudgetPlanDetailRow = {
   itemKey: string
   itemName: string
   amount: number
-  documentHref: string | null
+  documentId: string | null
 }
 
 type BudgetPlanningGroup = {
@@ -139,6 +139,7 @@ const REPORT_ITEM_COLORS = [
 ]
 
 const SHORT_MONTH_LABELS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+const MONTH_LABELS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
 
 function getDateKey(value?: string) {
   return value ? value.slice(0, 10) : ""
@@ -198,6 +199,25 @@ function getMonthEndDate(monthValue: string) {
   return formatDateForInput(new Date(year, month, 0))
 }
 
+function getMonthValue(year: number, monthIndex: number) {
+  return `${year}-${String(monthIndex + 1).padStart(2, "0")}`
+}
+
+function getPreviousDate(value: string) {
+  const [year, month, day] = getDateKey(value).split("-").map(Number)
+  if (!year || !month || !day) {
+    return undefined
+  }
+
+  const date = new Date(year, month - 1, day)
+  date.setDate(date.getDate() - 1)
+  return formatDateForInput(date)
+}
+
+function normalizeDateRange(from: string, to: string) {
+  return from <= to ? { from, to } : { from: to, to: from }
+}
+
 function getReportTabFromParam(value: string | null): ReportTab {
   if (value === "expenses" || value === "categories") {
     return "categories"
@@ -210,14 +230,6 @@ function getReportTabFromParam(value: string | null): ReportTab {
 
 function getReportTabParam(value: ReportTab) {
   return value === "categories" ? "expenses" : value
-}
-
-function getBudgetDocumentHref(row: BudgetReportDetail, returnToHref?: string) {
-  if (!row.document_id || row.document_type !== "Budget") {
-    return null
-  }
-  const href = `/budgets/${row.document_id}/edit`
-  return returnToHref ? withReturnToHref(href, returnToHref) : href
 }
 
 function renderNoData(title: string, description: string) {
@@ -233,7 +245,6 @@ function renderNoData(title: string, description: string) {
 
 export default function ReportsPage() {
   const router = useRouter()
-  const pathname = usePathname()
   const searchParams = useSearchParams()
   const today = formatDateForInput()
   const currentYear = new Date().getFullYear()
@@ -245,6 +256,10 @@ export default function ReportsPage() {
   const [selectedPreset, setSelectedPreset] = useState<RangePreset>(hasExplicitPeriod ? null : "year")
   const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || defaultDateFrom)
   const [dateTo, setDateTo] = useState(searchParams.get("date_to") || defaultDateTo)
+  const [draftDateFrom, setDraftDateFrom] = useState(searchParams.get("date_from") || defaultDateFrom)
+  const [draftDateTo, setDraftDateTo] = useState(searchParams.get("date_to") || defaultDateTo)
+  const [monthPickerYear, setMonthPickerYear] = useState(Number((searchParams.get("date_from") || defaultDateFrom).slice(0, 4)) || currentYear)
+  const [monthSelectionAnchor, setMonthSelectionAnchor] = useState<string | null>(null)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
   const [collapsedMonthlyGroups, setCollapsedMonthlyGroups] = useState<Record<string, boolean>>({})
@@ -253,13 +268,19 @@ export default function ReportsPage() {
   const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
   const [hiddenMonthlyExpenseItemKeys, setHiddenMonthlyExpenseItemKeys] = useState<Record<string, boolean>>({})
   const [hiddenBudgetPlanItemKeys, setHiddenBudgetPlanItemKeys] = useState<Record<string, boolean>>({})
-  const periodFromMonth = getMonthInputValue(dateFrom)
-  const periodToMonth = getMonthInputValue(dateTo)
+  const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
+  const periodFromMonth = getMonthInputValue(draftDateFrom)
+  const periodToMonth = getMonthInputValue(draftDateTo)
   const cashFlowChartRef = useRef<HTMLDivElement>(null)
   const walletChartRef = useRef<HTMLDivElement>(null)
   const categoryChartRef = useRef<HTMLDivElement>(null)
   const budgetExpenseChartRef = useRef<HTMLDivElement>(null)
-  const returnToHref = buildReturnToHref(pathname, searchParams)
+  useEffect(() => {
+    setDraftDateFrom(dateFrom)
+    setDraftDateTo(dateTo)
+    setMonthPickerYear(Number(dateFrom.slice(0, 4)) || currentYear)
+    setMonthSelectionAnchor(null)
+  }, [currentYear, dateFrom, dateTo])
 
   const projectsQuery = useQuery({
     queryKey: ["projects", "reports-budget"],
@@ -274,7 +295,8 @@ export default function ReportsPage() {
     ],
     staleTime: 60_000,
     queryFn: async () => {
-      const [cashFlow, budgetExpense, overview] = await Promise.all([
+      const openingDate = getPreviousDate(dateFrom)
+      const [cashFlow, budgetExpense, overview, openingOverview] = await Promise.all([
         ReportService.getCashFlowReport({ dateFrom, dateTo }),
         ReportService.getBudgetExpenseReport({
           dateFrom,
@@ -283,12 +305,14 @@ export default function ReportsPage() {
           project: budgetProjectId || undefined,
         }),
         DashboardService.getOverview({ date: dateTo, hideHiddenWallets: true }),
+        DashboardService.getOverview({ date: openingDate, hideHiddenWallets: true }),
       ])
 
       return {
         cashFlow,
         budgetExpense,
         overview,
+        openingOverview,
       }
     },
   })
@@ -320,42 +344,58 @@ export default function ReportsPage() {
     router.replace(`/reports?${params.toString()}`, { scroll: false })
   }
 
-  const setReportMonthRange = (nextDateFromMonth: string, nextDateToMonth: string) => {
-    if (!nextDateFromMonth || !nextDateToMonth) {
-      return
-    }
-    const normalizedDateToMonth =
-      nextDateToMonth < nextDateFromMonth ? nextDateFromMonth : nextDateToMonth
-    const nextDateFrom = getMonthStartDate(nextDateFromMonth)
-    const nextDateTo = getMonthEndDate(normalizedDateToMonth)
-    setDateFrom(nextDateFrom)
-    setDateTo(nextDateTo)
-    setSelectedPreset(null)
+  const resetReportItemFilters = () => {
     setSelectedMonthlyExpenseItemKey(null)
     setSelectedBudgetPlanItemKey(null)
     setHiddenMonthlyExpenseItemKeys({})
     setHiddenBudgetPlanItemKeys({})
-    updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
+  }
+
+  const applyReportPeriod = (
+    nextDateFrom = draftDateFrom,
+    nextDateTo = draftDateTo,
+    nextPreset: RangePreset = null
+  ) => {
+    if (!nextDateFrom || !nextDateTo) {
+      return
+    }
+    const normalized = normalizeDateRange(nextDateFrom, nextDateTo)
+    setDateFrom(normalized.from)
+    setDateTo(normalized.to)
+    setDraftDateFrom(normalized.from)
+    setDraftDateTo(normalized.to)
+    setSelectedPreset(nextPreset)
+    resetReportItemFilters()
+    updateReportUrl(normalized.from, normalized.to, budgetForecast)
+  }
+
+  const handleSelectMonth = (monthValue: string) => {
+    if (!monthSelectionAnchor) {
+      setMonthSelectionAnchor(monthValue)
+      setDraftDateFrom(getMonthStartDate(monthValue))
+      setDraftDateTo(getMonthEndDate(monthValue))
+      setSelectedPreset(null)
+      return
+    }
+
+    const fromMonth = monthSelectionAnchor <= monthValue ? monthSelectionAnchor : monthValue
+    const toMonth = monthSelectionAnchor <= monthValue ? monthValue : monthSelectionAnchor
+    setDraftDateFrom(getMonthStartDate(fromMonth))
+    setDraftDateTo(getMonthEndDate(toMonth))
+    setMonthSelectionAnchor(null)
+    setSelectedPreset(null)
   }
 
   const setExactDateFrom = (nextDateFrom: string) => {
-    setDateFrom(nextDateFrom)
+    setDraftDateFrom(nextDateFrom)
     setSelectedPreset(null)
-    setSelectedMonthlyExpenseItemKey(null)
-    setSelectedBudgetPlanItemKey(null)
-    setHiddenMonthlyExpenseItemKeys({})
-    setHiddenBudgetPlanItemKeys({})
-    updateReportUrl(nextDateFrom, dateTo, budgetForecast)
+    setMonthSelectionAnchor(null)
   }
 
   const setExactDateTo = (nextDateTo: string) => {
-    setDateTo(nextDateTo)
+    setDraftDateTo(nextDateTo)
     setSelectedPreset(null)
-    setSelectedMonthlyExpenseItemKey(null)
-    setSelectedBudgetPlanItemKey(null)
-    setHiddenMonthlyExpenseItemKeys({})
-    setHiddenBudgetPlanItemKeys({})
-    updateReportUrl(dateFrom, nextDateTo, budgetForecast)
+    setMonthSelectionAnchor(null)
   }
 
   const setPresetRange = (preset: Exclude<RangePreset, null>) => {
@@ -386,14 +426,7 @@ export default function ReportsPage() {
 
     const nextDateFrom = formatDateForInput(from)
     const nextDateTo = formatDateForInput(to)
-    setDateFrom(nextDateFrom)
-    setDateTo(nextDateTo)
-    setSelectedPreset(preset)
-    setSelectedMonthlyExpenseItemKey(null)
-    setSelectedBudgetPlanItemKey(null)
-    setHiddenMonthlyExpenseItemKeys({})
-    setHiddenBudgetPlanItemKeys({})
-    updateReportUrl(nextDateFrom, nextDateTo, budgetForecast)
+    applyReportPeriod(nextDateFrom, nextDateTo, preset)
   }
 
   const toggleHiddenMonthlyExpenseItem = (itemKey: string) => {
@@ -435,7 +468,7 @@ export default function ReportsPage() {
     )
   }
 
-  const { cashFlow, budgetExpense, overview } = reportsQuery.data
+  const { cashFlow, budgetExpense, overview, openingOverview } = reportsQuery.data
   const budgetProjectOptions = (projectsQuery.data ?? [])
     .filter((project) => !project.deleted)
     .sort((left, right) => left.name.localeCompare(right.name, "ru"))
@@ -446,6 +479,8 @@ export default function ReportsPage() {
   const incomeTotal = cashFlow.totals.income
   const expenseTotal = cashFlow.totals.expense
   const netTotal = incomeTotal - expenseTotal
+  const openingWalletTotal = openingOverview.wallet_total
+  const cumulativeEndingBalance = openingWalletTotal + netTotal
   const plannedBudgetCount = budgetExpense.summary.length
   const includedExpenseTotal = budgetExpense.totals.actual
   const isFutureReportDate = dateTo > today
@@ -480,11 +515,14 @@ export default function ReportsPage() {
     ...row,
     chartLabel: timelineMode === "daily" ? formatShortDateLabel(row.key) : formatShortMonthLabel(row.key),
   }))
-  let runningNet = 0
-  const cumulativeLineData = timelineChartRows.map((row) => {
+  let runningNet = openingWalletTotal
+  const cumulativeLineData = [
+    { x: "Старт", y: openingWalletTotal },
+    ...timelineChartRows.map((row) => {
     runningNet += row.net
     return { x: row.chartLabel, y: runningNet }
-  })
+    }),
+  ]
 
   const cashFlowExportRows = timelineRows.map((row: TimelineRow) => ({
     period: row.label,
@@ -809,7 +847,7 @@ export default function ReportsPage() {
         itemKey,
         itemName: row.cash_flow_item_name || "Неизвестная статья",
         amount: row.amount,
-        documentHref: getBudgetDocumentHref(row, returnToHref),
+        documentId: row.document_id && row.document_type === "Budget" ? row.document_id : null,
       }
     })
     .sort((left, right) => {
@@ -839,8 +877,9 @@ export default function ReportsPage() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Отчеты"
-        title="Отчеты"
-        description="Срез периода по деньгам, кошелькам и бюджету."
+        title="Аналитика денег"
+        description="Расходы, бюджет, чистый поток и кошельки за выбранный период."
+        compact
       />
 
       <Card>
@@ -879,10 +918,16 @@ export default function ReportsPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Доходы за период" value={formatCurrency(incomeTotal)} hint="Все зафиксированные поступления" icon={TrendingUp} tone="positive" />
         <StatCard label="Расходы за период" value={formatCurrency(expenseTotal)} hint="Все списания по выбранному периоду" icon={TrendingDown} tone="danger" />
-        <StatCard label="Чистый поток" value={formatCurrency(netTotal)} hint="Доходы минус расходы" icon={BarChart3} tone={netTotal >= 0 ? "positive" : "danger"} />
+        <StatCard
+          label="Чистый поток"
+          value={formatCurrency(netTotal)}
+          hint={`Начальный остаток: ${formatCurrency(openingWalletTotal)} · итог: ${formatCurrency(cumulativeEndingBalance)}`}
+          icon={BarChart3}
+          tone={netTotal >= 0 ? "positive" : "danger"}
+        />
         <StatCard label="Бюджетный факт" value={formatCurrency(includedExpenseTotal)} hint={`${plannedBudgetCount} строк отчета по расходному бюджету`} icon={Landmark} />
       </div>
 
@@ -931,42 +976,90 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="space-y-2">
-                <Label htmlFor="reports-period-month-from">Месяц с</Label>
-                <Input
-                  id="reports-period-month-from"
-                  type="month"
-                  value={periodFromMonth}
-                  onChange={(event) => setReportMonthRange(event.target.value, periodToMonth)}
-                />
+            <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1fr)]">
+              <div className="rounded-[22px] border border-border/70 bg-background/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-2xl"
+                    onClick={() => setMonthPickerYear((year) => year - 1)}
+                    aria-label="Предыдущий год"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">{monthPickerYear}</div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-2xl"
+                    onClick={() => setMonthPickerYear((year) => year + 1)}
+                    aria-label="Следующий год"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-3">
+                  {MONTH_LABELS.map((label, index) => {
+                    const monthValue = getMonthValue(monthPickerYear, index)
+                    const isInRange = monthValue >= periodFromMonth && monthValue <= periodToMonth
+                    const isEdge = monthValue === periodFromMonth || monthValue === periodToMonth
+                    const isAnchor = monthSelectionAnchor === monthValue
+
+                    return (
+                      <button
+                        key={monthValue}
+                        type="button"
+                        className={`rounded-2xl border px-3 py-2 text-sm font-medium transition ${
+                          isEdge || isAnchor
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : isInRange
+                              ? "border-primary/40 bg-primary/10 text-foreground"
+                              : "border-border/60 bg-card/50 text-muted-foreground hover:border-primary/60 hover:text-foreground"
+                        }`}
+                        onClick={() => handleSelectMonth(monthValue)}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="mt-3 text-xs leading-5 text-muted-foreground">
+                  Выбери начальный и конечный месяц. Точный день можно поправить справа.
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="reports-period-month-to">Месяц по</Label>
-                <Input
-                  id="reports-period-month-to"
-                  type="month"
-                  value={periodToMonth}
-                  onChange={(event) => setReportMonthRange(periodFromMonth, event.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
                 <Label htmlFor="reports-date-from">Дата с</Label>
                 <Input
                   id="reports-date-from"
                   type="date"
-                  value={dateFrom}
+                  value={draftDateFrom}
                   onChange={(event) => setExactDateFrom(event.target.value)}
                 />
-              </div>
-              <div className="space-y-2">
+                </div>
+                <div className="space-y-2">
                 <Label htmlFor="reports-date-to">Дата по</Label>
                 <Input
                   id="reports-date-to"
                   type="date"
-                  value={dateTo}
+                  value={draftDateTo}
                   onChange={(event) => setExactDateTo(event.target.value)}
                 />
+                </div>
+                <div className="md:col-span-2">
+                  <Button
+                    type="button"
+                    onClick={() => applyReportPeriod()}
+                    disabled={!draftDateFrom || !draftDateTo || (draftDateFrom === dateFrom && draftDateTo === dateTo)}
+                    className="w-full sm:w-auto"
+                  >
+                    Применить период
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -1913,10 +2006,14 @@ export default function ReportsPage() {
                                 <td className="py-2.5">{row.monthLabel}</td>
                                 <td className="py-2.5">{row.itemName}</td>
                                 <td className="py-2.5">
-                                  {row.documentHref ? (
-                                    <Link className="text-primary hover:underline" href={row.documentHref}>
+                                  {row.documentId ? (
+                                    <button
+                                      type="button"
+                                      className="text-primary hover:underline"
+                                      onClick={() => setEditingDocument({ kind: "budget", id: row.documentId! })}
+                                    >
                                       Открыть
-                                    </Link>
+                                    </button>
                                   ) : (
                                     <span className="text-muted-foreground">—</span>
                                   )}
@@ -1943,6 +2040,16 @@ export default function ReportsPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <DocumentEditDialog
+        document={editingDocument}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDocument(null)
+          }
+        }}
+        onSaved={() => reportsQuery.refetch()}
+      />
     </div>
   )
 }

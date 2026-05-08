@@ -35,6 +35,7 @@ import {
 } from "lucide-react"
 
 import { EmptyState } from "@/components/shared/empty-state"
+import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -73,6 +74,7 @@ export default function DashboardPage() {
     budget: false,
   })
   const [selectedBudgetItemId, setSelectedBudgetItemId] = useState<string | null>(null)
+  const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
   const today = formatDateForInput()
   const selectedDate = searchParams.get("date") || today
   const selectedDashboardDate = new Date(`${selectedDate}T12:00:00`)
@@ -216,15 +218,40 @@ export default function DashboardPage() {
     )
   }
 
-  const getActivityEditHref = (operation: DashboardRecentActivity) => {
-    const path =
-      operation.kind === "receipt"
-        ? `/receipts/${operation.id}/edit`
-        : operation.kind === "expenditure"
-          ? `/expenditures/${operation.id}/edit`
-          : `/transfers/${operation.id}/edit`
+  const getActivityEditKind = (operation: DashboardRecentActivity): EditableDocumentKind => {
+    if (operation.kind === "receipt") {
+      return "receipt"
+    }
+    if (operation.kind === "expenditure") {
+      return "expenditure"
+    }
+    return "transfer"
+  }
 
-    return withReturnToHref(path, returnToHref)
+  const getEditableKindFromDocumentType = (documentType?: string | null): EditableDocumentKind | null => {
+    if (documentType === "Receipt") {
+      return "receipt"
+    }
+    if (documentType === "Expenditure") {
+      return "expenditure"
+    }
+    if (documentType === "Transfer") {
+      return "transfer"
+    }
+    if (documentType === "Budget") {
+      return "budget"
+    }
+    if (documentType === "AutoPayment") {
+      return "auto-payment"
+    }
+    return null
+  }
+
+  const handleDocumentSaved = (document: { kind: EditableDocumentKind; id: string }) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("highlight", document.id)
+    const query = params.toString()
+    router.replace(query ? `/dashboard?${query}` : "/dashboard", { scroll: false })
   }
 
   const getActivityDuplicateHref = (operation: DashboardRecentActivity) => {
@@ -625,9 +652,10 @@ export default function DashboardPage() {
                           {operation.kind === "receipt" ? "Приход" : operation.kind === "expenditure" ? "Расход" : "Перевод"}
                         </Badge>
 
-                        <Link
-                          href={getActivityEditHref(operation)}
-                          className="min-w-0 flex-1 transition-colors hover:text-foreground/80"
+                        <button
+                          type="button"
+                          onClick={() => setEditingDocument({ kind: getActivityEditKind(operation), id: operation.id })}
+                          className="min-w-0 flex-1 text-left transition-colors hover:text-foreground/80"
                         >
                           <div className="truncate text-sm font-medium text-foreground">
                             {operation.kind === "transfer"
@@ -638,7 +666,7 @@ export default function DashboardPage() {
                             {operation.description ? <div className="truncate">{operation.description}</div> : null}
                             <div>{formatDate(operation.date)}</div>
                           </div>
-                        </Link>
+                        </button>
 
                         <div className="flex shrink-0 items-start gap-1.5">
                           <div
@@ -662,14 +690,16 @@ export default function DashboardPage() {
                               <Copy className="h-4 w-4" />
                             </Link>
                           </Button>
-                          <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-                            <Link
-                              href={getActivityEditHref(operation)}
-                              aria-label="Редактировать документ"
-                              title="Редактировать"
-                            >
-                              <PencilLine className="h-4 w-4" />
-                            </Link>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setEditingDocument({ kind: getActivityEditKind(operation), id: operation.id })}
+                            aria-label="Редактировать документ"
+                            title="Редактировать"
+                          >
+                            <PencilLine className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
@@ -891,29 +921,41 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     <div className="text-sm font-semibold text-foreground">Из чего сложилась сумма</div>
                     {expandedBudgetBreakdown.details.length > 0 ? (
-                      expandedBudgetBreakdown.details.map((detail) => (
-                        <div
-                          key={`${detail.entry_type}-${detail.document_id ?? detail.period}-${detail.amount}`}
-                          className="flex items-start justify-between gap-3 rounded-[18px] border border-border/60 bg-card/70 px-4 py-3"
-                        >
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant={detail.entry_type === "budget" ? "outline" : "destructive"}>
-                                {detail.entry_type === "budget" ? "План" : "Факт"}
-                              </Badge>
-                              {formatBudgetDetailType(detail.document_type) ? (
-                                <span className="text-xs text-muted-foreground">
-                                  {formatBudgetDetailType(detail.document_type)}
-                                </span>
-                              ) : null}
+                      expandedBudgetBreakdown.details.map((detail) => {
+                        const editableKind = getEditableKindFromDocumentType(detail.document_type)
+                        const canOpenDocument = Boolean(editableKind && detail.document_id)
+
+                        return (
+                          <button
+                            key={`${detail.entry_type}-${detail.document_id ?? detail.period}-${detail.amount}`}
+                            type="button"
+                            disabled={!canOpenDocument}
+                            onClick={() => {
+                              if (editableKind && detail.document_id) {
+                                setEditingDocument({ kind: editableKind, id: detail.document_id })
+                              }
+                            }}
+                            className="flex w-full items-start justify-between gap-3 rounded-[18px] border border-border/60 bg-card/70 px-4 py-3 text-left transition-colors enabled:hover:bg-muted/50 disabled:cursor-default"
+                          >
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant={detail.entry_type === "budget" ? "outline" : "destructive"}>
+                                  {detail.entry_type === "budget" ? "План" : "Факт"}
+                                </Badge>
+                                {formatBudgetDetailType(detail.document_type) ? (
+                                  <span className="text-xs text-muted-foreground">
+                                    {formatBudgetDetailType(detail.document_type)}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="text-sm text-foreground">{formatDate(detail.period)}</div>
                             </div>
-                            <div className="text-sm text-foreground">{formatDate(detail.period)}</div>
-                          </div>
-                          <div className="shrink-0 text-sm font-semibold text-foreground">
-                            {formatCurrency(detail.amount)}
-                          </div>
-                        </div>
-                      ))
+                            <div className="shrink-0 text-sm font-semibold text-foreground">
+                              {formatCurrency(detail.amount)}
+                            </div>
+                          </button>
+                        )
+                      })
                     ) : (
                       <div className="rounded-[18px] border border-dashed border-border/70 px-4 py-5 text-sm text-muted-foreground">
                         За текущий месяц строк по этой статье нет.
@@ -926,6 +968,16 @@ export default function DashboardPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      <DocumentEditDialog
+        document={editingDocument}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDocument(null)
+          }
+        }}
+        onSaved={handleDocumentSaved}
+      />
     </div>
   )
 }

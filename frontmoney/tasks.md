@@ -88,3 +88,10 @@
 - [x] Add a grand total row at the bottom of every report table, not only subtotals inside groups.
 - [x] Rework dashboard widgets: review what `Свободный остаток` and `Результат месяца` mean, consider replacing them with `Расходы за месяц`, and make click-through open the Expenses report.
 - [x] Investigate why wallet `ВТБ` with zero balance is displayed; zero-balance wallets should stay hidden wherever the product rule says empty wallets are not shown.
+
+## Backlog: Navigation, Auth, and Report Correctness
+- [x] Make every document mention clickable across dashboard, reports, operation lists, assistant/audit screens, and any compact summaries. If a document number/name/id is shown to the user, it should link to the document edit/detail flow and preserve return context where possible.
+- [x] Fix `Чистый поток` when the selected report period does not start from the first movement: the chart/report must include an opening balance at `date_from` as the initial value. For default current-year reports, use the balance at the beginning of the year before adding year movements.
+- [x] Replace the unexpected authorization popup/window with redirect-only auth behavior. Unauthorized API responses should redirect to login or refresh silently; no modal/popup should appear. Current backend JWT settings: access token 60 minutes, refresh token 7 days, refresh rotation enabled.
+- [x] Support arithmetic expressions in amount inputs across document forms. Example: entering `6000-4000` should normalize to `2000` and save as a valid numeric amount instead of showing “not a number”.
+- [x] Stop reports from applying filters while a date field is still being edited. Use draft period fields plus an explicit `Apply` action, or only auto-apply after a complete valid date/range, so changing each digit of the year does not rebuild reports repeatedly.

@@ -5,6 +5,7 @@ import { useDeferredValue, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Copy, Landmark, PencilLine, PiggyBank, Search, SlidersHorizontal, Trash2, TrendingDown, TrendingUp, X } from "lucide-react"
 
+import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { PageHeader } from "@/components/shared/page-header"
@@ -53,6 +54,7 @@ export default function BudgetCatalog() {
   const [amountMax, setAmountMax] = useState("")
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
   const deferredSearch = useDeferredValue(searchTerm)
   const itemsQuery = useActiveCashFlowItemsQuery()
 
@@ -414,10 +416,15 @@ export default function BudgetCatalog() {
                     <div className="mt-3 text-sm text-muted-foreground lg:mt-0">{formatDate(budget.date)}</div>
 
                     <div className="mt-4 flex justify-end gap-1 lg:mt-0">
-                      <Button asChild variant="ghost" size="icon">
-                        <Link href={`/budgets/${budget.id}/edit`} aria-label="Редактировать" title="Редактировать">
-                          <PencilLine className="h-4 w-4" />
-                        </Link>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setEditingDocument({ kind: "budget", id: budget.id })}
+                        aria-label="Редактировать"
+                        title="Редактировать"
+                      >
+                        <PencilLine className="h-4 w-4" />
                       </Button>
                       <Button asChild variant="ghost" size="icon">
                         <Link href={getBudgetDuplicateHref(budget)} aria-label="Дублировать" title="Дублировать">
@@ -435,6 +442,15 @@ export default function BudgetCatalog() {
           </CardContent>
         </Card>
       )}
+      <DocumentEditDialog
+        document={editingDocument}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDocument(null)
+          }
+        }}
+        onSaved={() => budgetsQuery.refetch()}
+      />
     </div>
   )
 }

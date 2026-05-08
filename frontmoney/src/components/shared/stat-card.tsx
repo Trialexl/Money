@@ -21,15 +21,15 @@ const toneClasses = {
 
 export function StatCard({ label, value, hint, icon: Icon, tone = "neutral", variant = "default", className }: StatCardProps) {
   return (
-    <Card className={cn("self-start", variant === "compact" && "rounded-[18px] border-border/60 bg-card/80 shadow-none", className)}>
+    <Card className={cn("h-full", variant === "compact" && "rounded-[18px] border-border/60 bg-card/80 shadow-none", className)}>
       <CardContent
         className={cn(
           variant === "compact"
-            ? "px-3.5 pb-3 pt-4 md:flex md:h-[120px] md:flex-col md:justify-center md:px-5 md:pb-4 md:pt-5"
-            : "px-5 pb-4 pt-5"
+            ? "flex h-full min-h-[120px] flex-col justify-center px-4 py-4 md:px-5 md:py-5"
+            : "flex h-full min-h-[132px] flex-col justify-center px-5 py-5 sm:px-6 sm:py-6"
         )}
       >
-        <div className="min-w-0 space-y-2">
+        <div className={cn("min-w-0", variant === "compact" ? "space-y-2" : "space-y-3")}>
           <div className="flex items-center justify-between gap-2">
             <p className="text-[9px] font-semibold uppercase leading-none tracking-[0.14em] text-muted-foreground md:text-[10px] md:tracking-[0.16em]">
               {label}
@@ -46,7 +46,7 @@ export function StatCard({ label, value, hint, icon: Icon, tone = "neutral", var
             {value}
           </p>
           {hint ? (
-            <p className={cn(variant === "compact" ? "text-[9px] leading-4 md:text-[11px]" : "text-xs leading-4", "text-muted-foreground")}>
+            <p className={cn(variant === "compact" ? "text-[9px] leading-4 md:text-[11px]" : "text-xs leading-5", "text-muted-foreground")}>
               {hint}
             </p>
           ) : null}

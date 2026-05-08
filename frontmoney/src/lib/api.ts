@@ -1,5 +1,5 @@
 import axios from "axios"
-import { getAuthToken, clearAuthTokens } from "@/lib/auth"
+import { clearAuthTokens, getAuthToken, getRefreshToken, setAuthTokens } from "@/lib/auth"
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
@@ -9,6 +9,58 @@ const api = axios.create({
     "Content-Type": "application/json",
   },
 })
+
+let refreshPromise: Promise<string> | null = null
+
+function redirectToLogin() {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  clearAuthTokens()
+
+  if (window.location.pathname.startsWith("/auth/login")) {
+    return
+  }
+
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  const params = new URLSearchParams()
+  if (returnTo && returnTo !== "/") {
+    params.set("return_to", returnTo)
+  }
+
+  const query = params.toString()
+  window.location.assign(query ? `/auth/login?${query}` : "/auth/login")
+}
+
+async function refreshAccessToken() {
+  if (refreshPromise) {
+    return refreshPromise
+  }
+
+  refreshPromise = (async () => {
+    const refreshToken = getRefreshToken()
+    if (!refreshToken) {
+      throw new Error("Missing refresh token")
+    }
+
+    const response = await axios.post(`${BASE_URL}/auth/refresh/`, {
+      refresh: refreshToken,
+    })
+
+    const nextAccessToken = response.data?.access
+    if (!nextAccessToken) {
+      throw new Error("Missing access token")
+    }
+
+    setAuthTokens(nextAccessToken, response.data?.refresh || refreshToken)
+    return nextAccessToken
+  })().finally(() => {
+    refreshPromise = null
+  })
+
+  return refreshPromise
+}
 
 // Request interceptor for adding auth token
 api.interceptors.request.use(
@@ -31,33 +83,16 @@ api.interceptors.response.use(
     const originalRequest = error.config
 
     // Handle token expiration or authentication errors
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true
       
       try {
-        // Try to refresh token or redirect to login
-        const refreshToken = localStorage.getItem("refreshToken")
-        
-        if (!refreshToken) {
-          clearAuthTokens()
-          window.location.href = "/auth/login"
-          return Promise.reject(error)
-        }
-        
-        const response = await axios.post(`${BASE_URL}/auth/refresh/`, {
-          refresh: refreshToken,
-        })
-        
-        if (response.data.access) {
-          localStorage.setItem("authToken", response.data.access)
-          
-          // Retry original request with new token
-          originalRequest.headers["Authorization"] = `Bearer ${response.data.access}`
-          return axios(originalRequest)
-        }
+        const accessToken = await refreshAccessToken()
+        originalRequest.headers = originalRequest.headers ?? {}
+        originalRequest.headers["Authorization"] = `Bearer ${accessToken}`
+        return api(originalRequest)
       } catch (refreshError) {
-        clearAuthTokens()
-        window.location.href = "/auth/login"
+        redirectToLogin()
         return Promise.reject(refreshError)
       }
     }

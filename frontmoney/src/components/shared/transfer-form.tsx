@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { normalizeAmountExpressionInput, parseAmountExpression } from "@/lib/amount-expression"
 import { formatCurrency, formatDateForInput } from "@/lib/formatters"
 import { resolveReturnHref } from "@/lib/return-navigation"
 import { Transfer, TransferService } from "@/services/financial-operations-service"
@@ -25,6 +26,9 @@ import { PlanningGraphicDraft, PlanningService } from "@/services/planning-servi
 interface TransferFormProps {
   transfer?: Transfer
   isEdit?: boolean
+  embedded?: boolean
+  onCancel?: () => void
+  onSaved?: (transfer: Transfer) => void
 }
 
 function dateKey(value?: string | null) {
@@ -42,7 +46,7 @@ function isIncludedInBalanceSnapshot(documentDate?: string | null, snapshotDate?
   return documentDateKey <= snapshotDateKey
 }
 
-export default function TransferForm({ transfer, isEdit = false }: TransferFormProps) {
+export default function TransferForm({ transfer, isEdit = false, embedded = false, onCancel, onSaved }: TransferFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const queryClient = useQueryClient()
@@ -108,7 +112,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
 
   const transferMutation = useMutation({
     mutationFn: async () => {
-      const parsedAmount = Number.parseFloat(amount)
+      const parsedAmount = parseAmountExpression(amount) ?? 0
       const payload: Partial<Transfer> = {
         amount: parsedAmount,
         date,
@@ -141,6 +145,11 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
         queryClient.invalidateQueries({ queryKey: ["wallets"] }),
         queryClient.invalidateQueries({ queryKey: ["wallet-balance"] }),
       ])
+      if (onSaved) {
+        onSaved(savedTransfer)
+        return
+      }
+
       router.push(resolveReturnHref(returnToHref, "/transfers", savedTransfer.id || transfer?.id, { resetPage: !isEdit }))
     },
   })
@@ -149,9 +158,9 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
     event.preventDefault()
     setValidationError(null)
 
-    const parsedAmount = Number.parseFloat(amount)
+    const parsedAmount = parseAmountExpression(amount)
 
-    if (!effectiveWalletFromId || !effectiveWalletToId || !date || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (!effectiveWalletFromId || !effectiveWalletToId || !date || parsedAmount === null || parsedAmount <= 0) {
       setValidationError("Укажи дату, сумму и оба кошелька. Сумма должна быть больше нуля.")
       return
     }
@@ -170,6 +179,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
       setValidationError(`Недостаточно средств. Сейчас на кошельке доступно ${formatCurrency(effectiveAvailableBalance)}.`)
       return
     }
+
+    setAmount(String(parsedAmount))
 
     try {
       await transferMutation.mutateAsync()
@@ -229,7 +240,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
   const selectedWalletToLabel = effectiveWalletToId
     ? walletOptions.find((wallet) => wallet.id === effectiveWalletToId)?.name || "Загружаем кошелек"
     : "Выбери назначение"
-  const parsedAmount = Number.parseFloat(amount)
+  const parsedAmount = parseAmountExpression(amount)
   const selectedCashFlowItemLabel = effectiveCashFlowItemId
     ? cashFlowItems.find((item) => item.id === effectiveCashFlowItemId)?.name || transfer?.cash_flow_item_name || "Загружаем статью"
     : "Выбери статью"
@@ -241,7 +252,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      {embedded ? null : (
+        <PageHeader
         eyebrow="Движение денег"
         title={isEdit ? "Редактирование перевода" : "Новый перевод"}
         description={
@@ -256,7 +268,8 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
             </Link>
           </Button>
         }
-      />
+        />
+      )}
 
       <div>
         <Card>
@@ -282,11 +295,11 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
                     <Label htmlFor="transfer-amount">Сумма</Label>
                     <Input
                       id="transfer-amount"
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={amount}
                       onChange={(event) => setAmount(event.target.value)}
+                      onBlur={() => setAmount((current) => normalizeAmountExpressionInput(current))}
                       placeholder="0.00"
                       required
                     />
@@ -425,11 +438,17 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
                     <Save className="h-4 w-4" />
                     {transferMutation.isPending ? "Сохраняем..." : isEdit ? "Сохранить и выйти" : "Создать перевод и выйти"}
                   </Button>
-                  <Button asChild variant="outline" size="icon">
-                    <Link href={cancelHref} aria-label="Отмена" title="Отмена">
+                  {embedded ? (
+                    <Button type="button" variant="outline" size="icon" onClick={onCancel} aria-label="Отмена" title="Отмена">
                       <X className="h-4 w-4" />
-                    </Link>
-                  </Button>
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline" size="icon">
+                      <Link href={cancelHref} aria-label="Отмена" title="Отмена">
+                        <X className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </form>
             )}
@@ -446,7 +465,7 @@ export default function TransferForm({ transfer, isEdit = false }: TransferFormP
         onDraftRowsChange={setPlanningDraftRows}
         onTotalAmountChange={(nextAmount) => setAmount(String(nextAmount))}
         distributionSource={{
-          totalAmount: !Number.isNaN(parsedAmount) && parsedAmount > 0 ? parsedAmount : 0,
+          totalAmount: parsedAmount !== null && parsedAmount > 0 ? parsedAmount : 0,
           startDate: date,
         }}
       />
