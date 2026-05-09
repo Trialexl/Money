@@ -319,6 +319,22 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
+                <div className="border-t border-border/60 pt-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Свободный остаток</div>
+                  <div
+                    className={
+                      overview.cash_with_budget >= 0
+                        ? "mt-1 text-lg font-semibold tracking-[-0.04em] text-emerald-600 dark:text-emerald-300 sm:mt-1.5 sm:text-xl"
+                        : "mt-1 text-lg font-semibold tracking-[-0.04em] text-rose-600 dark:text-rose-300 sm:mt-1.5 sm:text-xl"
+                    }
+                  >
+                    {formatCurrency(overview.cash_with_budget)}
+                  </div>
+                  <div className="mt-1 text-xs leading-4 text-muted-foreground">
+                    Остаток + план доходов − план расходов
+                  </div>
+                </div>
+
                 <Link
                   href={monthlyExpensesReportHref}
                   className="block border-t border-border/60 pt-3 transition-colors hover:text-foreground/80"
