@@ -41,6 +41,7 @@ export interface CashFlowReportResponse {
     income: number
     expense: number
   }
+  opening_balance: number
   months: CashFlowReportMonth[]
   details: CashFlowReportDetail[]
 }
@@ -106,6 +107,7 @@ function mapCashFlowReport(raw: any): CashFlowReportResponse {
       income: fromApiAmount(raw?.totals?.income),
       expense: fromApiAmount(raw?.totals?.expense),
     },
+    opening_balance: fromApiAmount(raw?.opening_balance),
     months: Array.isArray(raw?.months)
       ? raw.months.map((month: any) => ({
           period: fromApiDateTime(month?.period) ?? "",

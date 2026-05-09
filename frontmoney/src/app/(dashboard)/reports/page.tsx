@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import * as Dialog from "@radix-ui/react-dialog"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { ResponsiveBar } from "@nivo/bar"
@@ -8,6 +9,7 @@ import { ResponsiveLine } from "@nivo/line"
 import { ResponsivePie } from "@nivo/pie"
 import {
   BarChart3,
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -17,6 +19,7 @@ import {
   TrendingDown,
   TrendingUp,
   Wallet2,
+  X,
 } from "lucide-react"
 
 import ExportReportButtons from "@/components/reports/export-report-buttons"
@@ -92,6 +95,7 @@ type TimelineRow = {
 type WalletRow = {
   id: string
   name: string
+  hidden: boolean
   balance: number
   share: number
 }
@@ -203,17 +207,6 @@ function getMonthValue(year: number, monthIndex: number) {
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}`
 }
 
-function getPreviousDate(value: string) {
-  const [year, month, day] = getDateKey(value).split("-").map(Number)
-  if (!year || !month || !day) {
-    return undefined
-  }
-
-  const date = new Date(year, month - 1, day)
-  date.setDate(date.getDate() - 1)
-  return formatDateForInput(date)
-}
-
 function normalizeDateRange(from: string, to: string) {
   return from <= to ? { from, to } : { from: to, to: from }
 }
@@ -264,11 +257,14 @@ export default function ReportsPage() {
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
   const [collapsedMonthlyGroups, setCollapsedMonthlyGroups] = useState<Record<string, boolean>>({})
   const [collapsedBudgetPlanGroups, setCollapsedBudgetPlanGroups] = useState<Record<string, boolean>>({})
+  const [selectedWalletKey, setSelectedWalletKey] = useState<string | null>(null)
   const [selectedMonthlyExpenseItemKey, setSelectedMonthlyExpenseItemKey] = useState<string | null>(null)
   const [selectedBudgetPlanItemKey, setSelectedBudgetPlanItemKey] = useState<string | null>(null)
+  const [hiddenWalletKeys, setHiddenWalletKeys] = useState<Record<string, boolean>>({})
   const [hiddenMonthlyExpenseItemKeys, setHiddenMonthlyExpenseItemKeys] = useState<Record<string, boolean>>({})
   const [hiddenBudgetPlanItemKeys, setHiddenBudgetPlanItemKeys] = useState<Record<string, boolean>>({})
   const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
+  const [periodDialogOpen, setPeriodDialogOpen] = useState(false)
   const periodFromMonth = getMonthInputValue(draftDateFrom)
   const periodToMonth = getMonthInputValue(draftDateTo)
   const cashFlowChartRef = useRef<HTMLDivElement>(null)
@@ -295,8 +291,7 @@ export default function ReportsPage() {
     ],
     staleTime: 60_000,
     queryFn: async () => {
-      const openingDate = getPreviousDate(dateFrom)
-      const [cashFlow, budgetExpense, overview, openingOverview] = await Promise.all([
+      const [cashFlow, budgetExpense, overview] = await Promise.all([
         ReportService.getCashFlowReport({ dateFrom, dateTo }),
         ReportService.getBudgetExpenseReport({
           dateFrom,
@@ -304,15 +299,13 @@ export default function ReportsPage() {
           limitByToday: budgetForecast,
           project: budgetProjectId || undefined,
         }),
-        DashboardService.getOverview({ date: dateTo, hideHiddenWallets: true }),
-        DashboardService.getOverview({ date: openingDate, hideHiddenWallets: true }),
+        DashboardService.getOverview({ date: dateTo, hideHiddenWallets: false }),
       ])
 
       return {
         cashFlow,
         budgetExpense,
         overview,
-        openingOverview,
       }
     },
   })
@@ -345,10 +338,22 @@ export default function ReportsPage() {
   }
 
   const resetReportItemFilters = () => {
+    setSelectedWalletKey(null)
     setSelectedMonthlyExpenseItemKey(null)
     setSelectedBudgetPlanItemKey(null)
+    setHiddenWalletKeys({})
     setHiddenMonthlyExpenseItemKeys({})
     setHiddenBudgetPlanItemKeys({})
+  }
+
+  const handlePeriodDialogOpenChange = (open: boolean) => {
+    setPeriodDialogOpen(open)
+    if (open) {
+      setDraftDateFrom(dateFrom)
+      setDraftDateTo(dateTo)
+      setMonthPickerYear(Number(dateFrom.slice(0, 4)) || currentYear)
+      setMonthSelectionAnchor(null)
+    }
   }
 
   const applyReportPeriod = (
@@ -367,6 +372,7 @@ export default function ReportsPage() {
     setSelectedPreset(nextPreset)
     resetReportItemFilters()
     updateReportUrl(normalized.from, normalized.to, budgetForecast)
+    setPeriodDialogOpen(false)
   }
 
   const handleSelectMonth = (monthValue: string) => {
@@ -441,6 +447,18 @@ export default function ReportsPage() {
     })
   }
 
+  const toggleHiddenWallet = (walletKey: string) => {
+    setHiddenWalletKeys((current) => {
+      const next = { ...current }
+      if (next[walletKey]) {
+        delete next[walletKey]
+      } else {
+        next[walletKey] = true
+      }
+      return next
+    })
+  }
+
   const toggleHiddenBudgetPlanItem = (itemKey: string) => {
     setHiddenBudgetPlanItemKeys((current) => {
       const next = { ...current }
@@ -468,7 +486,7 @@ export default function ReportsPage() {
     )
   }
 
-  const { cashFlow, budgetExpense, overview, openingOverview } = reportsQuery.data
+  const { cashFlow, budgetExpense, overview } = reportsQuery.data
   const budgetProjectOptions = (projectsQuery.data ?? [])
     .filter((project) => !project.deleted)
     .sort((left, right) => left.name.localeCompare(right.name, "ru"))
@@ -479,7 +497,7 @@ export default function ReportsPage() {
   const incomeTotal = cashFlow.totals.income
   const expenseTotal = cashFlow.totals.expense
   const netTotal = incomeTotal - expenseTotal
-  const openingWalletTotal = openingOverview.wallet_total
+  const openingWalletTotal = cashFlow.opening_balance
   const cumulativeEndingBalance = openingWalletTotal + netTotal
   const plannedBudgetCount = budgetExpense.summary.length
   const includedExpenseTotal = budgetExpense.totals.actual
@@ -531,28 +549,56 @@ export default function ReportsPage() {
     net: row.net,
   }))
 
-  const totalAbsoluteBalance = overview.wallets.reduce(
-    (sum: number, wallet: DashboardWalletSummary) => sum + Math.abs(wallet.balance),
-    0
-  )
-  const walletRows: WalletRow[] = overview.wallets
+  const hiddenWalletKeySet = new Set(Object.keys(hiddenWalletKeys).filter((key) => hiddenWalletKeys[key]))
+  const allWalletRows: WalletRow[] = overview.wallets
     .map((wallet: DashboardWalletSummary) => ({
       id: wallet.wallet_id,
       name: wallet.wallet_name,
+      hidden: wallet.hidden,
       balance: wallet.balance,
-      share: totalAbsoluteBalance > 0 ? (Math.abs(wallet.balance) / totalAbsoluteBalance) * 100 : 0,
+      share: 0,
     }))
     .sort((left: WalletRow, right: WalletRow) => right.balance - left.balance)
+  const activeSelectedWalletKey =
+    selectedWalletKey &&
+    allWalletRows.some((wallet) => wallet.id === selectedWalletKey) &&
+    !hiddenWalletKeySet.has(selectedWalletKey)
+      ? selectedWalletKey
+      : null
+  const visibleWalletBaseRows = allWalletRows.filter(
+    (wallet) => !hiddenWalletKeySet.has(wallet.id) && (!activeSelectedWalletKey || wallet.id === activeSelectedWalletKey)
+  )
+  const visibleWalletAbsoluteBalance = visibleWalletBaseRows.reduce(
+    (sum: number, wallet: WalletRow) => sum + Math.abs(wallet.balance),
+    0
+  )
+  const walletRows: WalletRow[] = visibleWalletBaseRows.map((wallet) => ({
+    ...wallet,
+    share: visibleWalletAbsoluteBalance > 0 ? (Math.abs(wallet.balance) / visibleWalletAbsoluteBalance) * 100 : 0,
+  }))
+  const walletLegendAbsoluteBalance = allWalletRows.reduce(
+    (sum: number, wallet: WalletRow) => sum + Math.abs(wallet.balance),
+    0
+  )
+  const walletLegendRows = allWalletRows.map((wallet) => ({
+    ...wallet,
+    share: walletLegendAbsoluteBalance > 0 ? (Math.abs(wallet.balance) / walletLegendAbsoluteBalance) * 100 : 0,
+  }))
   const positiveWalletRows = walletRows.filter((wallet: WalletRow) => wallet.balance > 0)
   const totalWalletBalance = walletRows.reduce((sum: number, wallet: WalletRow) => sum + wallet.balance, 0)
   const positiveWalletBalance = positiveWalletRows.reduce((sum: number, wallet: WalletRow) => sum + wallet.balance, 0)
   const negativeWalletBalance = walletRows.filter((wallet: WalletRow) => wallet.balance < 0).reduce((sum: number, wallet: WalletRow) => sum + wallet.balance, 0)
   const dominantWallet = walletRows[0] || null
+  const selectedWalletName = activeSelectedWalletKey
+    ? allWalletRows.find((wallet) => wallet.id === activeSelectedWalletKey)?.name ?? null
+    : null
+  const hiddenWalletCount = hiddenWalletKeySet.size
 
   const walletExportRows = walletRows.map((wallet: WalletRow) => ({
     name: wallet.name,
     balance: wallet.balance,
     share: wallet.share,
+    hidden: wallet.hidden ? "Да" : "Нет",
   }))
 
   const categoryTotals = new Map<string, CategoryRow>()
@@ -953,114 +999,25 @@ export default function ReportsPage() {
 
         <Card>
           <CardContent className="space-y-4 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-1">
                 <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">Период отчета</div>
                 <div className="text-sm leading-5 text-muted-foreground">
-                  Быстрый выбор диапазона месяцев, точные даты можно уточнить ниже.
+                  С {formatDate(dateFrom)} по {formatDate(dateTo)}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant={selectedPreset === "month" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("month")}>
-                  Месяц
-                </Button>
-                <Button variant={selectedPreset === "quarter" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("quarter")}>
-                  Квартал
-                </Button>
-                <Button variant={selectedPreset === "year" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("year")}>
-                  Год
-                </Button>
-                <Button variant={selectedPreset === "ytd" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("ytd")}>
-                  С начала года
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1fr)]">
-              <div className="rounded-[22px] border border-border/70 bg-background/70 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 rounded-2xl"
-                    onClick={() => setMonthPickerYear((year) => year - 1)}
-                    aria-label="Предыдущий год"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">{monthPickerYear}</div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 rounded-2xl"
-                    onClick={() => setMonthPickerYear((year) => year + 1)}
-                    aria-label="Следующий год"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-3">
-                  {MONTH_LABELS.map((label, index) => {
-                    const monthValue = getMonthValue(monthPickerYear, index)
-                    const isInRange = monthValue >= periodFromMonth && monthValue <= periodToMonth
-                    const isEdge = monthValue === periodFromMonth || monthValue === periodToMonth
-                    const isAnchor = monthSelectionAnchor === monthValue
-
-                    return (
-                      <button
-                        key={monthValue}
-                        type="button"
-                        className={`rounded-2xl border px-3 py-2 text-sm font-medium transition ${
-                          isEdge || isAnchor
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : isInRange
-                              ? "border-primary/40 bg-primary/10 text-foreground"
-                              : "border-border/60 bg-card/50 text-muted-foreground hover:border-primary/60 hover:text-foreground"
-                        }`}
-                        onClick={() => handleSelectMonth(monthValue)}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="mt-3 text-xs leading-5 text-muted-foreground">
-                  Выбери начальный и конечный месяц. Точный день можно поправить справа.
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                <Label htmlFor="reports-date-from">Дата с</Label>
-                <Input
-                  id="reports-date-from"
-                  type="date"
-                  value={draftDateFrom}
-                  onChange={(event) => setExactDateFrom(event.target.value)}
-                />
-                </div>
-                <div className="space-y-2">
-                <Label htmlFor="reports-date-to">Дата по</Label>
-                <Input
-                  id="reports-date-to"
-                  type="date"
-                  value={draftDateTo}
-                  onChange={(event) => setExactDateTo(event.target.value)}
-                />
-                </div>
-                <div className="md:col-span-2">
-                  <Button
-                    type="button"
-                    onClick={() => applyReportPeriod()}
-                    disabled={!draftDateFrom || !draftDateTo || (draftDateFrom === dateFrom && draftDateTo === dateTo)}
-                    className="w-full sm:w-auto"
-                  >
-                    Применить период
-                  </Button>
-                </div>
-              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-auto justify-between gap-3 rounded-[18px] px-4 py-3 sm:min-w-[280px]"
+                onClick={() => handlePeriodDialogOpenChange(true)}
+              >
+                <span className="flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4 text-primary" />
+                  Выбрать период
+                </span>
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              </Button>
             </div>
 
             {isBudgetTab ? (
@@ -1096,9 +1053,9 @@ export default function ReportsPage() {
                     <Label htmlFor="budget-forecast-mode" className="cursor-pointer">
                       Прогноз бюджета
                     </Label>
-                    <div className="text-sm leading-5 text-muted-foreground">
-                      План до даты окончания, факт можно ограничить сегодняшним днем.
-                    </div>
+                <div className="text-sm leading-5 text-muted-foreground">
+                  План до даты окончания, факт можно ограничить сегодняшним днем.
+                </div>
                   </div>
                   <Switch
                     id="budget-forecast-mode"
@@ -1120,6 +1077,139 @@ export default function ReportsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <Dialog.Root open={periodDialogOpen} onOpenChange={handlePeriodDialogOpenChange}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm" />
+            <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[min(calc(100vw-18px),1040px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[28px] border border-border/70 bg-background shadow-[0_35px_120px_-45px_rgba(15,23,42,0.85)]">
+              <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4 sm:px-6">
+                <div className="min-w-0">
+                  <Dialog.Title className="text-xl font-semibold tracking-[-0.03em] text-foreground">
+                    Период отчета
+                  </Dialog.Title>
+                  <Dialog.Description className="mt-1 text-sm leading-5 text-muted-foreground">
+                    Быстрый выбор диапазона месяцев, точные даты можно уточнить ниже.
+                  </Dialog.Description>
+                </div>
+                <Dialog.Close asChild>
+                  <Button variant="ghost" size="icon" className="shrink-0 rounded-2xl" aria-label="Закрыть">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </Dialog.Close>
+              </div>
+
+              <div className="max-h-[calc(92vh-92px)] overflow-y-auto px-4 py-4 sm:px-6">
+                <div className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant={selectedPreset === "month" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("month")}>
+                      Месяц
+                    </Button>
+                    <Button variant={selectedPreset === "quarter" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("quarter")}>
+                      Квартал
+                    </Button>
+                    <Button variant={selectedPreset === "year" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("year")}>
+                      Год
+                    </Button>
+                    <Button variant={selectedPreset === "ytd" ? "default" : "outline"} size="sm" onClick={() => setPresetRange("ytd")}>
+                      С начала года
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1fr)]">
+                    <div className="rounded-[22px] border border-border/70 bg-background/70 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9 rounded-2xl"
+                          onClick={() => setMonthPickerYear((year) => year - 1)}
+                          aria-label="Предыдущий год"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">{monthPickerYear}</div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9 rounded-2xl"
+                          onClick={() => setMonthPickerYear((year) => year + 1)}
+                          aria-label="Следующий год"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-3">
+                        {MONTH_LABELS.map((label, index) => {
+                          const monthValue = getMonthValue(monthPickerYear, index)
+                          const isInRange = monthValue >= periodFromMonth && monthValue <= periodToMonth
+                          const isEdge = monthValue === periodFromMonth || monthValue === periodToMonth
+                          const isAnchor = monthSelectionAnchor === monthValue
+
+                          return (
+                            <button
+                              key={monthValue}
+                              type="button"
+                              className={`rounded-2xl border px-3 py-2 text-sm font-medium transition ${
+                                isEdge || isAnchor
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : isInRange
+                                    ? "border-primary/40 bg-primary/10 text-foreground"
+                                    : "border-border/60 bg-card/50 text-muted-foreground hover:border-primary/60 hover:text-foreground"
+                              }`}
+                              onClick={() => handleSelectMonth(monthValue)}
+                            >
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div className="mt-3 text-xs leading-5 text-muted-foreground">
+                        Выбери начальный и конечный месяц. Точный день можно поправить справа.
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="reports-date-from">Дата с</Label>
+                        <Input
+                          id="reports-date-from"
+                          type="date"
+                          value={draftDateFrom}
+                          onChange={(event) => setExactDateFrom(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="reports-date-to">Дата по</Label>
+                        <Input
+                          id="reports-date-to"
+                          type="date"
+                          value={draftDateTo}
+                          onChange={(event) => setExactDateTo(event.target.value)}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <Button
+                          type="button"
+                          onClick={() => applyReportPeriod()}
+                          disabled={!draftDateFrom || !draftDateTo || (draftDateFrom === dateFrom && draftDateTo === dateTo)}
+                          className="w-full sm:w-auto"
+                        >
+                          Применить период
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
+                    Будет применено: с {formatDate(draftDateFrom)} по {formatDate(draftDateTo)}
+                  </div>
+                </div>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
 
         <TabsContent value="cashflow" className="space-y-6">
           <Card>
@@ -1223,7 +1313,9 @@ export default function ReportsPage() {
             <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-1">
                 <CardTitle>Структура капитала по кошелькам</CardTitle>
-                <CardDescription>Показывает, где сейчас лежат деньги и насколько баланс распределён между кошельками.</CardDescription>
+                <CardDescription>
+                  Показывает все кошельки, включая скрытые. Клик по названию фильтрует отчет, глаз исключает кошелек.
+                </CardDescription>
               </div>
               <ExportReportButtons
                 data={walletExportRows}
@@ -1231,6 +1323,7 @@ export default function ReportsPage() {
                   { key: "name", header: "Кошелек" },
                   { key: "balance", header: "Баланс", formatter: exportFormatters.currency },
                   { key: "share", header: "Доля", formatter: exportFormatters.percent },
+                  { key: "hidden", header: "Скрытый" },
                 ]}
                 filename="wallet-structure-report"
                 title="Структура балансов по кошелькам"
@@ -1240,12 +1333,12 @@ export default function ReportsPage() {
           </Card>
 
           <div className="grid gap-4 md:grid-cols-3">
-            <StatCard label="Общий баланс" value={formatCurrency(totalWalletBalance)} hint="Сумма по всем видимым кошелькам" icon={Wallet2} tone={totalWalletBalance >= 0 ? "positive" : "danger"} />
-            <StatCard label="Положительные балансы" value={formatCurrency(positiveWalletBalance)} hint="Кошельки с положительным остатком" icon={TrendingUp} tone="positive" />
-            <StatCard label="Отрицательные балансы" value={formatCurrency(negativeWalletBalance)} hint="Кошельки в минусе или долге" icon={TrendingDown} tone="danger" />
+            <StatCard label="Общий баланс" value={formatCurrency(totalWalletBalance)} hint="Сумма по кошелькам в отчете" icon={Wallet2} tone={totalWalletBalance >= 0 ? "positive" : "danger"} />
+            <StatCard label="Положительные балансы" value={formatCurrency(positiveWalletBalance)} hint="Включенные кошельки с положительным остатком" icon={TrendingUp} tone="positive" />
+            <StatCard label="Отрицательные балансы" value={formatCurrency(negativeWalletBalance)} hint="Включенные кошельки в минусе или долге" icon={TrendingDown} tone="danger" />
           </div>
 
-          {walletRows.length === 0 ? (
+          {allWalletRows.length === 0 ? (
             renderNoData("Нет данных по кошелькам", "В системе пока нет кошельков с доступными балансами.")
           ) : (
             <div className="grid gap-6 xl:grid-cols-2">
@@ -1254,64 +1347,165 @@ export default function ReportsPage() {
                   <CardTitle>Распределение положительных балансов</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {positiveWalletRows.length === 0 ? (
-                    <div className="py-20 text-center text-sm text-muted-foreground">Нет кошельков с положительным балансом для круговой диаграммы.</div>
-                  ) : (
-                    <div className="h-[380px]" ref={walletChartRef}>
-                      <ResponsivePie
-                        data={positiveWalletRows.map((wallet) => ({
-                          id: wallet.name,
-                          label: wallet.name,
-                          value: wallet.balance,
-                        }))}
-                        margin={{ top: 20, right: 140, bottom: 20, left: 20 }}
-                        innerRadius={0.58}
-                        padAngle={1}
-                        cornerRadius={4}
-                        activeOuterRadiusOffset={8}
-                        tooltip={({ datum }) => (
-                          <div className="rounded border bg-background px-2 py-1 text-xs">
-                            {String(datum.label)}: {formatCurrency(Number(datum.value))}
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+                    {positiveWalletRows.length === 0 ? (
+                      <div className="py-20 text-center text-sm text-muted-foreground">
+                        Нет включенных кошельков с положительным балансом для круговой диаграммы.
+                      </div>
+                    ) : (
+                      <div className="h-[380px]" ref={walletChartRef}>
+                        <ResponsivePie
+                          data={positiveWalletRows.map((wallet) => ({
+                            id: wallet.name,
+                            label: wallet.name,
+                            value: wallet.balance,
+                          }))}
+                          margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
+                          innerRadius={0.58}
+                          padAngle={1}
+                          cornerRadius={4}
+                          activeOuterRadiusOffset={8}
+                          tooltip={({ datum }) => (
+                            <div className="rounded border bg-background px-2 py-1 text-xs">
+                              {String(datum.label)}: {formatCurrency(Number(datum.value))}
+                            </div>
+                          )}
+                          colors={{ scheme: "category10" }}
+                        />
+                      </div>
+                    )}
+                    <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold tracking-[-0.02em]">Легенда кошельков</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Название — отбор. Глаз — исключить из отчета.
                           </div>
-                        )}
-                        legends={[
-                          {
-                            anchor: "right",
-                            direction: "column",
-                            translateX: 110,
-                            itemWidth: 120,
-                            itemHeight: 18,
-                          },
-                        ]}
-                        colors={{ scheme: "category10" }}
-                      />
+                        </div>
+                        {selectedWalletName || hiddenWalletCount > 0 ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedWalletKey(null)
+                              setHiddenWalletKeys({})
+                            }}
+                          >
+                            Сбросить
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="mt-4 max-h-[300px] space-y-2 overflow-y-auto pr-1">
+                        {walletLegendRows.map((wallet) => {
+                          const isSelected = activeSelectedWalletKey === wallet.id
+                          const isHidden = hiddenWalletKeySet.has(wallet.id)
+                          return (
+                            <div
+                              key={wallet.id}
+                              className={`flex items-stretch gap-2 rounded-2xl border px-3 py-2 transition ${
+                                isSelected
+                                  ? "border-primary bg-primary/10"
+                                  : isHidden
+                                    ? "border-border/40 bg-muted/30 opacity-60"
+                                    : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 text-left"
+                                onClick={() =>
+                                  setSelectedWalletKey((current) => (current === wallet.id ? null : wallet.id))
+                                }
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? "line-through" : ""}`}
+                                  >
+                                    {wallet.name}
+                                  </span>
+                                  {wallet.hidden ? <Badge variant="outline">скрыт</Badge> : null}
+                                </div>
+                                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                                  <span>{isHidden ? "Исключен" : `${wallet.share.toFixed(1)}% от баланса`}</span>
+                                  <span className={wallet.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}>
+                                    {formatCurrency(wallet.balance)}
+                                  </span>
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition hover:border-primary/60 hover:text-primary"
+                                aria-label={isHidden ? "Вернуть кошелек в отчет" : "Исключить кошелек из отчета"}
+                                title={isHidden ? "Вернуть кошелек" : "Исключить кошелек"}
+                                onClick={() => {
+                                  if (!isHidden && isSelected) {
+                                    setSelectedWalletKey(null)
+                                  }
+                                  toggleHiddenWallet(wallet.id)
+                                }}
+                              >
+                                {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
                   <CardTitle>Детализация балансов</CardTitle>
+                  {selectedWalletName ? <CardDescription>Фильтр: {selectedWalletName}</CardDescription> : null}
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-x-auto">
+                  {walletRows.length === 0 ? (
+                    <div className="py-16 text-center text-sm text-muted-foreground">
+                      Все кошельки исключены из отчета. Верни кошелек через легенду или сбрось фильтры.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
                     <table className="w-full text-[13px] sm:text-sm">
                       <thead>
                         <tr className="border-b text-left text-xs text-muted-foreground">
                           <th className="pb-3">Кошелек</th>
                           <th className="pb-3 text-right">Баланс</th>
                           <th className="pb-3 text-right">Доля</th>
+                          <th className="pb-3 text-right">Видимость</th>
                         </tr>
                       </thead>
                       <tbody>
                         {walletRows.map((wallet) => (
                           <tr key={wallet.id} className="border-b border-border/60">
-                            <td className="py-2.5">{wallet.name}</td>
+                            <td className="py-2.5">
+                              <span className="inline-flex items-center gap-2">
+                                {wallet.name}
+                                {wallet.hidden ? <Badge variant="outline">скрыт</Badge> : null}
+                              </span>
+                            </td>
                             <td className={`py-2.5 text-right font-medium ${wallet.balance >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
                               {formatCurrency(wallet.balance)}
                             </td>
                             <td className="py-2.5 text-right text-muted-foreground">{wallet.share.toFixed(1)}%</td>
+                            <td className="py-2.5 text-right">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                aria-label="Исключить кошелек из отчета"
+                                title="Исключить кошелек"
+                                onClick={() => {
+                                  if (activeSelectedWalletKey === wallet.id) {
+                                    setSelectedWalletKey(null)
+                                  }
+                                  toggleHiddenWallet(wallet.id)
+                                }}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1322,10 +1516,12 @@ export default function ReportsPage() {
                             {formatCurrency(totalWalletBalance)}
                           </td>
                           <td className="py-3 text-right text-muted-foreground">100%</td>
+                          <td />
                         </tr>
                       </tfoot>
                     </table>
-                  </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query"
 
 import { queryKeys } from "@/lib/query-keys"
-import { CashFlowItemHierarchy, CashFlowItemService } from "@/services/cash-flow-item-service"
+import { CashFlowItemHierarchy, CashFlowItemService, compareCashFlowItemsByPopularity } from "@/services/cash-flow-item-service"
 import { ProjectService } from "@/services/project-service"
 import { WalletService } from "@/services/wallet-service"
 
@@ -89,7 +89,7 @@ export function useActiveCashFlowItemsQuery() {
     queryKey: queryKeys.cashFlowItems.active,
     queryFn: async () => {
       const items = await CashFlowItemService.getCashFlowItems()
-      return sortByName(items.filter((item) => !item.deleted))
+      return [...items.filter((item) => !item.deleted)].sort(compareCashFlowItemsByPopularity)
     },
   })
 }
@@ -103,7 +103,7 @@ export function useCashFlowTreeQuery() {
         CashFlowItemService.getCashFlowItemHierarchy(),
       ])
 
-      const activeItems = sortByName(items.filter((item) => !item.deleted))
+      const activeItems = [...items.filter((item) => !item.deleted)].sort(compareCashFlowItemsByPopularity)
       const allowedIds = new Set(activeItems.map((item) => item.id))
 
       return {

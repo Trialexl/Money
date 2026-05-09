@@ -1,9 +1,10 @@
 "use client"
 
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import * as Dialog from "@radix-ui/react-dialog"
 import * as Popover from "@radix-ui/react-popover"
 import {
@@ -35,7 +36,7 @@ import {
 } from "lucide-react"
 
 import { EmptyState } from "@/components/shared/empty-state"
-import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
+import type { EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,12 +55,18 @@ import {
 type ActivityFilter = "all" | "receipt" | "expenditure" | "transfer"
 type DashboardBlock = "wallets" | "activity" | "budget"
 
+const DocumentEditDialog = dynamic(
+  () => import("@/components/shared/document-edit-dialog").then((module) => module.DocumentEditDialog),
+  { ssr: false, loading: () => null }
+)
+
 function getActivityFilterFromParam(value: string | null): ActivityFilter {
   return value === "receipt" || value === "expenditure" || value === "transfer" ? value : "all"
 }
 
 export default function DashboardPage() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const initialActivityFilter = getActivityFilterFromParam(searchParams.get("activity"))
@@ -92,21 +99,19 @@ export default function DashboardPage() {
 
   const dashboardQuery = useQuery({
     queryKey: ["dashboard-overview", { selectedDate, showHiddenWallets }],
-    queryFn: async () => {
-      const [overview, recentActivity] = await Promise.all([
-        DashboardService.getOverview({ date: selectedDate, hideHiddenWallets: !showHiddenWallets }),
-        DashboardService.getRecentActivity({
-          date: selectedDate,
-          hideHiddenWallets: !showHiddenWallets,
-          limit: 20,
-        }),
-      ])
+    queryFn: () => DashboardService.getOverview({ date: selectedDate, hideHiddenWallets: !showHiddenWallets }),
+    staleTime: 60_000,
+  })
 
-      return {
-        overview,
-        recentActivity,
-      }
-    },
+  const recentActivityQuery = useQuery({
+    queryKey: ["dashboard-recent-activity", { selectedDate, showHiddenWallets }],
+    queryFn: () =>
+      DashboardService.getRecentActivity({
+        date: selectedDate,
+        hideHiddenWallets: !showHiddenWallets,
+        limit: 20,
+      }),
+    enabled: !collapsedBlocks.activity,
     staleTime: 60_000,
   })
 
@@ -136,8 +141,8 @@ export default function DashboardPage() {
     )
   }
 
-  const overview = dashboardQuery.data.overview
-  const allRecentActivity: DashboardRecentActivity[] = dashboardQuery.data.recentActivity
+  const overview = dashboardQuery.data
+  const allRecentActivity: DashboardRecentActivity[] = recentActivityQuery.data ?? []
 
   const currentMonthIncome = overview.month_comparison.current_month.income
   const currentMonthExpense = overview.month_comparison.current_month.expense
@@ -176,6 +181,14 @@ export default function DashboardPage() {
       : null
 
   const recentActivity = allRecentActivity.filter((item) => activityFilter === "all" || item.kind === activityFilter)
+  const recentActivityLabel =
+    collapsedBlocks.activity && !recentActivityQuery.data
+      ? "Свернуто"
+      : recentActivityQuery.isLoading
+        ? "Загружаем..."
+        : recentActivityQuery.isError
+          ? "Ошибка загрузки"
+          : `${recentActivity.length} строк`
 
   const handleSelectDashboardDate = (value: Date) => {
     const nextDate = formatDateForInput(value)
@@ -251,6 +264,8 @@ export default function DashboardPage() {
     const params = new URLSearchParams(searchParams.toString())
     params.set("highlight", document.id)
     const query = params.toString()
+    queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] })
+    queryClient.invalidateQueries({ queryKey: ["dashboard-recent-activity"] })
     router.replace(query ? `/dashboard?${query}` : "/dashboard", { scroll: false })
   }
 
@@ -603,7 +618,7 @@ export default function DashboardPage() {
                 <CardHeader className="flex flex-row items-center justify-between gap-3 pb-4">
                   <div className="min-w-0">
                     <CardTitle>Последние документы</CardTitle>
-                    <div className="mt-1 text-xs text-muted-foreground">{recentActivity.length} строк</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{recentActivityLabel}</div>
                   </div>
                   <Button
                     variant="outline"
@@ -633,7 +648,18 @@ export default function DashboardPage() {
                       Переводы
                     </Button>
                   </div>
-                  {recentActivity.length > 0 ? (
+                  {recentActivityQuery.isLoading ? (
+                    <div className="rounded-[20px] border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
+                      Загружаем последние документы...
+                    </div>
+                  ) : recentActivityQuery.isError ? (
+                    <div className="space-y-3 rounded-[20px] border border-destructive/20 bg-destructive/10 px-4 py-4 text-sm text-destructive">
+                      <div>Не удалось загрузить последние документы.</div>
+                      <Button size="sm" variant="outline" onClick={() => recentActivityQuery.refetch()}>
+                        Повторить
+                      </Button>
+                    </div>
+                  ) : recentActivity.length > 0 ? (
                     recentActivity.map((operation) => {
                       const isHighlighted = highlightedDocumentId === operation.id
 

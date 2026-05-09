@@ -125,12 +125,13 @@ function parseBudgetFilter(value: string | null): BudgetFilter {
   return value === "included" || value === "excluded" ? value : "all"
 }
 
-function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
+function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null; usage_count?: number | null }): SearchableSelectOption {
   return {
     value: item.id,
     label: item.name || "Без названия",
     description: item.code ? `Код ${item.code}` : undefined,
     keywords: [item.code ?? ""],
+    rank: item.usage_count ?? 0,
   }
 }
 

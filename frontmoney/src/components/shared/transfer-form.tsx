@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { normalizeAmountExpressionInput, parseAmountExpression } from "@/lib/amount-expression"
 import { formatCurrency, formatDateForInput } from "@/lib/formatters"
 import { resolveReturnHref } from "@/lib/return-navigation"
+import { compareCashFlowItemsByPopularity } from "@/services/cash-flow-item-service"
 import { Transfer, TransferService } from "@/services/financial-operations-service"
 import { PlanningGraphicDraft, PlanningService } from "@/services/planning-service"
 
@@ -203,7 +204,7 @@ export default function TransferForm({ transfer, isEdit = false, embedded = fals
       })
     }
 
-    return options.sort((left, right) => (left.name ?? "").localeCompare(right.name ?? "", "ru"))
+    return options.sort(compareCashFlowItemsByPopularity)
   }, [cashFlowItemsQuery.data, effectiveCashFlowItemId, transfer?.cash_flow_item_name])
   const cashFlowItemOptions: SearchableSelectOption[] = [
     { value: "unselected", label: "Не выбрано" },
@@ -212,6 +213,7 @@ export default function TransferForm({ transfer, isEdit = false, embedded = fals
       label: item.name || "Без названия",
       description: item.code ? `Код ${item.code}` : undefined,
       keywords: [item.code ?? ""],
+      rank: item.usage_count ?? 0,
     })),
   ]
   const walletOptions = useMemo(() => {

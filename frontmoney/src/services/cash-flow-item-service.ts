@@ -6,6 +6,7 @@ export interface CashFlowItem {
   code?: string | null
   parent?: string
   include_in_budget?: boolean | null
+  usage_count?: number
   created_at: string
   updated_at: string
   deleted: boolean
@@ -13,6 +14,14 @@ export interface CashFlowItem {
 
 export interface CashFlowItemHierarchy extends CashFlowItem {
   children?: CashFlowItemHierarchy[]
+}
+
+export function compareCashFlowItemsByPopularity<T extends { name?: string | null; usage_count?: number | null }>(
+  left: T,
+  right: T
+) {
+  const usageDelta = (right.usage_count ?? 0) - (left.usage_count ?? 0)
+  return usageDelta !== 0 ? usageDelta : (left.name ?? "").localeCompare(right.name ?? "", "ru")
 }
 
 export const CashFlowItemService = {
@@ -24,6 +33,7 @@ export const CashFlowItemService = {
       code: i.code ?? null,
       parent: i.parent ?? undefined,
       include_in_budget: i.include_in_budget ?? null,
+      usage_count: Number(i.usage_count ?? 0),
       created_at: i.created_at,
       updated_at: i.updated_at,
       deleted: !!i.deleted,
@@ -38,6 +48,7 @@ export const CashFlowItemService = {
       code: i.code ?? null,
       parent: i.parent ?? undefined,
       include_in_budget: i.include_in_budget ?? null,
+      usage_count: Number(i.usage_count ?? 0),
       created_at: i.created_at,
       updated_at: i.updated_at,
       deleted: !!i.deleted,
@@ -77,6 +88,7 @@ export const CashFlowItemService = {
       code: raw.code ?? null,
       parent: raw.parent ?? undefined,
       include_in_budget: raw.include_in_budget ?? null,
+      usage_count: Number(raw.usage_count ?? 0),
       created_at: raw.created_at,
       updated_at: raw.updated_at,
       deleted: !!raw.deleted,
@@ -111,6 +123,7 @@ export const CashFlowItemService = {
           code: r.code ?? null,
           parent: r.parent ?? undefined,
           include_in_budget: r.include_in_budget ?? null,
+          usage_count: Number(r.usage_count ?? 0),
           created_at: r.created_at,
           updated_at: r.updated_at,
           deleted: !!r.deleted,

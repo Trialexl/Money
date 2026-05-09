@@ -248,7 +248,12 @@ class CashFlowItemViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelVi
     
     def get_queryset(self):
         """Фильтрация неудаленных записей"""
-        return self.filter_soft_deleted(self.queryset)
+        return self.filter_soft_deleted(self.queryset).annotate(
+            usage_count=Count(
+                'flowoffunds',
+                filter=~Q(flowoffunds__type_of_document=TRANSFER_DOCUMENT_TYPE),
+            )
+        )
     
     @action(detail=False, methods=['get'])
     def hierarchy(self, request):
@@ -755,6 +760,7 @@ class DashboardViewSet(viewsets.ViewSet):
 
         selected_day_end = _day_end(selected_at)
         selected_month_start = _month_start(selected_at)
+        selected_month_end = _month_end(selected_month_start)
         previous_month_start = _shift_month(selected_month_start, -1)
         previous_month_end = _month_end(previous_month_start)
 
@@ -780,6 +786,7 @@ class DashboardViewSet(viewsets.ViewSet):
             wallet_rows.append({
                 'wallet_id': str(wallet.id),
                 'wallet_name': wallet.name,
+                'hidden': wallet.hidden,
                 'balance': _dashboard_money_str(balance),
                 '_balance': balance,
             })
@@ -789,7 +796,7 @@ class DashboardViewSet(viewsets.ViewSet):
 
         budget_expense_turnovers = BudgetExpense.objects.filter(
             period__gte=selected_month_start,
-            period__lte=selected_day_end,
+            period__lte=selected_month_end,
             project__isnull=True,
             cash_flow_item__isnull=False,
         ).values(
@@ -797,7 +804,10 @@ class DashboardViewSet(viewsets.ViewSet):
             'cash_flow_item__name',
         ).annotate(
             planned_total=Sum('amount', filter=Q(type_of_document=5)),
-            actual_total=Sum('amount', filter=Q(type_of_document__in=[1, 2, 4])),
+            actual_total=Sum(
+                'amount',
+                filter=Q(type_of_document__in=[1, 2, 4], period__lte=selected_day_end),
+            ),
         )
 
         budget_items = []
@@ -825,15 +835,15 @@ class DashboardViewSet(viewsets.ViewSet):
 
         budget_income_totals = BudgetIncome.objects.filter(
             period__gte=selected_month_start,
-            period__lte=selected_day_end,
+            period__lte=selected_month_end,
             project__isnull=True,
         ).aggregate(
             planned_total=Sum('amount', filter=Q(type_of_document=5)),
-            actual_total=Sum('amount', filter=Q(type_of_document=3)),
+            actual_total=Sum('amount', filter=Q(type_of_document=3, period__lte=selected_day_end)),
         )
         income_planned_total = _dashboard_money(budget_income_totals['planned_total'])
         income_actual_total = _dashboard_money(budget_income_totals['actual_total'])
-        income_remaining_total = _dashboard_money(income_planned_total - income_actual_total)
+        income_remaining_total = max(_dashboard_money(income_planned_total - income_actual_total), ZERO_AMOUNT)
 
         previous_income_total, previous_expense_total = _flow_period_totals(previous_month_start, previous_month_end)
         current_income_total, current_expense_total = _flow_period_totals(selected_month_start, selected_day_end)
@@ -1024,18 +1034,25 @@ class ReportViewSet(viewsets.ViewSet):
             if date_to is None or date_to > today:
                 date_to = today
 
-        queryset = FlowOfFunds.objects.select_related('wallet', 'cash_flow_item').filter(
+        base_queryset = FlowOfFunds.objects.select_related('wallet', 'cash_flow_item').filter(
             cash_flow_item__isnull=False
         ).exclude(type_of_document=TRANSFER_DOCUMENT_TYPE)
-        queryset = _apply_period_filters(queryset, date_from=date_from, date_to=date_to)
 
         wallet_id = validated.get('wallet')
         if wallet_id:
-            queryset = queryset.filter(wallet_id=wallet_id)
+            base_queryset = base_queryset.filter(wallet_id=wallet_id)
 
         cash_flow_item_id = validated.get('cash_flow_item')
         if cash_flow_item_id:
-            queryset = queryset.filter(cash_flow_item_id=cash_flow_item_id)
+            base_queryset = base_queryset.filter(cash_flow_item_id=cash_flow_item_id)
+
+        opening_balance = ZERO_AMOUNT
+        if date_from is not None:
+            opening_balance = _dashboard_money(
+                base_queryset.filter(period__lt=date_from).aggregate(total=Sum('amount'))['total']
+            )
+
+        queryset = _apply_period_filters(base_queryset, date_from=date_from, date_to=date_to)
 
         month_rows = []
         monthly_queryset = queryset.annotate(period_month=TruncMonth('period')).values('period_month').annotate(
@@ -1077,6 +1094,7 @@ class ReportViewSet(viewsets.ViewSet):
                 'income': _dashboard_money_str(income_total),
                 'expense': _dashboard_money_str(expense_total),
             },
+            'opening_balance': _dashboard_money_str(opening_balance),
             'months': month_rows,
             'details': detail_rows,
         })

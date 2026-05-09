@@ -89,6 +89,7 @@ vi.mock("@/services/financial-operations-service", () => ({
 }))
 
 import TransferForm from "@/components/shared/transfer-form"
+import { SearchableSelect } from "@/components/shared/searchable-select"
 import WalletForm from "@/components/shared/wallet-form"
 
 describe("shared forms", () => {
@@ -145,6 +146,33 @@ describe("shared forms", () => {
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ["wallets"] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ["dashboard-overview"] })
     expect(pushMock).toHaveBeenCalledWith("/wallets/wallet-99")
+  })
+
+  it("keeps ranked cash flow options first when searching", async () => {
+    const user = userEvent.setup()
+    render(
+      createElement(SearchableSelect, {
+        value: "unselected",
+        onValueChange: vi.fn(),
+        placeholder: "Выбери статью",
+        searchPlaceholder: "Найти статью",
+        options: [
+          { value: "unselected", label: "Не выбрано" },
+          { value: "transport", label: "Проезд", rank: 2 },
+          { value: "food", label: "Продукты", rank: 9 },
+          { value: "rent", label: "Аренда", rank: 100 },
+        ],
+      })
+    )
+
+    await user.click(screen.getByRole("combobox"))
+    await user.type(screen.getByPlaceholderText("Найти статью"), "про")
+
+    await waitFor(() => {
+      const labels = screen.getAllByRole("option").map((option) => option.textContent)
+      expect(labels[0]).toContain("Продукты")
+      expect(labels[1]).toContain("Проезд")
+    })
   })
 
   it("blocks a transfer when source and destination wallets are the same", async () => {

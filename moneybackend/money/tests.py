@@ -1488,6 +1488,64 @@ class DocumentRequiredFieldValidationTests(TestCase):
         self.assertIn('cash_flow_item', form.errors)
 
 
+class CashFlowItemUsageApiTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = CustomUser.objects.create_superuser(
+            username='cash-flow-item-usage-admin',
+            email='cash-flow-item-usage-admin@example.com',
+            password='adminpass123',
+        )
+        cls.wallet_main = Wallet.objects.create(name='Основной кошелек')
+        cls.wallet_spare = Wallet.objects.create(name='Резервный кошелек')
+        cls.food_item = CashFlowItem.objects.create(name='Продукты', include_in_budget=True)
+        cls.transport_item = CashFlowItem.objects.create(name='Транспорт', include_in_budget=True)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin_user)
+
+    def make_dt(self, day):
+        return timezone.make_aware(datetime(2024, 5, day, 12, 0, 0))
+
+    def test_cash_flow_items_include_non_transfer_usage_count(self):
+        Receipt.objects.create(
+            amount=Decimal('1000.00'),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+            date=self.make_dt(1),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('250.00'),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+            include_in_budget=False,
+            date=self.make_dt(2),
+        )
+        Expenditure.objects.create(
+            amount=Decimal('100.00'),
+            wallet=self.wallet_main,
+            cash_flow_item=self.transport_item,
+            include_in_budget=False,
+            date=self.make_dt(3),
+        )
+        Transfer.objects.create(
+            amount=Decimal('50.00'),
+            wallet_out=self.wallet_main,
+            wallet_in=self.wallet_spare,
+            cash_flow_item=self.food_item,
+            include_in_budget=True,
+            date=self.make_dt(4),
+        )
+
+        response = self.client.get('/api/v1/cash-flow-items/')
+
+        self.assertEqual(response.status_code, 200)
+        usage_by_name = {item['name']: item['usage_count'] for item in response.data}
+        self.assertEqual(usage_by_name['Продукты'], 2)
+        self.assertEqual(usage_by_name['Транспорт'], 1)
+
+
 class JwtWriteAuthenticationRegressionTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -2036,6 +2094,7 @@ class DashboardOverviewTests(TestCase):
                 {
                     'wallet_id': str(self.visible_wallet.id),
                     'wallet_name': 'Основной кошелек',
+                    'hidden': False,
                     'balance': '400.00',
                 }
             ],
@@ -2114,10 +2173,55 @@ class DashboardOverviewTests(TestCase):
         self.assertFalse(response.data['hide_hidden_wallets'])
         self.assertEqual(response.data['wallet_total'], '600.00')
         self.assertEqual(
-            [wallet['wallet_name'] for wallet in response.data['wallets']],
-            ['Основной кошелек', 'Скрытый кошелек'],
+            [(wallet['wallet_name'], wallet['hidden']) for wallet in response.data['wallets']],
+            [('Основной кошелек', False), ('Скрытый кошелек', True)],
         )
         self.assertEqual(response.data['cash_with_budget'], '500.00')
+
+    def test_dashboard_free_cash_uses_full_month_plan_and_fact_until_selected_day(self):
+        Budget.objects.create(
+            amount=Decimal('120.00'),
+            amount_month=1,
+            date=self.make_dt(2024, 3, 15),
+            date_start=self.make_dt(2024, 3, 20),
+            cash_flow_item=self.food_item,
+            type_of_budget=False,
+        )
+        Budget.objects.create(
+            amount=Decimal('70.00'),
+            amount_month=1,
+            date=self.make_dt(2024, 3, 15),
+            date_start=self.make_dt(2024, 3, 25),
+            cash_flow_item=self.salary_item,
+            type_of_budget=True,
+        )
+        Receipt.objects.create(
+            amount=Decimal('999.00'),
+            date=self.make_dt(2024, 3, 20),
+            wallet=self.visible_wallet,
+            cash_flow_item=self.salary_item,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('888.00'),
+            date=self.make_dt(2024, 3, 20),
+            wallet=self.visible_wallet,
+            cash_flow_item=self.food_item,
+            include_in_budget=True,
+        )
+
+        response = self.client.get(
+            '/api/v1/dashboard/overview/',
+            {'date': self.selected_at.isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['wallet_total'], '400.00')
+        self.assertEqual(response.data['budget_income']['planned_total'], '870.00')
+        self.assertEqual(response.data['budget_income']['actual_total'], '700.00')
+        self.assertEqual(response.data['budget_income']['remaining_total'], '170.00')
+        self.assertEqual(response.data['budget_expense']['remaining_total'], '320.00')
+        self.assertEqual(response.data['budget_expense']['overrun_total'], '300.00')
+        self.assertEqual(response.data['cash_with_budget'], '250.00')
 
     def test_dashboard_omits_zero_balance_wallets(self):
         zero_wallet = Wallet.objects.create(name='Пустой кошелек')
@@ -2277,6 +2381,7 @@ class DashboardOverviewTests(TestCase):
                 {
                     'wallet_id': str(self.visible_wallet.id),
                     'wallet_name': 'Основной кошелек',
+                    'hidden': False,
                     'balance': '1100.00',
                 }
             ],
@@ -2419,6 +2524,7 @@ class ReportEndpointsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['totals'], {'income': '1000.00', 'expense': '300.00'})
+        self.assertEqual(response.data['opening_balance'], '0.00')
         self.assertEqual(
             response.data['months'],
             [
@@ -2434,6 +2540,40 @@ class ReportEndpointsTests(TestCase):
             [row['document_type'] for row in response.data['details']],
             ['Receipt', 'Expenditure'],
         )
+
+    def test_cash_flow_report_opening_balance_uses_same_analytics_rules(self):
+        hidden_wallet = Wallet.objects.create(name='Скрытый переводный')
+        Receipt.objects.create(
+            amount=Decimal('500.00'),
+            date=self.make_dt(2024, 2, 10),
+            wallet=self.wallet_main,
+            cash_flow_item=self.salary_item,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('120.00'),
+            date=self.make_dt(2024, 2, 15),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+        )
+        Transfer.objects.create(
+            amount=Decimal('10000.00'),
+            date=self.make_dt(2024, 2, 20),
+            wallet_in=self.wallet_main,
+            wallet_out=hidden_wallet,
+            cash_flow_item=self.food_item,
+            include_in_budget=True,
+        )
+
+        response = self.client.get(
+            '/api/v1/reports/cash-flow/',
+            {
+                'date_from': self.make_dt(2024, 3, 1).isoformat(),
+                'date_to': self.make_dt(2024, 3, 31).isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['opening_balance'], '380.00')
 
     def test_flow_of_funds_summary_omits_transfers_from_analytics(self):
         response = self.client.get(

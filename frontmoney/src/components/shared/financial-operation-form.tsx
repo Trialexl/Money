@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { normalizeAmountExpressionInput, parseAmountExpression } from "@/lib/amount-expression"
 import { formatDateForInput } from "@/lib/formatters"
 import { resolveReturnHref } from "@/lib/return-navigation"
-import { CashFlowItemService } from "@/services/cash-flow-item-service"
+import { CashFlowItemService, compareCashFlowItemsByPopularity } from "@/services/cash-flow-item-service"
 import {
   Expenditure,
   ExpenditureService,
@@ -94,7 +94,7 @@ function normalizeLookupValue(value: string | null | undefined) {
 }
 
 function toCashFlowItemOption(
-  item: { id: string; name?: string | null; code?: string | null },
+  item: { id: string; name?: string | null; code?: string | null; usage_count?: number | null },
   description?: string
 ): SearchableSelectOption {
   return {
@@ -102,6 +102,7 @@ function toCashFlowItemOption(
     label: item.name || "Без названия",
     description: description || (item.code ? `Код ${item.code}` : undefined),
     keywords: [item.code ?? ""],
+    rank: item.usage_count ?? 0,
   }
 }
 
@@ -259,7 +260,7 @@ export default function FinancialOperationForm({
       })
     }
 
-    return fallbackItems.sort((left, right) => (left.name ?? "").localeCompare(right.name ?? "", "ru"))
+    return fallbackItems.sort(compareCashFlowItemsByPopularity)
   }, [
     effectiveCashFlowItemId,
     matchedCashFlowItemByName,

@@ -30,12 +30,13 @@ interface AutoPaymentFormProps {
   onSaved?: (autoPayment: AutoPayment) => void
 }
 
-function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null }): SearchableSelectOption {
+function toCashFlowItemOption(item: { id: string; name?: string | null; code?: string | null; usage_count?: number | null }): SearchableSelectOption {
   return {
     value: item.id,
     label: item.name || "Без названия",
     description: item.code ? `Код ${item.code}` : undefined,
     keywords: [item.code ?? ""],
+    rank: item.usage_count ?? 0,
   }
 }
 

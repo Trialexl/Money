@@ -4,6 +4,7 @@ import { fromApiAmount, fromApiDateTime, toApiDateTime } from "@/types"
 export interface DashboardWalletSummary {
   wallet_id: string
   wallet_name: string
+  hidden: boolean
   balance: number
 }
 
@@ -156,6 +157,7 @@ export const DashboardService = {
         ? data.wallets.map((wallet: any) => ({
             wallet_id: wallet.wallet_id,
             wallet_name: wallet.wallet_name,
+            hidden: Boolean(wallet.hidden),
             balance: fromApiAmount(wallet.balance),
           }))
         : [],

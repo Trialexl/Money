@@ -121,6 +121,7 @@ class CashFlowItemSerializer(BackendManagedIdentityMixin, serializers.ModelSeria
     sync_writable_fields = ('id', 'code')
     id = serializers.UUIDField(read_only=True)
     code = serializers.CharField(read_only=True)  # Автогенерация
+    usage_count = serializers.IntegerField(read_only=True, default=0)
     
     class Meta:
         model = models.CashFlowItem
@@ -321,6 +322,7 @@ class AutoPaymentListQuerySerializer(serializers.Serializer):
 class DashboardWalletSerializer(serializers.Serializer):
     wallet_id = serializers.UUIDField()
     wallet_name = serializers.CharField()
+    hidden = serializers.BooleanField()
     balance = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
@@ -455,6 +457,7 @@ class CashFlowReportDetailSerializer(serializers.Serializer):
 class CashFlowReportResponseSerializer(serializers.Serializer):
     filters = serializers.DictField()
     totals = CashFlowReportTotalsSerializer()
+    opening_balance = serializers.DecimalField(max_digits=12, decimal_places=2)
     months = CashFlowReportMonthSerializer(many=True)
     details = CashFlowReportDetailSerializer(many=True)
 

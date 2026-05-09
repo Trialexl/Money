@@ -25,9 +25,10 @@ WORKDIR /app
 # Копируем файл с зависимостями
 COPY requirements.txt .
 
-# Устанавливаем Python зависимости
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir gunicorn
+# Устанавливаем Python зависимости. Docker Hub/PyPI иногда отвечают медленно,
+# поэтому явно задаем retries/timeout для воспроизводимой сборки.
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt && \
+    pip install --no-cache-dir --retries 10 --timeout 120 gunicorn
 
 # Копируем код приложения
 COPY . .

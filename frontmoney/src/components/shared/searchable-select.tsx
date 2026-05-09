@@ -12,6 +12,7 @@ export interface SearchableSelectOption {
   label: string
   description?: string
   keywords?: string[]
+  rank?: number
 }
 
 export interface SearchableSelectGroup {
@@ -33,8 +34,8 @@ interface SearchableSelectProps {
   triggerClassName?: string
 }
 
-function normalizeSearch(value: string) {
-  return value.trim().toLocaleLowerCase("ru")
+function normalizeSearch(value: string | null | undefined) {
+  return (value ?? "").trim().toLocaleLowerCase("ru")
 }
 
 function optionMatches(option: SearchableSelectOption, query: string) {
@@ -45,6 +46,42 @@ function optionMatches(option: SearchableSelectOption, query: string) {
   return [option.label, option.description, ...(option.keywords ?? [])]
     .filter(Boolean)
     .some((value) => normalizeSearch(String(value)).includes(query))
+}
+
+function optionSearchScore(option: SearchableSelectOption, query: string) {
+  if (!query) {
+    return 0
+  }
+
+  const label = normalizeSearch(option.label)
+  const description = normalizeSearch(option.description)
+  const keywords = (option.keywords ?? []).map((keyword) => normalizeSearch(keyword))
+
+  if (label === query) {
+    return 500
+  }
+
+  if (label.startsWith(query)) {
+    return 400
+  }
+
+  if (label.split(/\s+/).some((part) => part.startsWith(query))) {
+    return 300
+  }
+
+  if (keywords.some((keyword) => keyword === query || keyword.startsWith(query))) {
+    return 250
+  }
+
+  if (label.includes(query)) {
+    return 200
+  }
+
+  if (description.includes(query) || keywords.some((keyword) => keyword.includes(query))) {
+    return 100
+  }
+
+  return 0
 }
 
 export function SearchableSelect({
@@ -77,7 +114,21 @@ export function SearchableSelect({
       normalizedGroups
         .map((group) => ({
           ...group,
-          options: group.options.filter((option) => optionMatches(option, normalizedQuery)),
+          options: group.options
+            .map((option, index) => ({ option, index }))
+            .filter(({ option }) => optionMatches(option, normalizedQuery))
+            .sort((left, right) => {
+              if (normalizedQuery) {
+                const scoreDelta = optionSearchScore(right.option, normalizedQuery) - optionSearchScore(left.option, normalizedQuery)
+                if (scoreDelta !== 0) {
+                  return scoreDelta
+                }
+              }
+
+              const rankDelta = (right.option.rank ?? 0) - (left.option.rank ?? 0)
+              return rankDelta !== 0 ? rankDelta : left.index - right.index
+            })
+            .map(({ option }) => option),
         }))
         .filter((group) => group.options.length > 0),
     [normalizedGroups, normalizedQuery]
