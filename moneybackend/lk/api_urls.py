@@ -13,5 +13,6 @@ urlpatterns = [
     
     # Приложения
     path('', include('money.api_urls')),
+    path('investment/', include('investments.api_urls')),
     path('', include('users.api_urls')),
-] 
+]

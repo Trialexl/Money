@@ -17,6 +17,7 @@ import {
   Plus,
   PieChart,
   Settings,
+  TrendingUp,
   Wallet,
   X,
   type LucideIcon
@@ -58,6 +59,7 @@ const navigationSections: NavigationSection[] = [
     items: [
       { href: "/dashboard", label: "Оперативная страница", description: "Главный рабочий экран по остаткам, бюджету и свежим движениям", icon: Home },
       { href: "/reports", label: "Отчеты", description: "Аналитика структуры денег и детализация периода", icon: BarChart4 },
+      { href: "/investments", label: "Портфель", description: "Криптовалюты, позиции и финансовый результат", icon: TrendingUp },
       { href: "/assistant", label: "Ассистент", description: "AI-ввод операций и Telegram-сценарии", icon: Bot },
     ],
   },
