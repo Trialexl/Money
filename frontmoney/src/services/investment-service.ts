@@ -83,6 +83,16 @@ export interface InvestmentOverview {
   positions: InvestmentPosition[]
 }
 
+export type InstrumentPayload = Omit<Instrument, "id">
+export type InvestmentPortfolioPayload = Pick<InvestmentPortfolio, "name" | "is_default"> & {
+  project?: string | null
+}
+export type InvestmentAccountPayload = Omit<InvestmentAccount, "id" | "portfolio_name">
+export type InvestmentOperationPayload = Omit<
+  InvestmentOperation,
+  "id" | "number" | "portfolio_name" | "account_name" | "account_to_name" | "instrument_ticker" | "instrument_name"
+>
+
 function mapInstrument(raw: any): Instrument {
   return {
     id: raw.id,
@@ -174,6 +184,21 @@ function mapOverview(raw: any): InvestmentOverview {
   }
 }
 
+function toOperationPayload(payload: Partial<InvestmentOperationPayload>) {
+  return {
+    ...payload,
+    date: toApiDateTime(payload.date),
+    account_to: payload.account_to || null,
+    quantity: payload.quantity === undefined ? undefined : payload.quantity.toString(),
+    price: payload.price === undefined ? undefined : payload.price.toString(),
+    amount: payload.amount === undefined ? undefined : payload.amount.toString(),
+    amount_rub: toApiAmount(payload.amount_rub),
+    fee_amount: payload.fee_amount === undefined ? undefined : payload.fee_amount.toString(),
+    fee_rub: toApiAmount(payload.fee_rub),
+    fx_rate_to_rub: payload.fx_rate_to_rub === undefined ? undefined : payload.fx_rate_to_rub.toString(),
+  }
+}
+
 export const InvestmentService = {
   async getOverview() {
     const response = await api.get("/investment/portfolio-overview/")
@@ -204,18 +229,59 @@ export const InvestmentService = {
     return Array.isArray(data) ? data.map(mapOperation) : []
   },
 
-  async createOperation(payload: Partial<InvestmentOperation>) {
-    const response = await api.post("/investment/operations/", {
-      ...payload,
-      date: toApiDateTime(payload.date),
-      quantity: payload.quantity?.toString(),
-      price: payload.price === undefined ? undefined : payload.price.toString(),
-      amount: payload.amount === undefined ? undefined : payload.amount.toString(),
-      amount_rub: toApiAmount(payload.amount_rub),
-      fee_amount: payload.fee_amount === undefined ? undefined : payload.fee_amount.toString(),
-      fee_rub: toApiAmount(payload.fee_rub),
-      fx_rate_to_rub: payload.fx_rate_to_rub === undefined ? undefined : payload.fx_rate_to_rub.toString(),
-    })
+  async createPortfolio(payload: InvestmentPortfolioPayload) {
+    const response = await api.post("/investment/portfolios/", payload)
+    return mapPortfolio(response.data)
+  },
+
+  async updatePortfolio(id: string, payload: Partial<InvestmentPortfolioPayload>) {
+    const response = await api.patch(`/investment/portfolios/${id}/`, payload)
+    return mapPortfolio(response.data)
+  },
+
+  async deletePortfolio(id: string) {
+    await api.delete(`/investment/portfolios/${id}/`)
+  },
+
+  async createInstrument(payload: InstrumentPayload) {
+    const response = await api.post("/investment/instruments/", payload)
+    return mapInstrument(response.data)
+  },
+
+  async updateInstrument(id: string, payload: Partial<InstrumentPayload>) {
+    const response = await api.patch(`/investment/instruments/${id}/`, payload)
+    return mapInstrument(response.data)
+  },
+
+  async deleteInstrument(id: string) {
+    await api.delete(`/investment/instruments/${id}/`)
+  },
+
+  async createAccount(payload: InvestmentAccountPayload) {
+    const response = await api.post("/investment/accounts/", payload)
+    return mapAccount(response.data)
+  },
+
+  async updateAccount(id: string, payload: Partial<InvestmentAccountPayload>) {
+    const response = await api.patch(`/investment/accounts/${id}/`, payload)
+    return mapAccount(response.data)
+  },
+
+  async deleteAccount(id: string) {
+    await api.delete(`/investment/accounts/${id}/`)
+  },
+
+  async createOperation(payload: Partial<InvestmentOperationPayload>) {
+    const response = await api.post("/investment/operations/", toOperationPayload(payload))
     return mapOperation(response.data)
+  },
+
+  async updateOperation(id: string, payload: Partial<InvestmentOperationPayload>) {
+    const response = await api.patch(`/investment/operations/${id}/`, toOperationPayload(payload))
+    return mapOperation(response.data)
+  },
+
+  async deleteOperation(id: string) {
+    await api.delete(`/investment/operations/${id}/`)
   },
 }
