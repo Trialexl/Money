@@ -50,6 +50,36 @@ class Instrument(models.Model):
         return f'{self.ticker} ({self.get_type_display()})'
 
 
+class InstrumentPriceSnapshot(models.Model):
+    SOURCE_MANUAL = 'manual'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    instrument = models.ForeignKey(Instrument, on_delete=models.CASCADE, related_name='price_snapshots')
+    captured_at = models.DateTimeField(default=timezone.now)
+    price = models.DecimalField(max_digits=24, decimal_places=8)
+    price_currency = models.CharField(max_length=10, default='USD')
+    fx_rate_to_rub = models.DecimalField(max_digits=18, decimal_places=8, default=Decimal('1'))
+    price_rub = models.DecimalField(max_digits=18, decimal_places=2)
+    source = models.CharField(max_length=50, default=SOURCE_MANUAL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Снимок цены инструмента'
+        verbose_name_plural = 'Снимки цен инструментов'
+        ordering = ['-captured_at', '-created_at']
+        indexes = [
+            models.Index(fields=['instrument', '-captured_at']),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.price_currency = (self.price_currency or 'USD').strip().upper()
+        self.source = (self.source or self.SOURCE_MANUAL).strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.instrument.ticker}: {self.price_rub} RUB'
+
+
 class InvestmentPortfolio(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(

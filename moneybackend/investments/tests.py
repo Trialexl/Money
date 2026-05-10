@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from money.models import BudgetExpense, BudgetIncome, FlowOfFunds, OneCSyncOutbox, Wallet
 from users.models import CustomUser
 
-from .models import Instrument, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
 from .services import calculate_positions, calculate_portfolio_totals
 
 
@@ -83,6 +83,39 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(positions[0]['average_buy_price_rub'], Decimal('150.00'))
         self.assertEqual(positions[0]['cost_basis_rub'], Decimal('225.00'))
         self.assertEqual(positions[0]['realized_pl_rub'], Decimal('75.00'))
+
+    def test_positions_use_latest_price_for_unrealized_pl(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price=Decimal('100.00'),
+            amount=Decimal('100.00'),
+            amount_rub=Decimal('100.00'),
+            date=timezone.now(),
+        )
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('150.00'),
+            price_currency='RUB',
+            fx_rate_to_rub=Decimal('1'),
+            price_rub=Decimal('150.00'),
+            captured_at=timezone.now(),
+        )
+
+        positions = calculate_positions(self.portfolio)
+        totals = calculate_portfolio_totals(self.portfolio)
+
+        self.assertEqual(positions[0]['current_value_rub'], Decimal('150.00'))
+        self.assertEqual(positions[0]['unrealized_pl_rub'], Decimal('50.00'))
+        self.assertEqual(positions[0]['total_pl_rub'], Decimal('50.00'))
+        self.assertEqual(positions[0]['return_percent'], Decimal('50.00'))
+        self.assertEqual(totals['current_value_rub'], Decimal('150.00'))
+        self.assertEqual(totals['unrealized_pl_rub'], Decimal('50.00'))
+        self.assertEqual(totals['total_pl_rub'], Decimal('50.00'))
+        self.assertTrue(totals['valuation_complete'])
 
     def test_portfolio_overview_endpoint_returns_default_portfolio(self):
         InvestmentOperation.objects.create(

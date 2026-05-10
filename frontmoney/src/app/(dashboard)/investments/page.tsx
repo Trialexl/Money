@@ -21,6 +21,7 @@ import { formatCurrency, formatDate } from "@/lib/formatters"
 import {
   InvestmentService,
   type Instrument,
+  type InstrumentPriceSnapshotPayload,
   type InstrumentPayload,
   type InstrumentType,
   type InvestmentAccount,
@@ -49,6 +50,7 @@ const accountTypeLabels: Record<string, string> = {
 type InvestmentDialogState =
   | { type: "portfolio"; mode: "create" | "edit"; item?: InvestmentPortfolio }
   | { type: "instrument"; mode: "create" | "edit"; item?: Instrument }
+  | { type: "price"; mode: "create"; item?: Instrument }
   | { type: "account"; mode: "create" | "edit"; item?: InvestmentAccount }
   | { type: "operation"; mode: "create" | "edit"; item?: InvestmentOperation }
   | null
@@ -72,6 +74,16 @@ function formatInputNumber(value?: number | null) {
     return ""
   }
   return String(value)
+}
+
+function formatPercent(value?: number | null) {
+  if (value === undefined || value === null) {
+    return "нет оценки"
+  }
+  return `${new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value)}%`
 }
 
 function todayInputDate() {
@@ -150,6 +162,12 @@ export default function InvestmentsPage() {
   const saveInstrumentMutation = useMutation({
     mutationFn: ({ id, payload }: { id?: string; payload: InstrumentPayload | Partial<InstrumentPayload> }) =>
       id ? InvestmentService.updateInstrument(id, payload) : InvestmentService.createInstrument(payload as InstrumentPayload),
+    onSuccess: handleSaved,
+    onError: (error) => setDialogError(getApiErrorMessage(error)),
+  })
+
+  const savePriceMutation = useMutation({
+    mutationFn: (payload: Partial<InstrumentPriceSnapshotPayload>) => InvestmentService.createPrice(payload),
     onSuccess: handleSaved,
     onError: (error) => setDialogError(getApiErrorMessage(error)),
   })
@@ -252,6 +270,10 @@ export default function InvestmentsPage() {
               <Plus className="mr-2 h-4 w-4" />
               Инструмент
             </Button>
+            <Button variant="outline" disabled={instruments.length === 0} onClick={() => openDialog({ type: "price", mode: "create", item: activeInstruments[0] ?? instruments[0] })}>
+              <Plus className="mr-2 h-4 w-4" />
+              Цена
+            </Button>
             <Button variant="outline" disabled={!currentPortfolio} onClick={() => openDialog({ type: "account", mode: "create" })}>
               <Plus className="mr-2 h-4 w-4" />
               Счет
@@ -265,10 +287,10 @@ export default function InvestmentsPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Себестоимость" value={formatCurrency(overview.cost_basis_rub)} hint="Остаток позиций в RUB" icon={Coins} variant="compact" />
-        <StatCard label="Realized P/L" value={formatCurrency(overview.realized_pl_rub)} hint="Зафиксированный результат" icon={LineChart} tone={overview.realized_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
-        <StatCard label="Куплено" value={formatCurrency(overview.bought_rub)} hint="С учетом комиссий" icon={TrendingUp} variant="compact" />
-        <StatCard label="Продано" value={formatCurrency(overview.sold_rub)} hint="После комиссий" icon={BarChart3} variant="compact" />
+        <StatCard label="Текущая стоимость" value={formatCurrency(overview.current_value_rub)} hint={overview.valuation_complete ? "По последним ценам" : "Есть позиции без цены"} icon={Coins} variant="compact" />
+        <StatCard label="Себестоимость" value={formatCurrency(overview.cost_basis_rub)} hint="Остаток позиций в RUB" icon={Landmark} variant="compact" />
+        <StatCard label="Total P/L" value={formatCurrency(overview.total_pl_rub)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={overview.total_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
+        <StatCard label="Unrealized P/L" value={formatCurrency(overview.unrealized_pl_rub)} hint={`Realized: ${formatCurrency(overview.realized_pl_rub)}`} icon={BarChart3} tone={overview.unrealized_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
       </div>
 
       {currentPortfolio ? (
@@ -296,14 +318,18 @@ export default function InvestmentsPage() {
               />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
+                <table className="w-full min-w-[1080px] text-left text-sm">
                   <thead className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
                     <tr className="border-b border-border/70">
                       <th className="py-3 pr-4">Актив</th>
                       <th className="py-3 pr-4 text-right">Количество</th>
                       <th className="py-3 pr-4 text-right">Себестоимость</th>
                       <th className="py-3 pr-4 text-right">Средняя</th>
-                      <th className="py-3 text-right">P/L</th>
+                      <th className="py-3 pr-4 text-right">Цена</th>
+                      <th className="py-3 pr-4 text-right">Стоимость</th>
+                      <th className="py-3 pr-4 text-right">Unrealized</th>
+                      <th className="py-3 pr-4 text-right">Total P/L</th>
+                      <th className="py-3 text-right">%</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -316,8 +342,29 @@ export default function InvestmentsPage() {
                         <td className="py-3 pr-4 text-right tabular-nums">{position.quantity}</td>
                         <td className="py-3 pr-4 text-right tabular-nums">{formatCurrency(position.cost_basis_rub)}</td>
                         <td className="py-3 pr-4 text-right tabular-nums">{formatCurrency(position.average_buy_price_rub)}</td>
-                        <td className={position.realized_pl_rub < 0 ? "py-3 text-right text-destructive tabular-nums" : "py-3 text-right text-emerald-600 tabular-nums"}>
-                          {formatCurrency(position.realized_pl_rub)}
+                        <td className="py-3 pr-4 text-right tabular-nums">
+                          {position.latest_price_rub === null || position.latest_price_rub === undefined ? (
+                            <Button variant="ghost" size="sm" onClick={() => openDialog({ type: "price", mode: "create", item: instruments.find((item) => item.id === position.instrument_id) })}>
+                              Добавить
+                            </Button>
+                          ) : (
+                            <div>
+                              <div>{formatCurrency(position.latest_price_rub)}</div>
+                              <div className="text-xs text-muted-foreground">{position.latest_price_at ? formatDate(position.latest_price_at) : ""}</div>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4 text-right tabular-nums">
+                          {position.current_value_rub === null || position.current_value_rub === undefined ? "нет цены" : formatCurrency(position.current_value_rub)}
+                        </td>
+                        <td className={position.unrealized_pl_rub !== undefined && position.unrealized_pl_rub !== null && position.unrealized_pl_rub < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
+                          {position.unrealized_pl_rub === null || position.unrealized_pl_rub === undefined ? "нет цены" : formatCurrency(position.unrealized_pl_rub)}
+                        </td>
+                        <td className={position.total_pl_rub < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
+                          {formatCurrency(position.total_pl_rub)}
+                        </td>
+                        <td className="py-3 text-right tabular-nums">
+                          {formatPercent(position.return_percent)}
                         </td>
                       </tr>
                     ))}
@@ -364,6 +411,9 @@ export default function InvestmentsPage() {
                       </div>
                       <div className="flex items-center gap-1">
                         <Badge variant={instrument.is_active ? "default" : "outline"}>{instrument.type}</Badge>
+                        <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "price", mode: "create", item: instrument })} aria-label="Добавить цену">
+                          <LineChart className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "instrument", mode: "edit", item: instrument })} aria-label="Редактировать инструмент">
                           <PencilLine className="h-4 w-4" />
                         </Button>
@@ -476,11 +526,13 @@ export default function InvestmentsPage() {
         }}
         onSavePortfolio={(id, payload) => savePortfolioMutation.mutate({ id, payload })}
         onSaveInstrument={(id, payload) => saveInstrumentMutation.mutate({ id, payload })}
+        onSavePrice={(payload) => savePriceMutation.mutate(payload)}
         onSaveAccount={(id, payload) => saveAccountMutation.mutate({ id, payload })}
         onSaveOperation={(id, payload) => saveOperationMutation.mutate({ id, payload })}
         isSaving={
           savePortfolioMutation.isPending ||
           saveInstrumentMutation.isPending ||
+          savePriceMutation.isPending ||
           saveAccountMutation.isPending ||
           saveOperationMutation.isPending
         }
@@ -499,6 +551,7 @@ function InvestmentCrudDialog({
   onOpenChange,
   onSavePortfolio,
   onSaveInstrument,
+  onSavePrice,
   onSaveAccount,
   onSaveOperation,
   isSaving,
@@ -512,6 +565,7 @@ function InvestmentCrudDialog({
   onOpenChange: (open: boolean) => void
   onSavePortfolio: (id: string | undefined, payload: InvestmentPortfolioPayload | Partial<InvestmentPortfolioPayload>) => void
   onSaveInstrument: (id: string | undefined, payload: InstrumentPayload | Partial<InstrumentPayload>) => void
+  onSavePrice: (payload: Partial<InstrumentPriceSnapshotPayload>) => void
   onSaveAccount: (id: string | undefined, payload: InvestmentAccountPayload | Partial<InvestmentAccountPayload>) => void
   onSaveOperation: (id: string | undefined, payload: Partial<InvestmentOperationPayload>) => void
   isSaving: boolean
@@ -548,6 +602,15 @@ function InvestmentCrudDialog({
 
             {dialog?.type === "instrument" ? (
               <InstrumentForm instrument={dialog.item} isSaving={isSaving} onSubmit={(payload) => onSaveInstrument(dialog.item?.id, payload)} />
+            ) : null}
+
+            {dialog?.type === "price" ? (
+              <PriceSnapshotForm
+                instrument={dialog.item}
+                instruments={instruments}
+                isSaving={isSaving}
+                onSubmit={onSavePrice}
+              />
             ) : null}
 
             {dialog?.type === "account" ? (
@@ -679,6 +742,92 @@ function InstrumentForm({
       <div className="md:col-span-2">
         <Button type="submit" disabled={isSaving || !ticker.trim() || !name.trim()}>
           {isSaving ? "Сохраняем..." : "Сохранить инструмент"}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function PriceSnapshotForm({
+  instrument,
+  instruments,
+  isSaving,
+  onSubmit,
+}: {
+  instrument?: Instrument
+  instruments: Instrument[]
+  isSaving: boolean
+  onSubmit: (payload: Partial<InstrumentPriceSnapshotPayload>) => void
+}) {
+  const [instrumentId, setInstrumentId] = useState(instrument?.id ?? instruments[0]?.id ?? "")
+  const selectedInstrument = instruments.find((item) => item.id === instrumentId)
+  const [capturedAt, setCapturedAt] = useState(todayInputDate())
+  const [price, setPrice] = useState("")
+  const [priceCurrency, setPriceCurrency] = useState(selectedInstrument?.quote_currency ?? "USD")
+  const [fxRateToRub, setFxRateToRub] = useState(priceCurrency.toUpperCase() === "RUB" ? "1" : "")
+  const [priceRub, setPriceRub] = useState("")
+  const [source, setSource] = useState("manual")
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    onSubmit({
+      instrument: instrumentId,
+      captured_at: capturedAt,
+      price: parseFormNumber(price),
+      price_currency: priceCurrency.trim().toUpperCase() || selectedInstrument?.quote_currency || "USD",
+      fx_rate_to_rub: parseFormNumber(fxRateToRub, 1),
+      price_rub: priceRub.trim() ? parseFormNumber(priceRub) : undefined,
+      source: source.trim() || "manual",
+    })
+  }
+
+  return (
+    <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
+      <FormField label="Инструмент">
+        <Select
+          value={instrumentId}
+          onValueChange={(value) => {
+            setInstrumentId(value)
+            const nextInstrument = instruments.find((item) => item.id === value)
+            if (nextInstrument) {
+              setPriceCurrency(nextInstrument.quote_currency)
+              setFxRateToRub(nextInstrument.quote_currency.toUpperCase() === "RUB" ? "1" : fxRateToRub)
+            }
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Выбери инструмент" />
+          </SelectTrigger>
+          <SelectContent>
+            {instruments.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.ticker} · {item.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
+      <FormField label="Дата цены">
+        <Input type="date" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} required />
+      </FormField>
+      <FormField label="Цена">
+        <Input value={price} onChange={(event) => setPrice(event.target.value)} required inputMode="decimal" placeholder="Например: 62000" />
+      </FormField>
+      <FormField label="Валюта цены">
+        <Input value={priceCurrency} onChange={(event) => setPriceCurrency(event.target.value)} placeholder="USD" />
+      </FormField>
+      <FormField label="Курс к RUB">
+        <Input value={fxRateToRub} onChange={(event) => setFxRateToRub(event.target.value)} required inputMode="decimal" placeholder="Например: 92.5" />
+      </FormField>
+      <FormField label="Цена в RUB">
+        <Input value={priceRub} onChange={(event) => setPriceRub(event.target.value)} inputMode="decimal" placeholder="Можно оставить пустым" />
+      </FormField>
+      <FormField label="Источник">
+        <Input value={source} onChange={(event) => setSource(event.target.value)} placeholder="manual" />
+      </FormField>
+      <div className="flex items-end">
+        <Button type="submit" disabled={isSaving || !instrumentId || !price.trim() || !fxRateToRub.trim()}>
+          {isSaving ? "Сохраняем..." : "Сохранить цену"}
         </Button>
       </div>
     </form>

@@ -62,6 +62,19 @@ export interface InvestmentOperation {
   posted: boolean
 }
 
+export interface InstrumentPriceSnapshot {
+  id: string
+  instrument: string
+  instrument_ticker?: string
+  instrument_name?: string
+  captured_at: string
+  price: number
+  price_currency: string
+  fx_rate_to_rub: number
+  price_rub: number
+  source: string
+}
+
 export interface InvestmentPosition {
   instrument_id: string
   instrument_ticker: string
@@ -69,7 +82,13 @@ export interface InvestmentPosition {
   quantity: number
   cost_basis_rub: number
   average_buy_price_rub: number
+  latest_price_rub?: number | null
+  latest_price_at?: string | null
+  current_value_rub?: number | null
   realized_pl_rub: number
+  unrealized_pl_rub?: number | null
+  total_pl_rub: number
+  return_percent?: number | null
   bought_rub: number
   sold_rub: number
 }
@@ -77,7 +96,12 @@ export interface InvestmentPosition {
 export interface InvestmentOverview {
   portfolio: InvestmentPortfolio | null
   cost_basis_rub: number
+  current_value_rub: number
   realized_pl_rub: number
+  unrealized_pl_rub: number
+  total_pl_rub: number
+  return_percent?: number | null
+  valuation_complete: boolean
   bought_rub: number
   sold_rub: number
   positions: InvestmentPosition[]
@@ -92,6 +116,14 @@ export type InvestmentOperationPayload = Omit<
   InvestmentOperation,
   "id" | "number" | "portfolio_name" | "account_name" | "account_to_name" | "instrument_ticker" | "instrument_name"
 >
+export type InstrumentPriceSnapshotPayload = Omit<InstrumentPriceSnapshot, "id" | "instrument_ticker" | "instrument_name">
+
+function fromApiNullableAmount(amount: string | number | undefined | null): number | null {
+  if (amount === undefined || amount === null || amount === "") {
+    return null
+  }
+  return fromApiAmount(amount)
+}
 
 function mapInstrument(raw: any): Instrument {
   return {
@@ -159,6 +191,21 @@ function mapOperation(raw: any): InvestmentOperation {
   }
 }
 
+function mapPriceSnapshot(raw: any): InstrumentPriceSnapshot {
+  return {
+    id: raw.id,
+    instrument: raw.instrument ?? "",
+    instrument_ticker: raw.instrument_ticker ?? undefined,
+    instrument_name: raw.instrument_name ?? undefined,
+    captured_at: fromApiDateTime(raw.captured_at) ?? "",
+    price: fromApiAmount(raw.price),
+    price_currency: raw.price_currency ?? "USD",
+    fx_rate_to_rub: fromApiAmount(raw.fx_rate_to_rub),
+    price_rub: fromApiAmount(raw.price_rub),
+    source: raw.source ?? "manual",
+  }
+}
+
 function mapPosition(raw: any): InvestmentPosition {
   return {
     instrument_id: raw.instrument_id,
@@ -167,7 +214,13 @@ function mapPosition(raw: any): InvestmentPosition {
     quantity: fromApiAmount(raw.quantity),
     cost_basis_rub: fromApiAmount(raw.cost_basis_rub),
     average_buy_price_rub: fromApiAmount(raw.average_buy_price_rub),
+    latest_price_rub: fromApiNullableAmount(raw.latest_price_rub),
+    latest_price_at: fromApiDateTime(raw.latest_price_at) ?? null,
+    current_value_rub: fromApiNullableAmount(raw.current_value_rub),
     realized_pl_rub: fromApiAmount(raw.realized_pl_rub),
+    unrealized_pl_rub: fromApiNullableAmount(raw.unrealized_pl_rub),
+    total_pl_rub: fromApiAmount(raw.total_pl_rub),
+    return_percent: fromApiNullableAmount(raw.return_percent),
     bought_rub: fromApiAmount(raw.bought_rub),
     sold_rub: fromApiAmount(raw.sold_rub),
   }
@@ -177,7 +230,12 @@ function mapOverview(raw: any): InvestmentOverview {
   return {
     portfolio: raw.portfolio ? mapPortfolio(raw.portfolio) : null,
     cost_basis_rub: fromApiAmount(raw.cost_basis_rub),
+    current_value_rub: fromApiAmount(raw.current_value_rub),
     realized_pl_rub: fromApiAmount(raw.realized_pl_rub),
+    unrealized_pl_rub: fromApiAmount(raw.unrealized_pl_rub),
+    total_pl_rub: fromApiAmount(raw.total_pl_rub),
+    return_percent: fromApiNullableAmount(raw.return_percent),
+    valuation_complete: raw.valuation_complete !== false,
     bought_rub: fromApiAmount(raw.bought_rub),
     sold_rub: fromApiAmount(raw.sold_rub),
     positions: Array.isArray(raw.positions) ? raw.positions.map(mapPosition) : [],
@@ -196,6 +254,16 @@ function toOperationPayload(payload: Partial<InvestmentOperationPayload>) {
     fee_amount: payload.fee_amount === undefined ? undefined : payload.fee_amount.toString(),
     fee_rub: toApiAmount(payload.fee_rub),
     fx_rate_to_rub: payload.fx_rate_to_rub === undefined ? undefined : payload.fx_rate_to_rub.toString(),
+  }
+}
+
+function toPricePayload(payload: Partial<InstrumentPriceSnapshotPayload>) {
+  return {
+    ...payload,
+    captured_at: toApiDateTime(payload.captured_at),
+    price: payload.price === undefined ? undefined : payload.price.toString(),
+    fx_rate_to_rub: payload.fx_rate_to_rub === undefined ? undefined : payload.fx_rate_to_rub.toString(),
+    price_rub: toApiAmount(payload.price_rub),
   }
 }
 
@@ -229,6 +297,12 @@ export const InvestmentService = {
     return Array.isArray(data) ? data.map(mapOperation) : []
   },
 
+  async getPrices(params?: { instrument?: string }) {
+    const response = await api.get("/investment/prices/", { params })
+    const data = Array.isArray(response.data?.results) ? response.data.results : response.data
+    return Array.isArray(data) ? data.map(mapPriceSnapshot) : []
+  },
+
   async createPortfolio(payload: InvestmentPortfolioPayload) {
     const response = await api.post("/investment/portfolios/", payload)
     return mapPortfolio(response.data)
@@ -255,6 +329,11 @@ export const InvestmentService = {
 
   async deleteInstrument(id: string) {
     await api.delete(`/investment/instruments/${id}/`)
+  },
+
+  async createPrice(payload: Partial<InstrumentPriceSnapshotPayload>) {
+    const response = await api.post("/investment/prices/", toPricePayload(payload))
+    return mapPriceSnapshot(response.data)
   },
 
   async createAccount(payload: InvestmentAccountPayload) {

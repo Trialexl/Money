@@ -1,7 +1,9 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import Instrument, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
 from .services import calculate_instrument_quantity, calculate_portfolio_totals, calculate_positions
 
 
@@ -41,6 +43,58 @@ class InstrumentSerializer(serializers.ModelSerializer):
 
     def validate_quote_currency(self, value):
         return (value or 'USD').strip().upper()
+
+
+class InstrumentPriceSnapshotSerializer(serializers.ModelSerializer):
+    instrument_ticker = serializers.CharField(source='instrument.ticker', read_only=True)
+    instrument_name = serializers.CharField(source='instrument.name', read_only=True)
+
+    class Meta:
+        model = InstrumentPriceSnapshot
+        fields = [
+            'id',
+            'instrument',
+            'instrument_ticker',
+            'instrument_name',
+            'captured_at',
+            'price',
+            'price_currency',
+            'fx_rate_to_rub',
+            'price_rub',
+            'source',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'instrument_ticker', 'instrument_name', 'created_at']
+        extra_kwargs = {
+            'price_rub': {'required': False},
+            'source': {'required': False},
+        }
+
+    def validate_price_currency(self, value):
+        return (value or 'USD').strip().upper()
+
+    def validate_source(self, value):
+        return (value or InstrumentPriceSnapshot.SOURCE_MANUAL).strip()
+
+    def validate(self, attrs):
+        price = attrs.get('price') if 'price' in attrs else getattr(self.instance, 'price', None)
+        fx_rate_to_rub = attrs.get('fx_rate_to_rub') if 'fx_rate_to_rub' in attrs else getattr(self.instance, 'fx_rate_to_rub', Decimal('1'))
+        price_rub = attrs.get('price_rub') if 'price_rub' in attrs else getattr(self.instance, 'price_rub', None)
+
+        if price is None or price <= 0:
+            raise serializers.ValidationError({'price': 'Укажите положительную цену.'})
+        if fx_rate_to_rub is None or fx_rate_to_rub <= 0:
+            raise serializers.ValidationError({'fx_rate_to_rub': 'Укажите положительный курс к RUB.'})
+
+        should_recalculate_price_rub = (
+            price_rub is None or price_rub <= 0 or 'price' in attrs or 'fx_rate_to_rub' in attrs
+        )
+        if should_recalculate_price_rub:
+            attrs['price_rub'] = (price * fx_rate_to_rub).quantize(Decimal('0.01'))
+        elif price_rub <= 0:
+            raise serializers.ValidationError({'price_rub': 'Укажите положительную цену в RUB.'})
+
+        return attrs
 
 
 class InvestmentPortfolioSerializer(serializers.ModelSerializer):
@@ -207,7 +261,13 @@ class InvestmentPositionSerializer(serializers.Serializer):
     quantity = serializers.DecimalField(max_digits=24, decimal_places=10)
     cost_basis_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     average_buy_price_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    latest_price_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    latest_price_at = serializers.DateTimeField(allow_null=True)
+    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     realized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    unrealized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    total_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    return_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
 
@@ -215,7 +275,12 @@ class InvestmentPositionSerializer(serializers.Serializer):
 class InvestmentPortfolioOverviewSerializer(serializers.Serializer):
     portfolio = InvestmentPortfolioSerializer()
     cost_basis_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     realized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    unrealized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    total_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    return_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    valuation_complete = serializers.BooleanField()
     bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     positions = InvestmentPositionSerializer(many=True)

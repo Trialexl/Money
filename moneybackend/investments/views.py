@@ -2,9 +2,10 @@ from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import Instrument, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
 from .serializers import (
     InstrumentSerializer,
+    InstrumentPriceSnapshotSerializer,
     InvestmentAccountSerializer,
     InvestmentOperationSerializer,
     InvestmentPortfolioSerializer,
@@ -20,6 +21,31 @@ class InstrumentViewSet(viewsets.ModelViewSet):
     queryset = Instrument.objects.all().order_by('type', 'ticker')
     filterset_fields = ['type', 'is_active']
     search_fields = ['ticker', 'name', 'provider_symbol']
+
+
+class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
+    serializer_class = InstrumentPriceSnapshotSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = (
+            InstrumentPriceSnapshot.objects
+            .select_related('instrument')
+            .order_by('-captured_at', '-created_at')
+        )
+        instrument_id = self.request.query_params.get('instrument')
+        if instrument_id:
+            queryset = queryset.filter(instrument_id=instrument_id)
+        date_from = self.request.query_params.get('date_from')
+        date_to = self.request.query_params.get('date_to')
+        if date_from:
+            queryset = queryset.filter(captured_at__date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(captured_at__date__lte=date_to)
+        source = self.request.query_params.get('source')
+        if source:
+            queryset = queryset.filter(source=source)
+        return queryset
 
 
 class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
@@ -110,7 +136,12 @@ class InvestmentOverviewViewSet(viewsets.ViewSet):
             return Response({
                 'portfolio': None,
                 'cost_basis_rub': '0.00',
+                'current_value_rub': '0.00',
                 'realized_pl_rub': '0.00',
+                'unrealized_pl_rub': '0.00',
+                'total_pl_rub': '0.00',
+                'return_percent': None,
+                'valuation_complete': True,
                 'bought_rub': '0.00',
                 'sold_rub': '0.00',
                 'positions': [],
