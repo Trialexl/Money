@@ -1,6 +1,7 @@
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, extend_schema_view
 
 from .models import Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
 from .serializers import (
@@ -8,6 +9,8 @@ from .serializers import (
     InstrumentPriceSnapshotSerializer,
     InvestmentAccountSerializer,
     InvestmentOperationSerializer,
+    InvestmentPositionSerializer,
+    InvestmentPortfolioOverviewSerializer,
     InvestmentPortfolioSerializer,
     get_default_portfolio,
     serialize_portfolio_overview,
@@ -15,6 +18,50 @@ from .serializers import (
 from .services import calculate_positions
 
 
+instrument_list_parameters = [
+    OpenApiParameter('type', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Тип инструмента: crypto или stock.'),
+    OpenApiParameter('is_active', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description='Фильтр активности инструмента.'),
+    OpenApiParameter('search', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Поиск по тикеру, названию или символу provider.'),
+]
+
+price_list_parameters = [
+    OpenApiParameter('instrument', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инструмента.'),
+    OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка цены с YYYY-MM-DD.'),
+    OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка цены по YYYY-MM-DD включительно.'),
+    OpenApiParameter('source', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Источник цены, например manual.'),
+]
+
+account_list_parameters = [
+    OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инвестиционного портфеля.'),
+    OpenApiParameter('hidden', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description='Показать скрытые или видимые счета.'),
+]
+
+operation_list_parameters = [
+    OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инвестиционного портфеля.'),
+    OpenApiParameter('account', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инвестиционного счета.'),
+    OpenApiParameter('instrument', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инструмента.'),
+    OpenApiParameter('operation_type', OpenApiTypes.STR, OpenApiParameter.QUERY, description='buy, sell, transfer_instrument или correction.'),
+    OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата операции с YYYY-MM-DD.'),
+    OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата операции по YYYY-MM-DD включительно.'),
+    OpenApiParameter('deleted', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description='Если не передан, по умолчанию скрывает удаленные операции.'),
+]
+
+overview_parameters = [
+    OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID портфеля. Если не передан, берется портфель по умолчанию.'),
+]
+
+
+@extend_schema_view(
+    list=extend_schema(
+        parameters=instrument_list_parameters,
+        description='Список финансовых инструментов. Инвестиционный модуль не синхронизируется с 1С.',
+    ),
+    create=extend_schema(description='Создать финансовый инструмент.'),
+    retrieve=extend_schema(description='Получить финансовый инструмент.'),
+    update=extend_schema(description='Полностью обновить финансовый инструмент.'),
+    partial_update=extend_schema(description='Частично обновить финансовый инструмент.'),
+    destroy=extend_schema(description='Удалить финансовый инструмент, если он не используется операциями.'),
+)
 class InstrumentViewSet(viewsets.ModelViewSet):
     serializer_class = InstrumentSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -23,6 +70,17 @@ class InstrumentViewSet(viewsets.ModelViewSet):
     search_fields = ['ticker', 'name', 'provider_symbol']
 
 
+@extend_schema_view(
+    list=extend_schema(
+        parameters=price_list_parameters,
+        description='Снимки цен инструментов. Используются для текущей оценки, unrealized P/L и доходности.',
+    ),
+    create=extend_schema(description='Создать ручной снимок цены инструмента.'),
+    retrieve=extend_schema(description='Получить снимок цены инструмента.'),
+    update=extend_schema(description='Полностью обновить снимок цены.'),
+    partial_update=extend_schema(description='Частично обновить снимок цены.'),
+    destroy=extend_schema(description='Удалить снимок цены.'),
+)
 class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
     serializer_class = InstrumentPriceSnapshotSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -48,12 +106,22 @@ class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+@extend_schema_view(
+    list=extend_schema(description='Список инвестиционных портфелей текущего пользователя.'),
+    create=extend_schema(description='Создать инвестиционный портфель.'),
+    retrieve=extend_schema(description='Получить инвестиционный портфель.'),
+    update=extend_schema(description='Полностью обновить инвестиционный портфель.'),
+    partial_update=extend_schema(description='Частично обновить инвестиционный портфель.'),
+    destroy=extend_schema(description='Удалить инвестиционный портфель, если он не используется.'),
+)
 class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
     serializer_class = InvestmentPortfolioSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         queryset = InvestmentPortfolio.objects.select_related('user', 'project').order_by('-is_default', 'name')
+        if getattr(self, 'swagger_fake_view', False):
+            return queryset.none()
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(user=self.request.user)
@@ -61,22 +129,46 @@ class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    @extend_schema(
+        responses={200: InvestmentPortfolioOverviewSerializer},
+        description='Сводка по портфелю: текущая стоимость, себестоимость, realized/unrealized/total P/L, доходность и позиции.',
+    )
     @action(detail=True, methods=['get'])
     def overview(self, request, pk=None):
         return Response(serialize_portfolio_overview(self.get_object()))
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter('include_zero', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description='Включить нулевые позиции.'),
+        ],
+        responses={200: InvestmentPositionSerializer(many=True)},
+        description='Позиции портфеля по инструментам.',
+    )
     @action(detail=True, methods=['get'])
     def positions(self, request, pk=None):
         include_zero = request.query_params.get('include_zero') in ('1', 'true', 'True')
         return Response(calculate_positions(self.get_object(), include_zero=include_zero))
 
 
+@extend_schema_view(
+    list=extend_schema(
+        parameters=account_list_parameters,
+        description='Список инвестиционных счетов. Hidden-счета остаются в данных, но могут скрываться в UI.',
+    ),
+    create=extend_schema(description='Создать инвестиционный счет.'),
+    retrieve=extend_schema(description='Получить инвестиционный счет.'),
+    update=extend_schema(description='Полностью обновить инвестиционный счет.'),
+    partial_update=extend_schema(description='Частично обновить инвестиционный счет.'),
+    destroy=extend_schema(description='Удалить инвестиционный счет, если он не используется.'),
+)
 class InvestmentAccountViewSet(viewsets.ModelViewSet):
     serializer_class = InvestmentAccountSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         queryset = InvestmentAccount.objects.select_related('portfolio', 'portfolio__user').order_by('name')
+        if getattr(self, 'swagger_fake_view', False):
+            return queryset.none()
         portfolio_id = self.request.query_params.get('portfolio')
         if portfolio_id:
             queryset = queryset.filter(portfolio_id=portfolio_id)
@@ -87,6 +179,17 @@ class InvestmentAccountViewSet(viewsets.ModelViewSet):
         return queryset.filter(portfolio__user=self.request.user)
 
 
+@extend_schema_view(
+    list=extend_schema(
+        parameters=operation_list_parameters,
+        description='Список инвестиционных операций, отсортированный по дате убыванию. Операции не создают денежные движения и не попадают в 1С.',
+    ),
+    create=extend_schema(description='Создать инвестиционную операцию. Покупки/продажи не меняют денежные кошельки.'),
+    retrieve=extend_schema(description='Получить инвестиционную операцию.'),
+    update=extend_schema(description='Полностью обновить инвестиционную операцию.'),
+    partial_update=extend_schema(description='Частично обновить инвестиционную операцию.'),
+    destroy=extend_schema(description='Удалить инвестиционную операцию.'),
+)
 class InvestmentOperationViewSet(viewsets.ModelViewSet):
     serializer_class = InvestmentOperationSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -97,6 +200,8 @@ class InvestmentOperationViewSet(viewsets.ModelViewSet):
             .select_related('portfolio', 'portfolio__user', 'account', 'account_to', 'instrument')
             .order_by('-date', '-created_at')
         )
+        if getattr(self, 'swagger_fake_view', False):
+            return queryset.none()
         filters = {
             'portfolio_id': self.request.query_params.get('portfolio'),
             'account_id': self.request.query_params.get('account'),
@@ -124,6 +229,11 @@ class InvestmentOperationViewSet(viewsets.ModelViewSet):
 class InvestmentOverviewViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(
+        parameters=overview_parameters,
+        responses={200: InvestmentPortfolioOverviewSerializer},
+        description='Overview портфеля по умолчанию или указанного portfolio. Используется главным экраном раздела Портфель.',
+    )
     def list(self, request):
         portfolio_id = request.query_params.get('portfolio')
         queryset = InvestmentPortfolio.objects.select_related('user', 'project')
