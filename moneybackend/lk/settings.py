@@ -189,6 +189,19 @@ AI_TELEGRAM_BOT_TOKEN = config('AI_TELEGRAM_BOT_TOKEN', default='')
 AI_TELEGRAM_API_BASE_URL = config('AI_TELEGRAM_API_BASE_URL', default='https://api.telegram.org')
 AI_DUPLICATE_WINDOW_SECONDS = config('AI_DUPLICATE_WINDOW_SECONDS', default=600, cast=int)
 
+INVESTMENT_PRICE_PROVIDER = config('INVESTMENT_PRICE_PROVIDER', default='coingecko')
+INVESTMENT_PRICE_PROVIDER_BASE_URL = config(
+    'INVESTMENT_PRICE_PROVIDER_BASE_URL',
+    default='https://api.coingecko.com/api/v3/simple/price',
+)
+INVESTMENT_PRICE_PROVIDER_TIMEOUT = config('INVESTMENT_PRICE_PROVIDER_TIMEOUT', default=10.0, cast=float)
+INVESTMENT_FX_PROVIDER = config('INVESTMENT_FX_PROVIDER', default='cbr')
+INVESTMENT_FX_PROVIDER_BASE_URL = config(
+    'INVESTMENT_FX_PROVIDER_BASE_URL',
+    default='https://www.cbr.ru/scripts/XML_daily.asp',
+)
+INVESTMENT_FX_PROVIDER_TIMEOUT = config('INVESTMENT_FX_PROVIDER_TIMEOUT', default=10.0, cast=float)
+
 SIMPLE_JWT = {
 
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),

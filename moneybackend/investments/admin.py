@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import (
+    FxRateSnapshot,
+    Instrument,
+    InstrumentPriceSnapshot,
+    InvestmentAccount,
+    InvestmentOperation,
+    InvestmentPortfolio,
+)
 
 
 @admin.register(Instrument)
@@ -16,6 +23,13 @@ class InstrumentPriceSnapshotAdmin(admin.ModelAdmin):
     list_filter = ('price_currency', 'source', 'captured_at')
     search_fields = ('instrument__ticker', 'instrument__name', 'source')
     autocomplete_fields = ('instrument',)
+
+
+@admin.register(FxRateSnapshot)
+class FxRateSnapshotAdmin(admin.ModelAdmin):
+    list_display = ('base_currency', 'quote_currency', 'captured_at', 'rate', 'source')
+    list_filter = ('base_currency', 'quote_currency', 'source', 'captured_at')
+    search_fields = ('base_currency', 'quote_currency', 'source')
 
 
 @admin.register(InvestmentPortfolio)

@@ -80,6 +80,35 @@ class InstrumentPriceSnapshot(models.Model):
         return f'{self.instrument.ticker}: {self.price_rub} RUB'
 
 
+class FxRateSnapshot(models.Model):
+    SOURCE_MANUAL = 'manual'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    captured_at = models.DateTimeField(default=timezone.now)
+    base_currency = models.CharField(max_length=10)
+    quote_currency = models.CharField(max_length=10, default='RUB')
+    rate = models.DecimalField(max_digits=18, decimal_places=8)
+    source = models.CharField(max_length=50, default=SOURCE_MANUAL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Снимок валютного курса'
+        verbose_name_plural = 'Снимки валютных курсов'
+        ordering = ['-captured_at', '-created_at']
+        indexes = [
+            models.Index(fields=['base_currency', 'quote_currency', '-captured_at']),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.base_currency = (self.base_currency or '').strip().upper()
+        self.quote_currency = (self.quote_currency or 'RUB').strip().upper()
+        self.source = (self.source or self.SOURCE_MANUAL).strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.base_currency}/{self.quote_currency}: {self.rate}'
+
+
 class InvestmentPortfolio(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(

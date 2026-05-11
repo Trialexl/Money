@@ -2352,6 +2352,198 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/investment/fx-rates/:
+    get:
+      operationId: v1_investment_fx_rates_list
+      description: Снимки валютных курсов. Используются для переоценки инструментов
+        в RUB.
+      parameters:
+      - in: query
+        name: base_currency
+        schema:
+          type: string
+        description: Базовая валюта, например USD.
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+        description: Дата снимка курса с YYYY-MM-DD.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+        description: Дата снимка курса по YYYY-MM-DD включительно.
+      - in: query
+        name: quote_currency
+        schema:
+          type: string
+        description: Валюта котировки, по умолчанию RUB.
+      - in: query
+        name: source
+        schema:
+          type: string
+        description: Источник курса, например manual или cbr.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FxRateSnapshot'
+          description: ''
+    post:
+      operationId: v1_investment_fx_rates_create
+      description: Создать ручной снимок валютного курса.
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FxRateSnapshotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/FxRateSnapshotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FxRateSnapshotRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxRateSnapshot'
+          description: ''
+  /api/v1/investment/fx-rates/{id}/:
+    get:
+      operationId: v1_investment_fx_rates_retrieve
+      description: Получить снимок валютного курса.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Снимок валютного курса.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxRateSnapshot'
+          description: ''
+    put:
+      operationId: v1_investment_fx_rates_update
+      description: Полностью обновить снимок валютного курса.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Снимок валютного курса.
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FxRateSnapshotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/FxRateSnapshotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FxRateSnapshotRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxRateSnapshot'
+          description: ''
+    patch:
+      operationId: v1_investment_fx_rates_partial_update
+      description: Частично обновить снимок валютного курса.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Снимок валютного курса.
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedFxRateSnapshotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedFxRateSnapshotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedFxRateSnapshotRequest'
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxRateSnapshot'
+          description: ''
+    delete:
+      operationId: v1_investment_fx_rates_destroy
+      description: Удалить снимок валютного курса.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Снимок валютного курса.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/investment/instruments/:
     get:
       operationId: v1_investment_instruments_list
@@ -3174,6 +3366,25 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/investment/prices/refresh/:
+    post:
+      operationId: v1_investment_prices_refresh_create
+      description: Обновить цены активных инструментов через configured price/fx providers.
+        Частичные ошибки возвращаются в results.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/onec-sync/outbox/:
     get:
       operationId: v1_onec_sync_outbox_list
@@ -6104,6 +6315,63 @@ components:
         * `2` - Transfer
         * `3` - Receipt
         * `4` - Expenditure
+    FxRateSnapshot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        captured_at:
+          type: string
+          format: date-time
+        base_currency:
+          type: string
+          maxLength: 10
+        quote_currency:
+          type: string
+          maxLength: 10
+        rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
+        source:
+          type: string
+          maxLength: 50
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - base_currency
+      - created_at
+      - id
+      - rate
+    FxRateSnapshotRequest:
+      type: object
+      properties:
+        captured_at:
+          type: string
+          format: date-time
+        base_currency:
+          type: string
+          minLength: 1
+          maxLength: 10
+        quote_currency:
+          type: string
+          minLength: 1
+          maxLength: 10
+        rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
+        source:
+          type: string
+          minLength: 1
+          maxLength: 50
+      required:
+      - base_currency
+      - rate
     Instrument:
       type: object
       properties:
@@ -6597,6 +6865,14 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        largest_asset:
+          allOf:
+          - $ref: '#/components/schemas/InvestmentPosition'
+          nullable: true
+        latest_price_at:
+          type: string
+          format: date-time
+          nullable: true
         positions:
           type: array
           items:
@@ -6605,6 +6881,8 @@ components:
       - bought_rub
       - cost_basis_rub
       - current_value_rub
+      - largest_asset
+      - latest_price_at
       - portfolio
       - positions
       - realized_pl_rub
@@ -6690,7 +6968,24 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        allocation_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        target_allocation_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        allocation_deviation_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
       required:
+      - allocation_deviation_percent
+      - allocation_percent
       - average_buy_price_rub
       - bought_rub
       - cost_basis_rub
@@ -6704,6 +6999,7 @@ components:
       - realized_pl_rub
       - return_percent
       - sold_rub
+      - target_allocation_percent
       - total_pl_rub
       - unrealized_pl_rub
     LogoutError:
@@ -7077,6 +7373,28 @@ components:
           type: string
           format: uuid
           nullable: true
+    PatchedFxRateSnapshotRequest:
+      type: object
+      properties:
+        captured_at:
+          type: string
+          format: date-time
+        base_currency:
+          type: string
+          minLength: 1
+          maxLength: 10
+        quote_currency:
+          type: string
+          minLength: 1
+          maxLength: 10
+        rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
+        source:
+          type: string
+          minLength: 1
+          maxLength: 50
     PatchedInstrumentPriceSnapshotRequest:
       type: object
       properties:

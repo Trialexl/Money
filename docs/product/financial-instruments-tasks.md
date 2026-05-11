@@ -43,17 +43,23 @@
 - `P0-FE-001` - добавлен раздел `Портфель` в меню и route `/investments`.
 - `P0-FE-003` - операции можно создавать, редактировать и удалять из раздела `Портфель`.
 - `P0-FE-004` - портфели, инструменты и инвестиционные счета можно создавать, редактировать и удалять без админки.
+- `P0-DOC-001` - добавлен README investment module, ссылки из корневой документации и README проекта.
+- `P1-SEC-001` - добавлены тесты приватности портфелей, счетов, операций и staff-доступа.
+- `P1-BE-001` - добавлен PriceProvider adapter: CoinGecko для крипты, static provider для тестов, env-настройки, таймауты и controlled errors.
+- `P1-BE-003` - добавлены `InstrumentPriceSnapshot` и `FxRateSnapshot`, admin, CRUD API и OpenAPI-контракт для snapshots.
+- `P1-BE-004` - добавлен `POST /api/v1/investment/prices/refresh/`: обновляет активные инструменты, сохраняет price/fx snapshots и возвращает частичные ошибки по инструментам.
+- `P1-BE-101` - portfolio overview API возвращает стоимость, вложено, realized/unrealized/total P/L, доходность, крупнейший актив, дату последнего курса и позиции.
 
 Частично:
 
 - `P0-FE-002` - overview расширен текущей стоимостью, unrealized/total P/L и доходностью; USD/EUR переключатель ждет P1 FX-курсы.
 - `P0-QA-001` - покрытие начато backend-тестами изоляции; полный регрессионный прогон требует доступной тестовой БД.
-- `P1-SEC-001` - backend queryset фильтрует портфели по пользователю; отдельные permission-тесты еще не выполнены.
+- `P1-BE-002` - добавлен FxRateProvider adapter: CBR для USD/RUB и EUR/RUB, static provider для тестов, env-настройки, in-memory cache внутри provider instance и controlled errors; интеграция в refresh/snapshots будет в `P1-BE-003/P1-BE-004`.
+- `P1-BE-102` - positions API возвращает количество, среднюю цену, текущую цену, стоимость, P/L и текущую долю; целевые доли/отклонения ждут `P1-BE-201`.
 
 Не начато:
 
-- P1 курсы и переоценка.
-- P1 provider-обновление цен: сейчас есть ручные price snapshots, но нет автоматического получения курсов.
+- P1 FX-курсы и переоценка в RUB через внешний курс.
 - P1 аналитика, графики, performance API.
 - P1 ребалансировка.
 - P2 AI/Telegram, импорт, snapshots, мониторинг.
@@ -336,6 +342,8 @@ Acceptance criteria:
 
 ### P1-BE-001. PriceProvider adapter
 
+Статус: готово.
+
 Цель: получать текущие цены криптовалют.
 
 Задачи:
@@ -353,6 +361,8 @@ Acceptance criteria:
 - ошибка provider возвращается контролируемо.
 
 ### P1-BE-002. FxRateProvider adapter
+
+Статус: частично готово. Adapter реализован, сохранение snapshot и применение в refresh endpoint вынесены в `P1-BE-003/P1-BE-004`.
 
 Цель: пересчитывать стоимость в RUB, USD, EUR.
 
@@ -372,6 +382,8 @@ Acceptance criteria:
 
 ### P1-BE-003. PriceSnapshot и FxRateSnapshot
 
+Статус: готово.
+
 Цель: хранить использованные рыночные данные.
 
 Задачи:
@@ -389,6 +401,8 @@ Acceptance criteria:
 - можно посмотреть источник цены.
 
 ### P1-BE-004. Endpoint refresh курсов
+
+Статус: готово.
 
 Цель: дать UI и регламенту возможность обновить цены.
 
@@ -409,6 +423,8 @@ Acceptance criteria:
 
 ### P1-BE-101. Portfolio overview API
 
+Статус: готово.
+
 Цель: один endpoint для главной страницы портфеля.
 
 Задачи:
@@ -426,6 +442,8 @@ Acceptance criteria:
 - данные согласованы с позициями.
 
 ### P1-BE-102. Positions API
+
+Статус: частично готово. Базовые позиции и текущая доля есть, целевые доли и отклонения будут после `TargetAllocation API`.
 
 Цель: список позиций по инструментам.
 

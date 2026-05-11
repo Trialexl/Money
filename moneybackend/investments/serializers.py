@@ -3,7 +3,14 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import (
+    FxRateSnapshot,
+    Instrument,
+    InstrumentPriceSnapshot,
+    InvestmentAccount,
+    InvestmentOperation,
+    InvestmentPortfolio,
+)
 from .services import calculate_instrument_quantity, calculate_portfolio_totals, calculate_positions
 
 
@@ -94,6 +101,42 @@ class InstrumentPriceSnapshotSerializer(serializers.ModelSerializer):
         elif price_rub <= 0:
             raise serializers.ValidationError({'price_rub': 'Укажите положительную цену в RUB.'})
 
+        return attrs
+
+
+class FxRateSnapshotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FxRateSnapshot
+        fields = [
+            'id',
+            'captured_at',
+            'base_currency',
+            'quote_currency',
+            'rate',
+            'source',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+        extra_kwargs = {
+            'source': {'required': False},
+            'quote_currency': {'required': False},
+        }
+
+    def validate_base_currency(self, value):
+        return (value or '').strip().upper()
+
+    def validate_quote_currency(self, value):
+        return (value or 'RUB').strip().upper()
+
+    def validate_source(self, value):
+        return (value or FxRateSnapshot.SOURCE_MANUAL).strip()
+
+    def validate(self, attrs):
+        rate = attrs.get('rate') if 'rate' in attrs else getattr(self.instance, 'rate', None)
+        if not attrs.get('base_currency') and self.instance is None:
+            raise serializers.ValidationError({'base_currency': 'Укажите базовую валюту.'})
+        if rate is None or rate <= 0:
+            raise serializers.ValidationError({'rate': 'Укажите положительный курс.'})
         return attrs
 
 
@@ -270,6 +313,9 @@ class InvestmentPositionSerializer(serializers.Serializer):
     return_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    target_allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    allocation_deviation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
 
 
 class InvestmentPortfolioOverviewSerializer(serializers.Serializer):
@@ -283,6 +329,8 @@ class InvestmentPortfolioOverviewSerializer(serializers.Serializer):
     valuation_complete = serializers.BooleanField()
     bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    largest_asset = InvestmentPositionSerializer(allow_null=True)
+    latest_price_at = serializers.DateTimeField(allow_null=True)
     positions = InvestmentPositionSerializer(many=True)
 
 

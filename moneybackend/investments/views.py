@@ -3,8 +3,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, extend_schema_view
 
-from .models import Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
 from .serializers import (
+    FxRateSnapshotSerializer,
     InstrumentSerializer,
     InstrumentPriceSnapshotSerializer,
     InvestmentAccountSerializer,
@@ -15,7 +16,7 @@ from .serializers import (
     get_default_portfolio,
     serialize_portfolio_overview,
 )
-from .services import calculate_positions
+from .services import calculate_positions, refresh_price_snapshots
 
 
 instrument_list_parameters = [
@@ -29,6 +30,14 @@ price_list_parameters = [
     OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка цены с YYYY-MM-DD.'),
     OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка цены по YYYY-MM-DD включительно.'),
     OpenApiParameter('source', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Источник цены, например manual.'),
+]
+
+fx_rate_list_parameters = [
+    OpenApiParameter('base_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Базовая валюта, например USD.'),
+    OpenApiParameter('quote_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Валюта котировки, по умолчанию RUB.'),
+    OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка курса с YYYY-MM-DD.'),
+    OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка курса по YYYY-MM-DD включительно.'),
+    OpenApiParameter('source', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Источник курса, например manual или cbr.'),
 ]
 
 account_list_parameters = [
@@ -94,6 +103,50 @@ class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
         instrument_id = self.request.query_params.get('instrument')
         if instrument_id:
             queryset = queryset.filter(instrument_id=instrument_id)
+        date_from = self.request.query_params.get('date_from')
+        date_to = self.request.query_params.get('date_to')
+        if date_from:
+            queryset = queryset.filter(captured_at__date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(captured_at__date__lte=date_to)
+        source = self.request.query_params.get('source')
+        if source:
+            queryset = queryset.filter(source=source)
+        return queryset
+
+    @extend_schema(
+        request=None,
+        responses={200: OpenApiTypes.OBJECT},
+        description='Обновить цены активных инструментов через configured price/fx providers. Частичные ошибки возвращаются в results.',
+    )
+    @action(detail=False, methods=['post'])
+    def refresh(self, request):
+        return Response(refresh_price_snapshots())
+
+
+@extend_schema_view(
+    list=extend_schema(
+        parameters=fx_rate_list_parameters,
+        description='Снимки валютных курсов. Используются для переоценки инструментов в RUB.',
+    ),
+    create=extend_schema(description='Создать ручной снимок валютного курса.'),
+    retrieve=extend_schema(description='Получить снимок валютного курса.'),
+    update=extend_schema(description='Полностью обновить снимок валютного курса.'),
+    partial_update=extend_schema(description='Частично обновить снимок валютного курса.'),
+    destroy=extend_schema(description='Удалить снимок валютного курса.'),
+)
+class FxRateSnapshotViewSet(viewsets.ModelViewSet):
+    serializer_class = FxRateSnapshotSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = FxRateSnapshot.objects.order_by('-captured_at', '-created_at')
+        base_currency = self.request.query_params.get('base_currency')
+        if base_currency:
+            queryset = queryset.filter(base_currency=base_currency.strip().upper())
+        quote_currency = self.request.query_params.get('quote_currency')
+        if quote_currency:
+            queryset = queryset.filter(quote_currency=quote_currency.strip().upper())
         date_from = self.request.query_params.get('date_from')
         date_to = self.request.query_params.get('date_to')
         if date_from:

@@ -27,6 +27,13 @@ docker compose up -d --build
 
 Скрипт сохраняет дампы PostgreSQL в `backups/postgres/`, требует явное подтверждение `RESTORE` перед восстановлением и не удаляет Docker volumes.
 
+## Документация
+
+- [Индекс документации](docs/README.md)
+- [Investment module](docs/investment-module.md)
+- [PRD финансовых инструментов](docs/product/financial-instruments-prd.md)
+- [Backlog финансовых инструментов](docs/product/financial-instruments-tasks.md)
+
 ## Git
 
 Этот корневой репозиторий создан как отдельный repo для объединённого проекта.
