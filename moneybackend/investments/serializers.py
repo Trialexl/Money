@@ -10,6 +10,7 @@ from .models import (
     InvestmentAccount,
     InvestmentOperation,
     InvestmentPortfolio,
+    InvestmentTargetAllocation,
 )
 from .services import calculate_instrument_quantity, calculate_portfolio_totals, calculate_positions
 
@@ -183,6 +184,52 @@ class InvestmentAccountSerializer(serializers.ModelSerializer):
         return portfolio
 
 
+class InvestmentTargetAllocationSerializer(serializers.ModelSerializer):
+    portfolio_name = serializers.CharField(source='portfolio.name', read_only=True)
+    instrument_ticker = serializers.CharField(source='instrument.ticker', read_only=True)
+    instrument_name = serializers.CharField(source='instrument.name', read_only=True)
+
+    class Meta:
+        model = InvestmentTargetAllocation
+        fields = [
+            'id',
+            'portfolio',
+            'portfolio_name',
+            'instrument',
+            'instrument_ticker',
+            'instrument_name',
+            'target_percent',
+            'tolerance_percent',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'portfolio_name', 'instrument_ticker', 'instrument_name', 'created_at', 'updated_at']
+
+    def validate_portfolio(self, portfolio):
+        request = self.context.get('request')
+        if request and not request.user.is_staff and portfolio.user_id != request.user.id:
+            raise serializers.ValidationError('Портфель недоступен.')
+        return portfolio
+
+    def validate(self, attrs):
+        portfolio = attrs.get('portfolio') or getattr(self.instance, 'portfolio', None)
+        target_percent = attrs.get('target_percent') if 'target_percent' in attrs else getattr(self.instance, 'target_percent', None)
+        tolerance_percent = attrs.get('tolerance_percent') if 'tolerance_percent' in attrs else getattr(self.instance, 'tolerance_percent', None)
+
+        if target_percent is None or target_percent <= 0 or target_percent > 100:
+            raise serializers.ValidationError({'target_percent': 'Целевая доля должна быть больше 0 и не больше 100.'})
+        if tolerance_percent is None or tolerance_percent < 0 or tolerance_percent > 100:
+            raise serializers.ValidationError({'tolerance_percent': 'Допуск должен быть от 0 до 100.'})
+        if portfolio is not None:
+            allocations = InvestmentTargetAllocation.objects.filter(portfolio=portfolio)
+            if self.instance is not None and self.instance.pk:
+                allocations = allocations.exclude(pk=self.instance.pk)
+            total_percent = sum((allocation.target_percent for allocation in allocations), Decimal('0')) + target_percent
+            if total_percent > Decimal('100'):
+                raise serializers.ValidationError({'target_percent': 'Сумма целевых долей портфеля не должна превышать 100%.'})
+        return attrs
+
+
 class InvestmentOperationSerializer(serializers.ModelSerializer):
     portfolio_name = serializers.CharField(source='portfolio.name', read_only=True)
     account_name = serializers.CharField(source='account.name', read_only=True)
@@ -315,7 +362,13 @@ class InvestmentPositionSerializer(serializers.Serializer):
     sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
     allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     target_allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    tolerance_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     allocation_deviation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    target_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    allocation_deviation_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    rebalance_action = serializers.CharField(allow_null=True)
+    rebalance_amount_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    is_within_tolerance = serializers.BooleanField(allow_null=True)
 
 
 class InvestmentPortfolioOverviewSerializer(serializers.Serializer):
@@ -332,6 +385,37 @@ class InvestmentPortfolioOverviewSerializer(serializers.Serializer):
     largest_asset = InvestmentPositionSerializer(allow_null=True)
     latest_price_at = serializers.DateTimeField(allow_null=True)
     positions = InvestmentPositionSerializer(many=True)
+
+
+class InvestmentPerformancePointSerializer(serializers.Serializer):
+    label = serializers.CharField()
+    date = serializers.DateField()
+    period_start = serializers.DateField(allow_null=True)
+    period_end = serializers.DateField()
+    cost_basis_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    realized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    unrealized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    total_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    valuation_complete = serializers.BooleanField()
+
+
+class InvestmentPerformanceSerializer(serializers.Serializer):
+    portfolio_id = serializers.UUIDField()
+    date_from = serializers.DateField()
+    date_to = serializers.DateField()
+    group_by = serializers.CharField()
+    opening = InvestmentPerformancePointSerializer()
+    points = InvestmentPerformancePointSerializer(many=True)
+
+
+class InvestmentRebalanceStatusSerializer(serializers.Serializer):
+    portfolio_id = serializers.UUIDField()
+    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    positions = InvestmentPositionSerializer(many=True)
+    disclaimer = serializers.CharField()
 
 
 def serialize_portfolio_overview(portfolio):

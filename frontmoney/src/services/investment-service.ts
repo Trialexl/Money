@@ -91,6 +91,9 @@ export interface InvestmentPosition {
   return_percent?: number | null
   bought_rub: number
   sold_rub: number
+  allocation_percent?: number | null
+  target_allocation_percent?: number | null
+  allocation_deviation_percent?: number | null
 }
 
 export interface InvestmentOverview {
@@ -104,7 +107,33 @@ export interface InvestmentOverview {
   valuation_complete: boolean
   bought_rub: number
   sold_rub: number
+  largest_asset?: InvestmentPosition | null
+  latest_price_at?: string | null
   positions: InvestmentPosition[]
+}
+
+export interface InvestmentPerformancePoint {
+  label: string
+  date: string
+  period_start?: string | null
+  period_end: string
+  cost_basis_rub: number
+  current_value_rub: number
+  realized_pl_rub: number
+  unrealized_pl_rub: number
+  total_pl_rub: number
+  bought_rub: number
+  sold_rub: number
+  valuation_complete: boolean
+}
+
+export interface InvestmentPerformance {
+  portfolio_id: string
+  date_from: string
+  date_to: string
+  group_by: "day" | "month"
+  opening: InvestmentPerformancePoint
+  points: InvestmentPerformancePoint[]
 }
 
 export type InstrumentPayload = Omit<Instrument, "id">
@@ -223,6 +252,9 @@ function mapPosition(raw: any): InvestmentPosition {
     return_percent: fromApiNullableAmount(raw.return_percent),
     bought_rub: fromApiAmount(raw.bought_rub),
     sold_rub: fromApiAmount(raw.sold_rub),
+    allocation_percent: fromApiNullableAmount(raw.allocation_percent),
+    target_allocation_percent: fromApiNullableAmount(raw.target_allocation_percent),
+    allocation_deviation_percent: fromApiNullableAmount(raw.allocation_deviation_percent),
   }
 }
 
@@ -238,7 +270,37 @@ function mapOverview(raw: any): InvestmentOverview {
     valuation_complete: raw.valuation_complete !== false,
     bought_rub: fromApiAmount(raw.bought_rub),
     sold_rub: fromApiAmount(raw.sold_rub),
+    largest_asset: raw.largest_asset ? mapPosition(raw.largest_asset) : null,
+    latest_price_at: fromApiDateTime(raw.latest_price_at) ?? null,
     positions: Array.isArray(raw.positions) ? raw.positions.map(mapPosition) : [],
+  }
+}
+
+function mapPerformancePoint(raw: any): InvestmentPerformancePoint {
+  return {
+    label: raw.label ?? "",
+    date: raw.date ?? "",
+    period_start: raw.period_start ?? null,
+    period_end: raw.period_end ?? "",
+    cost_basis_rub: fromApiAmount(raw.cost_basis_rub),
+    current_value_rub: fromApiAmount(raw.current_value_rub),
+    realized_pl_rub: fromApiAmount(raw.realized_pl_rub),
+    unrealized_pl_rub: fromApiAmount(raw.unrealized_pl_rub),
+    total_pl_rub: fromApiAmount(raw.total_pl_rub),
+    bought_rub: fromApiAmount(raw.bought_rub),
+    sold_rub: fromApiAmount(raw.sold_rub),
+    valuation_complete: raw.valuation_complete !== false,
+  }
+}
+
+function mapPerformance(raw: any): InvestmentPerformance {
+  return {
+    portfolio_id: raw.portfolio_id ?? "",
+    date_from: raw.date_from ?? "",
+    date_to: raw.date_to ?? "",
+    group_by: raw.group_by === "day" ? "day" : "month",
+    opening: mapPerformancePoint(raw.opening ?? {}),
+    points: Array.isArray(raw.points) ? raw.points.map(mapPerformancePoint) : [],
   }
 }
 
@@ -273,6 +335,11 @@ export const InvestmentService = {
     return mapOverview(response.data)
   },
 
+  async getPortfolioPerformance(portfolioId: string, params?: { date_from?: string; date_to?: string; group_by?: "day" | "month" }) {
+    const response = await api.get(`/investment/portfolios/${portfolioId}/performance/`, { params })
+    return mapPerformance(response.data)
+  },
+
   async getInstruments() {
     const response = await api.get("/investment/instruments/")
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data
@@ -291,8 +358,14 @@ export const InvestmentService = {
     return Array.isArray(data) ? data.map(mapAccount) : []
   },
 
-  async getOperations() {
-    const response = await api.get("/investment/operations/")
+  async getOperations(params?: {
+    date_from?: string
+    date_to?: string
+    instrument?: string
+    account?: string
+    operation_type?: InvestmentOperationType
+  }) {
+    const response = await api.get("/investment/operations/", { params })
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data
     return Array.isArray(data) ? data.map(mapOperation) : []
   },

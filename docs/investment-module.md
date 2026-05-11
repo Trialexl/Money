@@ -80,6 +80,12 @@
 - нужен для сохранения использованных внешних курсов;
 - не пересчитывает исторические операции задним числом.
 
+`InvestmentTargetAllocation` - целевая доля инструмента в портфеле.
+
+- хранит `target_percent` и `tolerance_percent`;
+- сумма целевых долей одного портфеля не должна превышать 100%;
+- используется только для аналитики ребалансировки и не создает операций.
+
 ## Price providers
 
 Текущий слой provider-ов находится в `moneybackend/investments/price_providers.py`.
@@ -129,6 +135,9 @@ Env-настройки:
 - `portfolios/` - CRUD портфелей текущего пользователя.
 - `portfolios/{id}/overview/` - сводка конкретного портфеля.
 - `portfolios/{id}/positions/` - позиции конкретного портфеля, параметр `include_zero`.
+- `portfolios/{id}/performance/` - динамика стоимости и P/L, параметры `date_from`, `date_to`, `group_by=day|month`.
+- `portfolios/{id}/rebalance/` - текущие отклонения от целевых долей, без автоматического создания операций.
+- `target-allocations/` - CRUD целевых долей инструментов, фильтры `portfolio`, `instrument`.
 - `accounts/` - CRUD investment accounts, фильтры `portfolio`, `hidden`.
 - `operations/` - CRUD investment operations, фильтры `portfolio`, `account`, `instrument`, `operation_type`, `date_from`, `date_to`, `deleted`.
 - `portfolio-overview/` - overview портфеля по умолчанию или указанного `portfolio`.
@@ -174,4 +183,8 @@ Overview считает:
 
 Если по активу нет price snapshot, текущая стоимость и unrealized P/L для этой позиции не считаются, а `valuation_complete` становится `false`.
 
-Позиции дополнительно возвращают `allocation_percent`. Поля `target_allocation_percent` и `allocation_deviation_percent` зарезервированы под следующий блок целевых долей.
+Позиции дополнительно возвращают `allocation_percent`, `target_allocation_percent`, `tolerance_percent`, `allocation_deviation_percent`, `allocation_deviation_rub` и `rebalance_amount_rub`.
+
+Performance API строит `opening` на момент перед `date_from` и затем точки по дням или месяцам. Для каждой точки используются только операции и price snapshots, доступные на конец этой точки. Поэтому график за год и график за весь период должны давать одинаковое значение на одной и той же дате.
+
+Rebalance API возвращает текущую долю, целевую долю, отклонение в процентах и RUB, а также расчетную сумму `buy/sell/hold`. Это аналитическая подсказка, не инвестиционная рекомендация и не команда на создание операций.

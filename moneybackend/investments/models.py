@@ -143,6 +143,36 @@ class InvestmentPortfolio(models.Model):
         return self.name
 
 
+class InvestmentTargetAllocation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    portfolio = models.ForeignKey(InvestmentPortfolio, on_delete=models.CASCADE, related_name='target_allocations')
+    instrument = models.ForeignKey(Instrument, on_delete=models.PROTECT, related_name='target_allocations')
+    target_percent = models.DecimalField(max_digits=5, decimal_places=2)
+    tolerance_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('5.00'))
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Целевая доля инструмента'
+        verbose_name_plural = 'Целевые доли инструментов'
+        ordering = ['portfolio', 'instrument__ticker']
+        constraints = [
+            models.UniqueConstraint(fields=['portfolio', 'instrument'], name='uniq_target_allocation_portfolio_instrument'),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.target_percent <= ZERO_AMOUNT or self.target_percent > Decimal('100'):
+            errors['target_percent'] = 'Целевая доля должна быть больше 0 и не больше 100.'
+        if self.tolerance_percent < ZERO_AMOUNT or self.tolerance_percent > Decimal('100'):
+            errors['tolerance_percent'] = 'Допуск должен быть от 0 до 100.'
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f'{self.portfolio}: {self.instrument.ticker} {self.target_percent}%'
+
+
 class InvestmentAccount(models.Model):
     TYPE_EXCHANGE = 'exchange'
     TYPE_BROKER = 'broker'

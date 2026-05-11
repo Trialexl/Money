@@ -3146,6 +3146,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/InvestmentPortfolioOverview'
           description: ''
+  /api/v1/investment/portfolios/{id}/performance/:
+    get:
+      operationId: v1_investment_portfolios_performance_retrieve
+      description: Динамика стоимости портфеля и P/L. Opening учитывает операции до
+        начала периода.
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+        description: Дата начала периода YYYY-MM-DD. По умолчанию 1 января текущего
+          года.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+        description: Дата окончания периода YYYY-MM-DD. По умолчанию 31 декабря текущего
+          года.
+      - in: query
+        name: group_by
+        schema:
+          type: string
+        description: 'Группировка: day или month. По умолчанию month.'
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Инвестиционный портфель.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentPerformance'
+          description: ''
   /api/v1/investment/portfolios/{id}/positions/:
     get:
       operationId: v1_investment_portfolios_positions_list
@@ -3177,6 +3222,32 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/InvestmentPosition'
+          description: ''
+  /api/v1/investment/portfolios/{id}/rebalance/:
+    get:
+      operationId: v1_investment_portfolios_rebalance_retrieve
+      description: Текущие отклонения от целевых долей. Не является инвестиционной
+        рекомендацией.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Инвестиционный портфель.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentRebalanceStatus'
           description: ''
   /api/v1/investment/prices/:
     get:
@@ -3385,6 +3456,183 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/investment/target-allocations/:
+    get:
+      operationId: v1_investment_target_allocations_list
+      description: Целевые доли инструментов для ребалансировки портфеля.
+      parameters:
+      - in: query
+        name: instrument
+        schema:
+          type: string
+          format: uuid
+        description: UUID инструмента.
+      - in: query
+        name: portfolio
+        schema:
+          type: string
+          format: uuid
+        description: UUID инвестиционного портфеля.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InvestmentTargetAllocation'
+          description: ''
+    post:
+      operationId: v1_investment_target_allocations_create
+      description: Создать целевую долю инструмента. Сумма долей портфеля не должна
+        превышать 100%.
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestmentTargetAllocationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InvestmentTargetAllocationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InvestmentTargetAllocationRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentTargetAllocation'
+          description: ''
+  /api/v1/investment/target-allocations/{id}/:
+    get:
+      operationId: v1_investment_target_allocations_retrieve
+      description: Получить целевую долю.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Целевая доля инструмента.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentTargetAllocation'
+          description: ''
+    put:
+      operationId: v1_investment_target_allocations_update
+      description: Полностью обновить целевую долю.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Целевая доля инструмента.
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestmentTargetAllocationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InvestmentTargetAllocationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InvestmentTargetAllocationRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentTargetAllocation'
+          description: ''
+    patch:
+      operationId: v1_investment_target_allocations_partial_update
+      description: Частично обновить целевую долю.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Целевая доля инструмента.
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedInvestmentTargetAllocationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedInvestmentTargetAllocationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedInvestmentTargetAllocationRequest'
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentTargetAllocation'
+          description: ''
+    delete:
+      operationId: v1_investment_target_allocations_destroy
+      description: Удалить целевую долю.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Целевая доля инструмента.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/onec-sync/outbox/:
     get:
       operationId: v1_onec_sync_outbox_list
@@ -6787,6 +7035,91 @@ components:
       - instrument
       - operation_type
       - quantity
+    InvestmentPerformance:
+      type: object
+      properties:
+        portfolio_id:
+          type: string
+          format: uuid
+        date_from:
+          type: string
+          format: date
+        date_to:
+          type: string
+          format: date
+        group_by:
+          type: string
+        opening:
+          $ref: '#/components/schemas/InvestmentPerformancePoint'
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvestmentPerformancePoint'
+      required:
+      - date_from
+      - date_to
+      - group_by
+      - opening
+      - points
+      - portfolio_id
+    InvestmentPerformancePoint:
+      type: object
+      properties:
+        label:
+          type: string
+        date:
+          type: string
+          format: date
+        period_start:
+          type: string
+          format: date
+          nullable: true
+        period_end:
+          type: string
+          format: date
+        cost_basis_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        current_value_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        realized_pl_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        unrealized_pl_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        total_pl_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        bought_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        sold_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        valuation_complete:
+          type: boolean
+      required:
+      - bought_rub
+      - cost_basis_rub
+      - current_value_rub
+      - date
+      - label
+      - period_end
+      - period_start
+      - realized_pl_rub
+      - sold_rub
+      - total_pl_rub
+      - unrealized_pl_rub
+      - valuation_complete
     InvestmentPortfolio:
       type: object
       properties:
@@ -6978,13 +7311,40 @@ components:
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
           nullable: true
+        tolerance_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
         allocation_deviation_percent:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
           nullable: true
+        target_value_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
+        allocation_deviation_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
+        rebalance_action:
+          type: string
+          nullable: true
+        rebalance_amount_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
+        is_within_tolerance:
+          type: boolean
+          nullable: true
       required:
       - allocation_deviation_percent
+      - allocation_deviation_rub
       - allocation_percent
       - average_buy_price_rub
       - bought_rub
@@ -6993,15 +7353,110 @@ components:
       - instrument_id
       - instrument_name
       - instrument_ticker
+      - is_within_tolerance
       - latest_price_at
       - latest_price_rub
       - quantity
       - realized_pl_rub
+      - rebalance_action
+      - rebalance_amount_rub
       - return_percent
       - sold_rub
       - target_allocation_percent
+      - target_value_rub
+      - tolerance_percent
       - total_pl_rub
       - unrealized_pl_rub
+    InvestmentRebalanceStatus:
+      type: object
+      properties:
+        portfolio_id:
+          type: string
+          format: uuid
+        current_value_rub:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvestmentPosition'
+        disclaimer:
+          type: string
+      required:
+      - current_value_rub
+      - disclaimer
+      - portfolio_id
+      - positions
+    InvestmentTargetAllocation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        portfolio:
+          type: string
+          format: uuid
+        portfolio_name:
+          type: string
+          readOnly: true
+        instrument:
+          type: string
+          format: uuid
+        instrument_ticker:
+          type: string
+          readOnly: true
+        instrument_name:
+          type: string
+          readOnly: true
+        target_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        tolerance_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - instrument
+      - instrument_name
+      - instrument_ticker
+      - portfolio
+      - portfolio_name
+      - target_percent
+      - updated_at
+    InvestmentTargetAllocationRequest:
+      type: object
+      properties:
+        portfolio:
+          type: string
+          format: uuid
+        instrument:
+          type: string
+          format: uuid
+        target_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        tolerance_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+      required:
+      - instrument
+      - portfolio
+      - target_percent
     LogoutError:
       type: object
       properties:
@@ -7551,6 +8006,23 @@ components:
           nullable: true
         is_default:
           type: boolean
+    PatchedInvestmentTargetAllocationRequest:
+      type: object
+      properties:
+        portfolio:
+          type: string
+          format: uuid
+        instrument:
+          type: string
+          format: uuid
+        target_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        tolerance_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
     PatchedProfileCustomUserRequest:
       type: object
       properties:

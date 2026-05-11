@@ -7,6 +7,7 @@ from .models import (
     InvestmentAccount,
     InvestmentOperation,
     InvestmentPortfolio,
+    InvestmentTargetAllocation,
 )
 
 
@@ -37,6 +38,14 @@ class InvestmentPortfolioAdmin(admin.ModelAdmin):
     list_display = ('name', 'user', 'base_currency', 'is_default', 'project')
     list_filter = ('is_default', 'base_currency')
     search_fields = ('name', 'user__username', 'user__full_name')
+
+
+@admin.register(InvestmentTargetAllocation)
+class InvestmentTargetAllocationAdmin(admin.ModelAdmin):
+    list_display = ('portfolio', 'instrument', 'target_percent', 'tolerance_percent')
+    list_filter = ('portfolio', 'instrument')
+    search_fields = ('portfolio__name', 'instrument__ticker', 'instrument__name')
+    autocomplete_fields = ('portfolio', 'instrument')
 
 
 @admin.register(InvestmentAccount)

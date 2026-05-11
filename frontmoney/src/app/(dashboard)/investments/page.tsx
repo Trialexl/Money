@@ -1,6 +1,7 @@
 "use client"
 
 import * as Dialog from "@radix-ui/react-dialog"
+import { ResponsiveLine } from "@nivo/line"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BarChart3, Coins, Landmark, LineChart, PencilLine, Plus, RefreshCw, Trash2, TrendingUp, X } from "lucide-react"
 import { useMemo, useState, type FormEvent } from "react"
@@ -57,6 +58,7 @@ type InvestmentDialogState =
 
 const INVESTMENT_QUERY_KEYS = [
   ["investment-overview"],
+  ["investment-performance"],
   ["investment-portfolios"],
   ["investment-instruments"],
   ["investment-accounts"],
@@ -90,6 +92,27 @@ function todayInputDate() {
   return new Date().toISOString().split("T")[0]
 }
 
+function yearDateRange() {
+  const year = new Date().getFullYear()
+  return {
+    dateFrom: `${year}-01-01`,
+    dateTo: `${year}-12-31`,
+  }
+}
+
+function formatShortPerformanceLabel(value: string, groupBy: "day" | "month") {
+  if (!value) {
+    return ""
+  }
+  if (groupBy === "month") {
+    const [year, month] = value.split("-")
+    const date = new Date(Number(year), Number(month) - 1, 1)
+    return new Intl.DateTimeFormat("ru-RU", { month: "short" }).format(date).replace(".", "")
+  }
+  const date = new Date(value)
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(date)
+}
+
 function getApiErrorMessage(error: unknown) {
   const data = (error as any)?.response?.data
   if (typeof data === "string") {
@@ -108,6 +131,11 @@ function getApiErrorMessage(error: unknown) {
   return "Не удалось сохранить данные. Проверь заполнение формы."
 }
 
+function escapeCsvValue(value: string | number | null | undefined) {
+  const text = value === null || value === undefined ? "" : String(value)
+  return `"${text.replace(/"/g, '""')}"`
+}
+
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -121,10 +149,27 @@ export default function InvestmentsPage() {
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<InvestmentDialogState>(null)
   const [dialogError, setDialogError] = useState("")
+  const [performanceGroupBy, setPerformanceGroupBy] = useState<"day" | "month">("month")
+  const [operationDateFrom, setOperationDateFrom] = useState("")
+  const [operationDateTo, setOperationDateTo] = useState("")
+  const [operationInstrument, setOperationInstrument] = useState("all")
+  const [operationAccount, setOperationAccount] = useState("all")
+  const performancePeriod = useMemo(() => yearDateRange(), [])
 
   const overviewQuery = useQuery({
     queryKey: ["investment-overview"],
     queryFn: InvestmentService.getOverview,
+  })
+  const performancePortfolioId = overviewQuery.data?.portfolio?.id
+  const performanceQuery = useQuery({
+    queryKey: ["investment-performance", performancePortfolioId, performanceGroupBy, performancePeriod.dateFrom, performancePeriod.dateTo],
+    queryFn: () =>
+      InvestmentService.getPortfolioPerformance(performancePortfolioId!, {
+        date_from: performancePeriod.dateFrom,
+        date_to: performancePeriod.dateTo,
+        group_by: performanceGroupBy,
+      }),
+    enabled: Boolean(performancePortfolioId),
   })
   const portfoliosQuery = useQuery({
     queryKey: ["investment-portfolios"],
@@ -139,8 +184,14 @@ export default function InvestmentsPage() {
     queryFn: InvestmentService.getAccounts,
   })
   const operationsQuery = useQuery({
-    queryKey: ["investment-operations"],
-    queryFn: InvestmentService.getOperations,
+    queryKey: ["investment-operations", operationDateFrom, operationDateTo, operationInstrument, operationAccount],
+    queryFn: () =>
+      InvestmentService.getOperations({
+        date_from: operationDateFrom || undefined,
+        date_to: operationDateTo || undefined,
+        instrument: operationInstrument === "all" ? undefined : operationInstrument,
+        account: operationAccount === "all" ? undefined : operationAccount,
+      }),
   })
 
   const invalidateInvestmentQueries = () =>
@@ -224,6 +275,51 @@ export default function InvestmentsPage() {
   const currentPortfolioAccounts = currentPortfolio ? accounts.filter((account) => account.portfolio === currentPortfolio.id) : []
   const visibleAccounts = currentPortfolioAccounts.filter((account) => !account.hidden)
   const canCreateOperation = Boolean(currentPortfolio && activeInstruments.length > 0 && currentPortfolioAccounts.length > 0)
+  const performance = performanceQuery.data
+  const performancePoints = performance ? [performance.opening, ...performance.points] : []
+  const valueLineData = performancePoints.map((point) => ({
+    x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
+    y: point.current_value_rub,
+  }))
+  const plLineData = performancePoints.map((point) => ({
+    x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
+    y: point.total_pl_rub,
+  }))
+  const operationTotals = operations.reduce(
+    (totals, operation) => {
+      if (operation.operation_type === "buy") {
+        totals.buy += operation.amount_rub
+      }
+      if (operation.operation_type === "sell") {
+        totals.sell += operation.amount_rub
+      }
+      totals.fee += operation.fee_rub
+      return totals
+    },
+    { buy: 0, sell: 0, fee: 0 },
+  )
+  const exportOperationsCsv = () => {
+    const header = ["Дата", "Номер", "Тип", "Инструмент", "Счет", "Количество", "Сумма RUB", "Комиссия RUB", "Комментарий"]
+    const rows = operations.map((operation) => [
+      formatDate(operation.date),
+      operation.number ?? "",
+      operationLabels[operation.operation_type] ?? operation.operation_type,
+      operation.instrument_ticker ?? "",
+      operation.account_name ?? "",
+      operation.quantity,
+      operation.amount_rub,
+      operation.fee_rub,
+      operation.comment ?? "",
+    ])
+    const csv = [header, ...rows].map((row) => row.map(escapeCsvValue).join(";")).join("\n")
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "investment-operations.csv"
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   const openDialog = (nextDialog: InvestmentDialogState) => {
     setDialogError("")
@@ -292,6 +388,104 @@ export default function InvestmentsPage() {
         <StatCard label="Total P/L" value={formatCurrency(overview.total_pl_rub)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={overview.total_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
         <StatCard label="Unrealized P/L" value={formatCurrency(overview.unrealized_pl_rub)} hint={`Realized: ${formatCurrency(overview.realized_pl_rub)}`} icon={BarChart3} tone={overview.unrealized_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
       </div>
+
+      {currentPortfolio ? (
+        <Card>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle>Динамика портфеля</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Текущий год. Начальная точка учитывает операции до начала периода.
+              </p>
+            </div>
+            <div className="flex rounded-full border border-border/70 bg-muted/40 p-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={performanceGroupBy === "day" ? "default" : "ghost"}
+                className="rounded-full"
+                onClick={() => setPerformanceGroupBy("day")}
+              >
+                По дням
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={performanceGroupBy === "month" ? "default" : "ghost"}
+                className="rounded-full"
+                onClick={() => setPerformanceGroupBy("month")}
+              >
+                По месяцам
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {performanceQuery.isLoading ? (
+              <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">Загружаем графики...</div>
+            ) : performanceQuery.isError || !performance ? (
+              <EmptyState
+                icon={LineChart}
+                title="График пока недоступен"
+                description="Не удалось получить performance API. Остальные данные портфеля доступны."
+                action={<Button variant="outline" onClick={() => void performanceQuery.refetch()}>Повторить</Button>}
+              />
+            ) : performance.points.length === 0 ? (
+              <EmptyState
+                icon={LineChart}
+                title="Нет точек графика"
+                description="За выбранный период нет данных для динамики."
+              />
+            ) : (
+              <div className="grid gap-6 xl:grid-cols-2">
+                <div className="min-w-0 rounded-[22px] border border-border/70 bg-background/70 p-4">
+                  <div className="mb-3 text-sm font-semibold text-foreground">Стоимость</div>
+                  <div className="h-[320px]">
+                    <ResponsiveLine
+                      data={[{ id: "Стоимость", data: valueLineData }]}
+                      margin={{ top: 18, right: 16, bottom: 64, left: 54 }}
+                      xScale={{ type: "point" }}
+                      yScale={{ type: "linear", stacked: false }}
+                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -35 }}
+                      axisLeft={{ tickSize: 0, tickPadding: 8 }}
+                      curve="monotoneX"
+                      pointSize={7}
+                      colors={["hsl(var(--primary))"]}
+                      useMesh
+                      tooltip={({ point }) => (
+                        <div className="rounded border bg-background px-2 py-1 text-xs">
+                          {String(point.data.x)}: {formatCurrency(Number(point.data.y))}
+                        </div>
+                      )}
+                    />
+                  </div>
+                </div>
+                <div className="min-w-0 rounded-[22px] border border-border/70 bg-background/70 p-4">
+                  <div className="mb-3 text-sm font-semibold text-foreground">Total P/L</div>
+                  <div className="h-[320px]">
+                    <ResponsiveLine
+                      data={[{ id: "Total P/L", data: plLineData }]}
+                      margin={{ top: 18, right: 16, bottom: 64, left: 54 }}
+                      xScale={{ type: "point" }}
+                      yScale={{ type: "linear", stacked: false }}
+                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -35 }}
+                      axisLeft={{ tickSize: 0, tickPadding: 8 }}
+                      curve="monotoneX"
+                      pointSize={7}
+                      colors={[overview.total_pl_rub < 0 ? "#ef4444" : "#10b981"]}
+                      useMesh
+                      tooltip={({ point }) => (
+                        <div className="rounded border bg-background px-2 py-1 text-xs">
+                          {String(point.data.x)}: {formatCurrency(Number(point.data.y))}
+                        </div>
+                      )}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {currentPortfolio ? (
         <Card>
@@ -468,8 +662,11 @@ export default function InvestmentsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Последние операции</CardTitle>
+            <CardTitle>Операции</CardTitle>
             <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" disabled={operations.length === 0} onClick={exportOperationsCsv}>
+                CSV
+              </Button>
               <Button variant="outline" size="icon" onClick={() => void operationsQuery.refetch()} aria-label="Обновить">
                 <RefreshCw className="h-4 w-4" />
               </Button>
@@ -479,11 +676,49 @@ export default function InvestmentsPage() {
             </div>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 grid gap-3 md:grid-cols-4">
+              <FormField label="Дата с">
+                <Input type="date" value={operationDateFrom} onChange={(event) => setOperationDateFrom(event.target.value)} />
+              </FormField>
+              <FormField label="Дата по">
+                <Input type="date" value={operationDateTo} onChange={(event) => setOperationDateTo(event.target.value)} />
+              </FormField>
+              <FormField label="Инструмент">
+                <Select value={operationInstrument} onValueChange={setOperationInstrument}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все</SelectItem>
+                    {instruments.map((instrument) => (
+                      <SelectItem key={instrument.id} value={instrument.id}>
+                        {instrument.ticker}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField label="Счет">
+                <Select value={operationAccount} onValueChange={setOperationAccount}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все</SelectItem>
+                    {currentPortfolioAccounts.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
             {operations.length === 0 ? (
               <p className="text-sm text-muted-foreground">Операций пока нет.</p>
             ) : (
               <div className="space-y-2">
-                {operations.slice(0, 12).map((operation) => (
+                {operations.map((operation) => (
                   <div key={operation.id} className="flex items-center justify-between gap-3 rounded-[18px] border border-border/60 bg-background/70 px-3 py-2.5">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">
@@ -507,6 +742,20 @@ export default function InvestmentsPage() {
                 ))}
               </div>
             )}
+            <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 text-sm sm:grid-cols-3">
+              <div className="rounded-2xl bg-background/70 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Покупки</div>
+                <div className="mt-1 font-semibold tabular-nums">{formatCurrency(operationTotals.buy)}</div>
+              </div>
+              <div className="rounded-2xl bg-background/70 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Продажи</div>
+                <div className="mt-1 font-semibold tabular-nums">{formatCurrency(operationTotals.sell)}</div>
+              </div>
+              <div className="rounded-2xl bg-background/70 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Комиссии</div>
+                <div className="mt-1 font-semibold tabular-nums">{formatCurrency(operationTotals.fee)}</div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

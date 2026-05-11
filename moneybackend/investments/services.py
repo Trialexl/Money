@@ -1,11 +1,13 @@
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+import calendar
 
 from django.utils import timezone
 
 from .fx_providers import FxRateProviderError, get_fx_rate_provider
-from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentOperation
+from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentOperation, InvestmentTargetAllocation
 from .price_providers import PriceProviderError, get_price_provider
 
 ZERO_AMOUNT = Decimal('0')
@@ -39,7 +41,31 @@ def _percent(value):
     return value.quantize(Decimal('0.01'))
 
 
-def _latest_price_snapshots(instrument_ids):
+def _aware_datetime(value, *, end_of_day=False):
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        dt = datetime.combine(value, time.max if end_of_day else time.min)
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone.get_current_timezone())
+    return dt
+
+
+def _month_end(value):
+    return date(value.year, value.month, calendar.monthrange(value.year, value.month)[1])
+
+
+def _next_day(value):
+    return value + timedelta(days=1)
+
+
+def _next_month(value):
+    if value.month == 12:
+        return date(value.year + 1, 1, 1)
+    return date(value.year, value.month + 1, 1)
+
+
+def _latest_price_snapshots(instrument_ids, *, as_of=None):
     latest = {}
     if not instrument_ids:
         return latest
@@ -49,12 +75,14 @@ def _latest_price_snapshots(instrument_ids):
         .filter(instrument_id__in=instrument_ids)
         .order_by('instrument_id', '-captured_at', '-created_at')
     )
+    if as_of is not None:
+        snapshots = snapshots.filter(captured_at__lte=as_of)
     for snapshot in snapshots:
         latest.setdefault(snapshot.instrument_id, snapshot)
     return latest
 
 
-def calculate_positions(portfolio, *, include_zero=False):
+def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_of=None, include_targets=False):
     positions = {}
 
     operations = (
@@ -63,6 +91,8 @@ def calculate_positions(portfolio, *, include_zero=False):
         .select_related('instrument')
         .order_by('date', 'created_at', 'id')
     )
+    if as_of is not None:
+        operations = operations.filter(date__lte=as_of)
 
     for operation in operations:
         instrument = operation.instrument
@@ -104,7 +134,11 @@ def calculate_positions(portfolio, *, include_zero=False):
             # Перевод между инвестиционными счетами не меняет агрегированную позицию портфеля.
             continue
 
-    latest_prices = _latest_price_snapshots(positions.keys())
+    latest_prices = _latest_price_snapshots(positions.keys(), as_of=price_as_of or as_of)
+    target_allocations = {
+        str(allocation.instrument_id): allocation
+        for allocation in InvestmentTargetAllocation.objects.filter(portfolio=portfolio).select_related('instrument')
+    }
 
     result = []
     for instrument_id, state in positions.items():
@@ -136,18 +170,68 @@ def calculate_positions(portfolio, *, include_zero=False):
             'sold_rub': _money(state.sold_rub),
         })
 
+    if include_targets:
+        existing_instrument_ids = {row['instrument_id'] for row in result}
+        for allocation in target_allocations.values():
+            if str(allocation.instrument_id) in existing_instrument_ids:
+                continue
+            result.append({
+                'instrument_id': str(allocation.instrument_id),
+                'instrument_ticker': allocation.instrument.ticker,
+                'instrument_name': allocation.instrument.name,
+                'quantity': ZERO_AMOUNT,
+                'cost_basis_rub': ZERO_AMOUNT,
+                'average_buy_price_rub': ZERO_AMOUNT,
+                'latest_price_rub': None,
+                'latest_price_at': None,
+                'current_value_rub': ZERO_AMOUNT,
+                'realized_pl_rub': ZERO_AMOUNT,
+                'unrealized_pl_rub': ZERO_AMOUNT,
+                'total_pl_rub': ZERO_AMOUNT,
+                'return_percent': None,
+                'bought_rub': ZERO_AMOUNT,
+                'sold_rub': ZERO_AMOUNT,
+            })
+
     total_current_value = sum(
         (row['current_value_rub'] for row in result if row['current_value_rub'] is not None),
         ZERO_AMOUNT,
     )
     for row in result:
+        allocation = target_allocations.get(row['instrument_id'])
+        current_value_rub = row['current_value_rub'] or ZERO_AMOUNT
+        target_percent = allocation.target_percent if allocation is not None else None
+        tolerance_percent = allocation.tolerance_percent if allocation is not None else None
         row['allocation_percent'] = (
             _percent((row['current_value_rub'] / total_current_value) * Decimal('100'))
             if row['current_value_rub'] is not None and total_current_value != ZERO_AMOUNT
             else None
         )
-        row['target_allocation_percent'] = None
-        row['allocation_deviation_percent'] = None
+        row['target_allocation_percent'] = target_percent
+        row['tolerance_percent'] = tolerance_percent
+        row['allocation_deviation_percent'] = (
+            _percent((row['allocation_percent'] or ZERO_AMOUNT) - target_percent)
+            if target_percent is not None
+            else None
+        )
+        target_value_rub = _money((total_current_value * target_percent / Decimal('100'))) if target_percent is not None else None
+        allocation_deviation_rub = _money(current_value_rub - target_value_rub) if target_value_rub is not None else None
+        row['target_value_rub'] = target_value_rub
+        row['allocation_deviation_rub'] = allocation_deviation_rub
+        row['is_within_tolerance'] = (
+            abs(row['allocation_deviation_percent']) <= tolerance_percent
+            if row['allocation_deviation_percent'] is not None and tolerance_percent is not None
+            else None
+        )
+        if allocation_deviation_rub is None or allocation_deviation_rub == ZERO_AMOUNT:
+            row['rebalance_action'] = 'hold'
+            row['rebalance_amount_rub'] = ZERO_AMOUNT
+        elif allocation_deviation_rub > ZERO_AMOUNT:
+            row['rebalance_action'] = 'sell'
+            row['rebalance_amount_rub'] = allocation_deviation_rub
+        else:
+            row['rebalance_action'] = 'buy'
+            row['rebalance_amount_rub'] = abs(allocation_deviation_rub)
 
     return sorted(result, key=lambda row: row['instrument_ticker'])
 
@@ -174,8 +258,8 @@ def calculate_instrument_quantity(portfolio, instrument, *, exclude_operation=No
     return quantity
 
 
-def calculate_portfolio_totals(portfolio):
-    positions = calculate_positions(portfolio, include_zero=True)
+def calculate_portfolio_totals(portfolio, *, as_of=None):
+    positions = calculate_positions(portfolio, include_zero=True, as_of=as_of, price_as_of=as_of)
     totals = defaultdict(lambda: ZERO_AMOUNT)
     valuation_complete = True
 
@@ -217,6 +301,82 @@ def calculate_portfolio_totals(portfolio):
         'largest_asset': largest_asset,
         'latest_price_at': latest_price_at,
         'positions': positions,
+    }
+
+
+def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='month'):
+    if date_from > date_to:
+        raise ValueError('date_from must be before or equal to date_to.')
+    if group_by not in {'day', 'month'}:
+        raise ValueError('group_by must be day or month.')
+
+    start_dt = _aware_datetime(date_from)
+    opening_cutoff = start_dt - timedelta(microseconds=1)
+    opening = _performance_totals_for_cutoff(portfolio, opening_cutoff, label='Старт')
+    opening.update({
+        'date': date_from.isoformat(),
+        'period_start': None,
+        'period_end': date_from.isoformat(),
+    })
+
+    points = []
+    cursor = date_from
+    while cursor <= date_to:
+        if group_by == 'day':
+            period_start = cursor
+            period_end = min(cursor, date_to)
+            cursor = _next_day(cursor)
+            label = period_end.isoformat()
+        else:
+            period_start = cursor
+            period_end = min(_month_end(cursor), date_to)
+            cursor = _next_month(date(period_end.year, period_end.month, 1))
+            label = period_end.strftime('%Y-%m')
+
+        cutoff = _aware_datetime(period_end, end_of_day=True)
+        point = _performance_totals_for_cutoff(portfolio, cutoff, label=label)
+        point.update({
+            'date': period_end.isoformat(),
+            'period_start': period_start.isoformat(),
+            'period_end': period_end.isoformat(),
+        })
+        points.append(point)
+
+    return {
+        'portfolio_id': str(portfolio.id),
+        'date_from': date_from.isoformat(),
+        'date_to': date_to.isoformat(),
+        'group_by': group_by,
+        'opening': opening,
+        'points': points,
+    }
+
+
+def calculate_rebalance_status(portfolio):
+    positions = calculate_positions(portfolio, include_zero=True, include_targets=True)
+    return {
+        'portfolio_id': str(portfolio.id),
+        'current_value_rub': _money(sum(
+            (position['current_value_rub'] for position in positions if position['current_value_rub'] is not None),
+            ZERO_AMOUNT,
+        )),
+        'positions': positions,
+        'disclaimer': 'Расчет показывает отклонение от целевых долей и не является инвестиционной рекомендацией.',
+    }
+
+
+def _performance_totals_for_cutoff(portfolio, cutoff, *, label):
+    totals = calculate_portfolio_totals(portfolio, as_of=cutoff)
+    return {
+        'label': label,
+        'cost_basis_rub': totals['cost_basis_rub'],
+        'current_value_rub': totals['current_value_rub'],
+        'realized_pl_rub': totals['realized_pl_rub'],
+        'unrealized_pl_rub': totals['unrealized_pl_rub'],
+        'total_pl_rub': totals['total_pl_rub'],
+        'bought_rub': totals['bought_rub'],
+        'sold_rub': totals['sold_rub'],
+        'valuation_complete': totals['valuation_complete'],
     }
 
 

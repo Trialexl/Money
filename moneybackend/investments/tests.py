@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -10,9 +10,22 @@ from money.models import BudgetExpense, BudgetIncome, FlowOfFunds, OneCSyncOutbo
 from users.models import CustomUser
 
 from .fx_providers import CbrFxRateProvider, FxRateProviderError, FxRateQuote, StaticFxRateProvider, get_fx_rate_provider
-from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import (
+    FxRateSnapshot,
+    Instrument,
+    InstrumentPriceSnapshot,
+    InvestmentAccount,
+    InvestmentOperation,
+    InvestmentPortfolio,
+    InvestmentTargetAllocation,
+)
 from .price_providers import CoinGeckoPriceProvider, PriceProviderError, PriceQuote, StaticPriceProvider, get_price_provider
-from .services import calculate_positions, calculate_portfolio_totals, refresh_price_snapshots
+from .services import (
+    calculate_portfolio_performance,
+    calculate_positions,
+    calculate_portfolio_totals,
+    refresh_price_snapshots,
+)
 
 
 class InvestmentModuleIsolationTests(TestCase):
@@ -39,6 +52,12 @@ class InvestmentModuleIsolationTests(TestCase):
             amount_rub=Decimal('100000.00'),
             fx_rate_to_rub=Decimal('1.00000000'),
             date=timezone.now(),
+        )
+
+    def _dt(self, year, month, day, hour=12):
+        return timezone.make_aware(
+            datetime(year, month, day, hour, 0, 0),
+            timezone.get_current_timezone(),
         )
 
     def _create_foreign_investment_data(self):
@@ -222,6 +241,163 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(totals['largest_asset']['instrument_ticker'], 'BTC')
         self.assertIsNotNone(totals['latest_price_at'])
 
+    def test_target_allocations_reject_total_above_100_percent(self):
+        eth = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='ETH', name='Ethereum')
+        usdt = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='USDT', name='Tether')
+        extra = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='SOL', name='Solana')
+
+        responses = [
+            self.client.post('/api/v1/investment/target-allocations/', {
+                'portfolio': str(self.portfolio.id),
+                'instrument': str(self.instrument.id),
+                'target_percent': '50.00',
+                'tolerance_percent': '5.00',
+            }, format='json'),
+            self.client.post('/api/v1/investment/target-allocations/', {
+                'portfolio': str(self.portfolio.id),
+                'instrument': str(eth.id),
+                'target_percent': '30.00',
+                'tolerance_percent': '5.00',
+            }, format='json'),
+            self.client.post('/api/v1/investment/target-allocations/', {
+                'portfolio': str(self.portfolio.id),
+                'instrument': str(usdt.id),
+                'target_percent': '20.00',
+                'tolerance_percent': '5.00',
+            }, format='json'),
+        ]
+        overflow_response = self.client.post('/api/v1/investment/target-allocations/', {
+            'portfolio': str(self.portfolio.id),
+            'instrument': str(extra.id),
+            'target_percent': '1.00',
+            'tolerance_percent': '5.00',
+        }, format='json')
+
+        self.assertTrue(all(response.status_code == 201 for response in responses), [response.data for response in responses])
+        self.assertEqual(overflow_response.status_code, 400)
+        self.assertIn('target_percent', overflow_response.data)
+
+    def test_rebalance_endpoint_returns_current_deviation_without_creating_operations(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price=Decimal('100.00'),
+            amount=Decimal('100.00'),
+            amount_rub=Decimal('100.00'),
+            date=timezone.now(),
+        )
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('100.00'),
+            price_currency='RUB',
+            fx_rate_to_rub=Decimal('1'),
+            price_rub=Decimal('100.00'),
+            captured_at=timezone.now(),
+        )
+        InvestmentTargetAllocation.objects.create(
+            portfolio=self.portfolio,
+            instrument=self.instrument,
+            target_percent=Decimal('50.00'),
+            tolerance_percent=Decimal('5.00'),
+        )
+
+        response = self.client.get(f'/api/v1/investment/portfolios/{self.portfolio.id}/rebalance/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['positions'][0]['target_allocation_percent'], Decimal('50.00'))
+        self.assertEqual(response.data['positions'][0]['allocation_deviation_percent'], Decimal('50.00'))
+        self.assertEqual(response.data['positions'][0]['rebalance_action'], 'sell')
+        self.assertIn('не является инвестиционной рекомендацией', response.data['disclaimer'])
+
+    def test_portfolio_performance_uses_opening_value_before_period(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price=Decimal('100.00'),
+            amount=Decimal('100.00'),
+            amount_rub=Decimal('100.00'),
+            date=self._dt(2025, 12, 20),
+        )
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('120.00'),
+            price_currency='RUB',
+            fx_rate_to_rub=Decimal('1'),
+            price_rub=Decimal('120.00'),
+            captured_at=self._dt(2025, 12, 31),
+        )
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price=Decimal('200.00'),
+            amount=Decimal('200.00'),
+            amount_rub=Decimal('200.00'),
+            date=self._dt(2026, 1, 10),
+        )
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('150.00'),
+            price_currency='RUB',
+            fx_rate_to_rub=Decimal('1'),
+            price_rub=Decimal('150.00'),
+            captured_at=self._dt(2026, 1, 31),
+        )
+
+        performance = calculate_portfolio_performance(
+            self.portfolio,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 1, 31),
+            group_by='month',
+        )
+
+        self.assertEqual(performance['opening']['cost_basis_rub'], Decimal('100.00'))
+        self.assertEqual(performance['opening']['current_value_rub'], Decimal('120.00'))
+        self.assertEqual(performance['points'][0]['cost_basis_rub'], Decimal('300.00'))
+        self.assertEqual(performance['points'][0]['current_value_rub'], Decimal('300.00'))
+        self.assertEqual(performance['points'][0]['period_start'], '2026-01-01')
+        self.assertEqual(performance['points'][0]['period_end'], '2026-01-31')
+
+    def test_portfolio_performance_endpoint_returns_period_series(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price=Decimal('100.00'),
+            amount=Decimal('100.00'),
+            amount_rub=Decimal('100.00'),
+            date=self._dt(2026, 1, 10),
+        )
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('150.00'),
+            price_currency='RUB',
+            fx_rate_to_rub=Decimal('1'),
+            price_rub=Decimal('150.00'),
+            captured_at=self._dt(2026, 1, 31),
+        )
+
+        response = self.client.get(f'/api/v1/investment/portfolios/{self.portfolio.id}/performance/', {
+            'date_from': '2026-01-01',
+            'date_to': '2026-01-31',
+            'group_by': 'month',
+        })
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['group_by'], 'month')
+        self.assertEqual(str(response.data['opening']['current_value_rub']), '0.00')
+        self.assertEqual(str(response.data['points'][0]['current_value_rub']), '150.00')
+
     def test_portfolio_overview_endpoint_returns_default_portfolio(self):
         InvestmentOperation.objects.create(
             portfolio=self.portfolio,
@@ -269,6 +445,9 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertIn('/api/v1/investment/prices/refresh/', content)
         self.assertIn('/api/v1/investment/fx-rates/', content)
         self.assertIn('/api/v1/investment/portfolios/', content)
+        self.assertIn('/api/v1/investment/portfolios/{id}/performance/', content)
+        self.assertIn('/api/v1/investment/portfolios/{id}/rebalance/', content)
+        self.assertIn('/api/v1/investment/target-allocations/', content)
         self.assertIn('/api/v1/investment/accounts/', content)
         self.assertIn('/api/v1/investment/operations/', content)
         self.assertIn('/api/v1/investment/portfolio-overview/', content)

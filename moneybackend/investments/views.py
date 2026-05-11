@@ -1,22 +1,36 @@
+from datetime import date
+
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.utils.dateparse import parse_date
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, extend_schema_view
 
-from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from .models import (
+    FxRateSnapshot,
+    Instrument,
+    InstrumentPriceSnapshot,
+    InvestmentAccount,
+    InvestmentOperation,
+    InvestmentPortfolio,
+    InvestmentTargetAllocation,
+)
 from .serializers import (
     FxRateSnapshotSerializer,
     InstrumentSerializer,
     InstrumentPriceSnapshotSerializer,
     InvestmentAccountSerializer,
     InvestmentOperationSerializer,
+    InvestmentPerformanceSerializer,
     InvestmentPositionSerializer,
     InvestmentPortfolioOverviewSerializer,
     InvestmentPortfolioSerializer,
+    InvestmentRebalanceStatusSerializer,
+    InvestmentTargetAllocationSerializer,
     get_default_portfolio,
     serialize_portfolio_overview,
 )
-from .services import calculate_positions, refresh_price_snapshots
+from .services import calculate_portfolio_performance, calculate_positions, calculate_rebalance_status, refresh_price_snapshots
 
 
 instrument_list_parameters = [
@@ -45,6 +59,11 @@ account_list_parameters = [
     OpenApiParameter('hidden', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description='Показать скрытые или видимые счета.'),
 ]
 
+target_allocation_list_parameters = [
+    OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инвестиционного портфеля.'),
+    OpenApiParameter('instrument', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инструмента.'),
+]
+
 operation_list_parameters = [
     OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инвестиционного портфеля.'),
     OpenApiParameter('account', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инвестиционного счета.'),
@@ -58,6 +77,30 @@ operation_list_parameters = [
 overview_parameters = [
     OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID портфеля. Если не передан, берется портфель по умолчанию.'),
 ]
+
+performance_parameters = [
+    OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата начала периода YYYY-MM-DD. По умолчанию 1 января текущего года.'),
+    OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата окончания периода YYYY-MM-DD. По умолчанию 31 декабря текущего года.'),
+    OpenApiParameter('group_by', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Группировка: day или month. По умолчанию month.'),
+]
+
+
+def _parse_performance_period(request):
+    today = date.today()
+    date_from_value = request.query_params.get('date_from')
+    date_to_value = request.query_params.get('date_to')
+    date_from = parse_date(date_from_value) if date_from_value else date(today.year, 1, 1)
+    date_to = parse_date(date_to_value) if date_to_value else date(today.year, 12, 31)
+    group_by = request.query_params.get('group_by') or 'month'
+    if date_from is None:
+        return None, None, group_by, {'date_from': 'Некорректная дата. Используйте YYYY-MM-DD.'}
+    if date_to is None:
+        return None, None, group_by, {'date_to': 'Некорректная дата. Используйте YYYY-MM-DD.'}
+    if date_from > date_to:
+        return None, None, group_by, {'date_to': 'Дата окончания должна быть не раньше даты начала.'}
+    if group_by not in {'day', 'month'}:
+        return None, None, group_by, {'group_by': 'Поддерживаются значения day или month.'}
+    return date_from, date_to, group_by, None
 
 
 @extend_schema_view(
@@ -202,6 +245,31 @@ class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
         include_zero = request.query_params.get('include_zero') in ('1', 'true', 'True')
         return Response(calculate_positions(self.get_object(), include_zero=include_zero))
 
+    @extend_schema(
+        responses={200: InvestmentRebalanceStatusSerializer},
+        description='Текущие отклонения от целевых долей. Не является инвестиционной рекомендацией.',
+    )
+    @action(detail=True, methods=['get'])
+    def rebalance(self, request, pk=None):
+        return Response(calculate_rebalance_status(self.get_object()))
+
+    @extend_schema(
+        parameters=performance_parameters,
+        responses={200: InvestmentPerformanceSerializer},
+        description='Динамика стоимости портфеля и P/L. Opening учитывает операции до начала периода.',
+    )
+    @action(detail=True, methods=['get'])
+    def performance(self, request, pk=None):
+        date_from, date_to, group_by, error = _parse_performance_period(request)
+        if error:
+            return Response(error, status=400)
+        return Response(calculate_portfolio_performance(
+            self.get_object(),
+            date_from=date_from,
+            date_to=date_to,
+            group_by=group_by,
+        ))
+
 
 @extend_schema_view(
     list=extend_schema(
@@ -227,6 +295,40 @@ class InvestmentAccountViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(portfolio_id=portfolio_id)
         if self.request.query_params.get('hidden') in ('true', 'false'):
             queryset = queryset.filter(hidden=self.request.query_params.get('hidden') == 'true')
+        if self.request.user.is_staff:
+            return queryset
+        return queryset.filter(portfolio__user=self.request.user)
+
+
+@extend_schema_view(
+    list=extend_schema(
+        parameters=target_allocation_list_parameters,
+        description='Целевые доли инструментов для ребалансировки портфеля.',
+    ),
+    create=extend_schema(description='Создать целевую долю инструмента. Сумма долей портфеля не должна превышать 100%.'),
+    retrieve=extend_schema(description='Получить целевую долю.'),
+    update=extend_schema(description='Полностью обновить целевую долю.'),
+    partial_update=extend_schema(description='Частично обновить целевую долю.'),
+    destroy=extend_schema(description='Удалить целевую долю.'),
+)
+class InvestmentTargetAllocationViewSet(viewsets.ModelViewSet):
+    serializer_class = InvestmentTargetAllocationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = (
+            InvestmentTargetAllocation.objects
+            .select_related('portfolio', 'portfolio__user', 'instrument')
+            .order_by('portfolio', 'instrument__ticker')
+        )
+        if getattr(self, 'swagger_fake_view', False):
+            return queryset.none()
+        portfolio_id = self.request.query_params.get('portfolio')
+        if portfolio_id:
+            queryset = queryset.filter(portfolio_id=portfolio_id)
+        instrument_id = self.request.query_params.get('instrument')
+        if instrument_id:
+            queryset = queryset.filter(instrument_id=instrument_id)
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(portfolio__user=self.request.user)
