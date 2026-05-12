@@ -2502,6 +2502,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             wallet_id=wallet_id,
             dry_run=True,
             source='web',
+            user=request.user,
         )
         if result.get('status') == 'preview' and not requested_dry_run:
             semantic_duplicate = self._recent_semantic_duplicate(
@@ -2894,6 +2895,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             image_mime_type=image_mime_type,
             dry_run=True,
             source='telegram',
+            user=binding.user,
         )
         if result.get('status') == 'preview':
             semantic_duplicate = self._recent_semantic_duplicate(

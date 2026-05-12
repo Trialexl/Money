@@ -14,6 +14,9 @@ from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from investments.models import Instrument, InvestmentPortfolio
+from investments.services import calculate_portfolio_totals, calculate_positions, calculate_rebalance_status
+
 from .models import BudgetExpense, CashFlowItem, Expenditure, FlowOfFunds, Receipt, Transfer, Wallet, ZERO_AMOUNT
 
 
@@ -23,6 +26,9 @@ INTENT_CREATE_TRANSFER = 'create_transfer'
 INTENT_GET_WALLET_BALANCE = 'get_wallet_balance'
 INTENT_GET_ALL_WALLET_BALANCES = 'get_all_wallet_balances'
 INTENT_GET_MONTH_EXPENSES_BY_ITEM = 'get_month_expenses_by_item'
+INTENT_GET_PORTFOLIO_OVERVIEW = 'get_portfolio_overview'
+INTENT_GET_INSTRUMENT_POSITION = 'get_instrument_position'
+INTENT_GET_REBALANCE_STATUS = 'get_rebalance_status'
 INTENT_HELP_CAPABILITIES = 'help_capabilities'
 INTENT_UNKNOWN = 'unknown'
 INTENT_CREATE_MULTIPLE_OPERATIONS = 'create_multiple_operations'
@@ -37,6 +43,9 @@ SUPPORTED_INTENTS = {
     INTENT_GET_WALLET_BALANCE,
     INTENT_GET_ALL_WALLET_BALANCES,
     INTENT_GET_MONTH_EXPENSES_BY_ITEM,
+    INTENT_GET_PORTFOLIO_OVERVIEW,
+    INTENT_GET_INSTRUMENT_POSITION,
+    INTENT_GET_REBALANCE_STATUS,
     INTENT_HELP_CAPABILITIES,
     INTENT_UNKNOWN,
 }
@@ -315,6 +324,61 @@ def _detect_month_expenses_by_item_intent(text):
             'period_month': period_month,
             'period_month_from': period_range.get('period_month_from') if period_range else None,
             'period_month_to': period_range.get('period_month_to') if period_range else None,
+            'comment': text,
+        }
+
+    return None
+
+
+def _match_investment_instrument_by_hint(hint):
+    if not hint:
+        return None
+
+    best_match = None
+    best_score = 0
+    for instrument in Instrument.objects.filter(is_active=True):
+        score = max(
+            _score_hint_against_pattern(hint, instrument.ticker),
+            _score_hint_against_pattern(hint, instrument.name),
+            _score_hint_against_pattern(hint, instrument.provider_symbol),
+        )
+        if score > best_score:
+            best_match = instrument
+            best_score = score
+    return best_match if best_score >= 500 else None
+
+
+def _detect_investment_readonly_intent(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    instrument = _match_investment_instrument_by_hint(normalized)
+    has_portfolio_word = bool(re.search(r'\b(?:портфель|инвестиц\w*|крипт\w*|активы)\b', normalized))
+    has_position_word = bool(re.search(r'\b(?:сколько|позици\w*|держу|остаток|баланс|есть)\b', normalized))
+    has_rebalance_word = bool(re.search(r'\b(?:ребаланс\w*|дол[яи]|цел\w*)\b', normalized))
+    has_operation_word = bool(re.search(r'\b(?:купил\w*|купить|покупк\w*|продал\w*|продаж\w*|создай|добавь|занеси)\b', normalized))
+
+    if has_rebalance_word and (has_portfolio_word or 'ребаланс' in normalized):
+        return {
+            'intent': INTENT_GET_REBALANCE_STATUS,
+            'confidence': 0.98,
+            'comment': text,
+        }
+
+    if instrument is not None and has_position_word and not has_operation_word:
+        return {
+            'intent': INTENT_GET_INSTRUMENT_POSITION,
+            'confidence': 0.96,
+            'instrument_id': str(instrument.id),
+            'instrument_hint': instrument.ticker,
+            'comment': text,
+        }
+
+    if has_portfolio_word and not has_operation_word:
+        return {
+            'intent': INTENT_GET_PORTFOLIO_OVERVIEW,
+            'confidence': 0.95,
             'comment': text,
         }
 
@@ -865,6 +929,7 @@ class OpenRouterIntentProvider:
             'Определи intent из списка: '
             'create_receipt, create_expenditure, create_transfer, '
             'get_wallet_balance, get_all_wallet_balances, get_month_expenses_by_item, '
+            'get_portfolio_overview, get_instrument_position, get_rebalance_status, '
             'help_capabilities, unknown. '
             'Если передано изображение, считай, что это банковский скриншот операции или истории операций, '
             f'{image_instruction}'
@@ -895,6 +960,12 @@ class OpenRouterIntentProvider:
             'или просит отклонение от бюджета, верни intent=get_month_expenses_by_item. '
             'Для такого отчета можешь вернуть period_month="YYYY-MM" или диапазон '
             'period_month_from="YYYY-MM", period_month_to="YYYY-MM". '
+            'Если пользователь спрашивает портфель, инвестиции, крипту или стоимость активов, '
+            'верни intent=get_portfolio_overview. '
+            'Если пользователь спрашивает сколько BTC/ETH/другого инструмента есть или просит позицию по инструменту, '
+            'верни intent=get_instrument_position и instrument_hint. '
+            'Если пользователь спрашивает ребалансировку, целевые доли или отклонения портфеля, '
+            'верни intent=get_rebalance_status. '
             'Если уверенности нет, ставь intent=unknown или оставляй поля null. '
             'Схема JSON: '
             '{"intent": "...", "confidence": 0.0, "amount": "0.00" | null, '
@@ -903,6 +974,7 @@ class OpenRouterIntentProvider:
             '"description": null, "occurred_at": null, "operation_sign": null, '
             '"comment": null, "include_in_budget": false, '
             '"period_month": null, "period_month_from": null, "period_month_to": null, '
+            '"instrument_hint": null, '
             '"operations": [{"source_index": 1, "intent": "...", "amount": "0.00", "merchant": "..."}] | null}. '
             'operation_sign может быть incoming, outgoing, transfer или null. '
             'amount возвращай числом без знака валюты и без символа ₽, а направление отражай в operation_sign. '
@@ -912,6 +984,7 @@ class OpenRouterIntentProvider:
             'amount="1719000.00" и наиболее подходящую статью в cash_flow_item_hint, если она есть в справочнике. '
             f'Доступные кошельки: {json.dumps(context.get("wallets", []), ensure_ascii=False)}. '
             f'Доступные статьи: {json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}. '
+            f'Доступные инвест-инструменты: {json.dumps(context.get("investment_instruments", []), ensure_ascii=False)}. '
             f'Текст пользователя: {text or ""}'
         )
 
@@ -1430,6 +1503,49 @@ def _month_expenses_by_item_range(*, at_time=None, month_start=None, month_end=N
     }
 
 
+def _investment_portfolio_for_user(user):
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return None
+    return (
+        InvestmentPortfolio.objects
+        .filter(user=user)
+        .order_by('-is_default', 'name')
+        .first()
+    )
+
+
+def _investment_instrument_context():
+    return [
+        {
+            'id': str(instrument.id),
+            'ticker': instrument.ticker,
+            'name': instrument.name,
+            'provider_symbol': instrument.provider_symbol,
+            'type': instrument.type,
+        }
+        for instrument in Instrument.objects.filter(is_active=True).order_by('type', 'ticker')
+    ]
+
+
+def _serialize_investment_position(position):
+    return {
+        'instrument_id': str(position.get('instrument_id') or ''),
+        'instrument_ticker': position.get('instrument_ticker') or '',
+        'instrument_name': position.get('instrument_name') or '',
+        'quantity': str(position.get('quantity') or ZERO_AMOUNT),
+        'current_value_rub': _serialize_decimal(position.get('current_value_rub')),
+        'total_pl_rub': _serialize_decimal(position.get('total_pl_rub')),
+        'return_percent': _serialize_decimal(position.get('return_percent')),
+        'allocation_percent': _serialize_decimal(position.get('allocation_percent')),
+        'target_allocation_percent': _serialize_decimal(position.get('target_allocation_percent')),
+        'allocation_deviation_percent': _serialize_decimal(position.get('allocation_deviation_percent')),
+        'allocation_deviation_rub': _serialize_decimal(position.get('allocation_deviation_rub')),
+        'rebalance_action': position.get('rebalance_action'),
+        'rebalance_amount_rub': _serialize_decimal(position.get('rebalance_amount_rub')),
+        'is_within_tolerance': position.get('is_within_tolerance'),
+    }
+
+
 class AiOperationService:
     def transcribe_audio(self, *, audio_bytes, audio_mime_type=None, file_name=None):
         transcription_service = _get_transcription_service()
@@ -1448,6 +1564,7 @@ class AiOperationService:
             '- создавать приход, расход и перевод по тексту;',
             '- показывать остаток по одному кошельку или по всем кошелькам;',
             '- показывать расходы текущего месяца по статьям и отклонение от бюджета;',
+            '- показывать инвестиционный портфель, позицию по инструменту и ребалансировку;',
             '- разбирать банковские скриншоты и предлагать документ;',
             '- принимать голосовые сообщения в Telegram и распознавать их как обычный текст;',
             '- задавать уточняющие вопросы, если не хватает суммы, кошелька или статьи.',
@@ -1458,6 +1575,9 @@ class AiOperationService:
             'остатки по кошелькам',
             'расходы по статьям',
             'расходы апрель май',
+            'портфель',
+            'сколько btc',
+            'ребалансировка портфеля',
         ]
         if include_telegram_link_hint:
             lines.append('Если Telegram еще не привязан, сгенерируйте код в web API и отправьте команду /link CODE.')
@@ -1475,10 +1595,176 @@ class AiOperationService:
             },
         }
 
-    def build_context(self):
-        return {
+    def build_context(self, user=None):
+        context = {
             'wallets': _wallet_context(),
             'cash_flow_items': _cash_flow_item_context(),
+        }
+        if user is not None and getattr(user, 'is_authenticated', False):
+            context['investment_instruments'] = _investment_instrument_context()
+        return context
+
+    def _build_missing_portfolio_result(self, *, intent, provider_name, normalized):
+        return {
+            'status': 'info',
+            'intent': intent,
+            'provider': provider_name,
+            'confidence': normalized.get('confidence', 0.0),
+            'reply_text': 'Инвестиционный портфель пока не создан.',
+            'parsed': normalized,
+        }
+
+    def _build_portfolio_overview_result(self, *, user, provider_name, normalized):
+        portfolio = _investment_portfolio_for_user(user)
+        if portfolio is None:
+            return self._build_missing_portfolio_result(
+                intent=INTENT_GET_PORTFOLIO_OVERVIEW,
+                provider_name=provider_name,
+                normalized=normalized,
+            )
+
+        totals = calculate_portfolio_totals(portfolio)
+        positions = sorted(
+            totals.get('positions') or [],
+            key=lambda item: item.get('current_value_rub') or ZERO_AMOUNT,
+            reverse=True,
+        )
+        lines = [
+            f'💼 {portfolio.name}',
+            f'Стоимость: {_format_compact_money(totals["current_value_rub"])}',
+            f'Total P/L: {_format_compact_money(totals["total_pl_rub"])} ({_serialize_decimal(totals.get("return_percent")) or "н/д"}%)',
+        ]
+        if not totals.get('valuation_complete', True):
+            lines.append('Есть активы без актуальной цены.')
+        for index, position in enumerate(positions[:5], start=1):
+            value = _format_compact_money(position.get('current_value_rub'))
+            pl = _format_compact_money(position.get('total_pl_rub'))
+            lines.append(f'{index}. {position["instrument_ticker"]}: {value} | P/L {pl}')
+        return {
+            'status': 'info',
+            'intent': INTENT_GET_PORTFOLIO_OVERVIEW,
+            'provider': provider_name,
+            'confidence': normalized.get('confidence', 0.0),
+            'reply_text': '\n'.join(lines),
+            'investment_overview': {
+                'portfolio_id': str(portfolio.id),
+                'portfolio_name': portfolio.name,
+                'current_value_rub': _serialize_decimal(totals.get('current_value_rub')),
+                'total_pl_rub': _serialize_decimal(totals.get('total_pl_rub')),
+                'return_percent': _serialize_decimal(totals.get('return_percent')),
+                'valuation_complete': bool(totals.get('valuation_complete', True)),
+                'positions': [_serialize_investment_position(position) for position in positions],
+            },
+            'parsed': normalized,
+        }
+
+    def _build_instrument_position_result(self, *, user, provider_name, normalized):
+        raw = normalized.get('raw') or {}
+        instrument = Instrument.objects.filter(pk=raw.get('instrument_id')).first()
+        if instrument is None:
+            instrument = _match_investment_instrument_by_hint(raw.get('instrument_hint') or normalized.get('comment'))
+        if instrument is None:
+            return self._needs_confirmation(
+                normalized,
+                provider_name,
+                missing_fields=['instrument'],
+                reply_text='Не удалось определить инвестиционный инструмент.',
+            )
+
+        portfolio = _investment_portfolio_for_user(user)
+        if portfolio is None:
+            return self._build_missing_portfolio_result(
+                intent=INTENT_GET_INSTRUMENT_POSITION,
+                provider_name=provider_name,
+                normalized=normalized,
+            )
+
+        positions = calculate_positions(portfolio, include_zero=True)
+        position = next(
+            (item for item in positions if str(item.get('instrument_id')) == str(instrument.id)),
+            None,
+        )
+        if position is None:
+            position = {
+                'instrument_id': str(instrument.id),
+                'instrument_ticker': instrument.ticker,
+                'instrument_name': instrument.name,
+                'quantity': ZERO_AMOUNT,
+                'current_value_rub': ZERO_AMOUNT,
+                'total_pl_rub': ZERO_AMOUNT,
+                'return_percent': None,
+            }
+
+        value_text = (
+            'нет цены'
+            if position.get('current_value_rub') is None
+            else _format_compact_money(position.get('current_value_rub'))
+        )
+        lines = [
+            f'🪙 {position["instrument_ticker"]}',
+            f'Количество: {position.get("quantity")}',
+            f'Стоимость: {value_text}',
+            f'Total P/L: {_format_compact_money(position.get("total_pl_rub"))} ({_serialize_decimal(position.get("return_percent")) or "н/д"}%)',
+        ]
+        return {
+            'status': 'info',
+            'intent': INTENT_GET_INSTRUMENT_POSITION,
+            'provider': provider_name,
+            'confidence': normalized.get('confidence', 0.0),
+            'reply_text': '\n'.join(lines),
+            'investment_position': _serialize_investment_position(position),
+            'parsed': normalized,
+        }
+
+    def _build_rebalance_result(self, *, user, provider_name, normalized):
+        portfolio = _investment_portfolio_for_user(user)
+        if portfolio is None:
+            return self._build_missing_portfolio_result(
+                intent=INTENT_GET_REBALANCE_STATUS,
+                provider_name=provider_name,
+                normalized=normalized,
+            )
+
+        status = calculate_rebalance_status(portfolio)
+        positions = [
+            position for position in status.get('positions') or []
+            if position.get('target_allocation_percent') is not None
+        ]
+        positions.sort(
+            key=lambda item: abs(item.get('allocation_deviation_rub') or ZERO_AMOUNT),
+            reverse=True,
+        )
+        lines = [
+            f'🎯 Ребаланс: {portfolio.name}',
+            f'Стоимость: {_format_compact_money(status["current_value_rub"])}',
+        ]
+        if not positions:
+            lines.append('Целевые доли не заданы.')
+        else:
+            for index, position in enumerate(positions[:8], start=1):
+                action = {
+                    'buy': 'докупить',
+                    'sell': 'сократить',
+                    'hold': 'в норме',
+                }.get(position.get('rebalance_action'), 'нет цели')
+                lines.append(
+                    f'{index}. {position["instrument_ticker"]}: '
+                    f'{_serialize_decimal(position.get("allocation_percent")) or "0.00"}% / '
+                    f'{_serialize_decimal(position.get("target_allocation_percent")) or "0.00"}% | '
+                    f'{action} {_format_compact_money(position.get("rebalance_amount_rub"))}'
+                )
+        return {
+            'status': 'info',
+            'intent': INTENT_GET_REBALANCE_STATUS,
+            'provider': provider_name,
+            'confidence': normalized.get('confidence', 0.0),
+            'reply_text': '\n'.join(lines),
+            'investment_rebalance': {
+                'portfolio_id': str(portfolio.id),
+                'current_value_rub': _serialize_decimal(status.get('current_value_rub')),
+                'positions': [_serialize_investment_position(position) for position in positions],
+            },
+            'parsed': normalized,
         }
 
     def _is_batch_provider_payload(self, parsed):
@@ -2155,14 +2441,16 @@ class AiOperationService:
             context=retry_context,
         )
 
-    def process(self, *, text=None, image_bytes=None, image_mime_type=None, wallet_id=None, dry_run=False, source='web'):
-        context = self.build_context()
+    def process(self, *, text=None, image_bytes=None, image_mime_type=None, wallet_id=None, dry_run=False, source='web', user=None):
+        context = self.build_context(user=user)
         parsed = None
         provider_name = 'rule_based'
         if not image_bytes:
             parsed = self.detect_meta_intent(text)
         if parsed is None and not image_bytes:
             parsed = _detect_month_expenses_by_item_intent(text)
+        if parsed is None and not image_bytes:
+            parsed = _detect_investment_readonly_intent(text)
         if parsed is None:
             provider, provider_name = _get_intent_provider()
             parsed = provider.parse(
@@ -2286,6 +2574,27 @@ class AiOperationService:
                 'expense_summary': summary,
                 'parsed': normalized,
             }
+
+        if intent == INTENT_GET_PORTFOLIO_OVERVIEW:
+            return self._build_portfolio_overview_result(
+                user=user,
+                provider_name=provider_name,
+                normalized=normalized,
+            )
+
+        if intent == INTENT_GET_INSTRUMENT_POSITION:
+            return self._build_instrument_position_result(
+                user=user,
+                provider_name=provider_name,
+                normalized=normalized,
+            )
+
+        if intent == INTENT_GET_REBALANCE_STATUS:
+            return self._build_rebalance_result(
+                user=user,
+                provider_name=provider_name,
+                normalized=normalized,
+            )
 
         if intent == INTENT_HELP_CAPABILITIES:
             return self.build_help_result(provider_name=provider_name, source=source)

@@ -3,7 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { ResponsiveLine } from "@nivo/line"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BarChart3, Coins, Landmark, LineChart, PencilLine, Plus, RefreshCw, Trash2, TrendingUp, X } from "lucide-react"
+import { BarChart3, Coins, Landmark, LineChart, PencilLine, Plus, RefreshCw, Target, Trash2, TrendingUp, X } from "lucide-react"
 import { useMemo, useState, type FormEvent } from "react"
 
 import { EmptyState } from "@/components/shared/empty-state"
@@ -32,6 +32,8 @@ import {
   type InvestmentOperationType,
   type InvestmentPortfolio,
   type InvestmentPortfolioPayload,
+  type InvestmentTargetAllocation,
+  type InvestmentTargetAllocationPayload,
 } from "@/services/investment-service"
 
 const operationLabels: Record<InvestmentOperationType, string> = {
@@ -48,12 +50,19 @@ const accountTypeLabels: Record<string, string> = {
   manual: "Ручной счет",
 }
 
+const rebalanceActionLabels: Record<string, string> = {
+  buy: "Докупка",
+  sell: "Сократить",
+  hold: "В норме",
+}
+
 type InvestmentDialogState =
   | { type: "portfolio"; mode: "create" | "edit"; item?: InvestmentPortfolio }
   | { type: "instrument"; mode: "create" | "edit"; item?: Instrument }
   | { type: "price"; mode: "create"; item?: Instrument }
   | { type: "account"; mode: "create" | "edit"; item?: InvestmentAccount }
   | { type: "operation"; mode: "create" | "edit"; item?: InvestmentOperation }
+  | { type: "target-allocation"; mode: "create" | "edit"; item?: InvestmentTargetAllocation }
   | null
 
 const INVESTMENT_QUERY_KEYS = [
@@ -63,6 +72,8 @@ const INVESTMENT_QUERY_KEYS = [
   ["investment-instruments"],
   ["investment-accounts"],
   ["investment-operations"],
+  ["investment-target-allocations"],
+  ["investment-rebalance"],
 ]
 
 function parseFormNumber(value: string, fallback = 0) {
@@ -183,6 +194,20 @@ export default function InvestmentsPage() {
     queryKey: ["investment-accounts"],
     queryFn: InvestmentService.getAccounts,
   })
+  const activePortfolioId =
+    overviewQuery.data?.portfolio?.id ??
+    portfoliosQuery.data?.find((portfolio) => portfolio.is_default)?.id ??
+    portfoliosQuery.data?.[0]?.id
+  const targetAllocationsQuery = useQuery({
+    queryKey: ["investment-target-allocations", activePortfolioId],
+    queryFn: () => InvestmentService.getTargetAllocations({ portfolio: activePortfolioId }),
+    enabled: Boolean(activePortfolioId),
+  })
+  const rebalanceQuery = useQuery({
+    queryKey: ["investment-rebalance", activePortfolioId],
+    queryFn: () => InvestmentService.getPortfolioRebalance(activePortfolioId!),
+    enabled: Boolean(activePortfolioId),
+  })
   const operationsQuery = useQuery({
     queryKey: ["investment-operations", operationDateFrom, operationDateTo, operationInstrument, operationAccount],
     queryFn: () =>
@@ -226,6 +251,15 @@ export default function InvestmentsPage() {
   const saveAccountMutation = useMutation({
     mutationFn: ({ id, payload }: { id?: string; payload: InvestmentAccountPayload | Partial<InvestmentAccountPayload> }) =>
       id ? InvestmentService.updateAccount(id, payload) : InvestmentService.createAccount(payload as InvestmentAccountPayload),
+    onSuccess: handleSaved,
+    onError: (error) => setDialogError(getApiErrorMessage(error)),
+  })
+
+  const saveTargetAllocationMutation = useMutation({
+    mutationFn: ({ id, payload }: { id?: string; payload: InvestmentTargetAllocationPayload | Partial<InvestmentTargetAllocationPayload> }) =>
+      id
+        ? InvestmentService.updateTargetAllocation(id, payload)
+        : InvestmentService.createTargetAllocation(payload as InvestmentTargetAllocationPayload),
     onSuccess: handleSaved,
     onError: (error) => setDialogError(getApiErrorMessage(error)),
   })
@@ -275,6 +309,18 @@ export default function InvestmentsPage() {
   const currentPortfolioAccounts = currentPortfolio ? accounts.filter((account) => account.portfolio === currentPortfolio.id) : []
   const visibleAccounts = currentPortfolioAccounts.filter((account) => !account.hidden)
   const canCreateOperation = Boolean(currentPortfolio && activeInstruments.length > 0 && currentPortfolioAccounts.length > 0)
+  const targetAllocations = targetAllocationsQuery.data ?? []
+  const rebalanceStatus = rebalanceQuery.data
+  const targetAllocationByInstrument = new Map(targetAllocations.map((allocation) => [allocation.instrument, allocation]))
+  const targetAllocationSum = targetAllocations.reduce((sum, allocation) => sum + allocation.target_percent, 0)
+  const offTargetPositions = rebalanceStatus?.positions.filter(
+    (position) => position.target_allocation_percent !== null && position.target_allocation_percent !== undefined && position.is_within_tolerance === false,
+  ) ?? []
+  const rebalancePositions = rebalanceStatus?.positions.filter(
+    (position) =>
+      position.target_allocation_percent !== null ||
+      (position.current_value_rub !== null && position.current_value_rub !== undefined && position.current_value_rub > 0),
+  ) ?? []
   const performance = performanceQuery.data
   const performancePoints = performance ? [performance.opening, ...performance.points] : []
   const valueLineData = performancePoints.map((point) => ({
@@ -326,7 +372,7 @@ export default function InvestmentsPage() {
     setDialog(nextDialog)
   }
 
-  const handleDelete = async (kind: "portfolio" | "instrument" | "account" | "operation", id: string, label: string) => {
+  const handleDelete = async (kind: "portfolio" | "instrument" | "account" | "operation" | "target-allocation", id: string, label: string) => {
     if (!window.confirm(`Удалить ${label}?`)) {
       return
     }
@@ -340,6 +386,9 @@ export default function InvestmentsPage() {
       }
       if (kind === "account") {
         await InvestmentService.deleteAccount(id)
+      }
+      if (kind === "target-allocation") {
+        await InvestmentService.deleteTargetAllocation(id)
       }
       if (kind === "operation") {
         await InvestmentService.deleteOperation(id)
@@ -481,6 +530,144 @@ export default function InvestmentsPage() {
                     />
                   </div>
                 </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {currentPortfolio ? (
+        <Card>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle>Ребалансировка</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Целевые доли, отклонения и допуски. Операции здесь не создаются автоматически.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              disabled={activeInstruments.length === 0}
+              onClick={() => openDialog({ type: "target-allocation", mode: "create" })}
+            >
+              <Target className="mr-2 h-4 w-4" />
+              Целевая доля
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {rebalanceQuery.isLoading || targetAllocationsQuery.isLoading ? (
+              <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">Считаем отклонения...</div>
+            ) : rebalanceQuery.isError || targetAllocationsQuery.isError || !rebalanceStatus ? (
+              <EmptyState
+                icon={Target}
+                title="Ребалансировка пока недоступна"
+                description="Не удалось получить целевые доли или расчет отклонений."
+                action={<Button variant="outline" onClick={() => void Promise.all([rebalanceQuery.refetch(), targetAllocationsQuery.refetch()])}>Повторить</Button>}
+              />
+            ) : targetAllocations.length === 0 ? (
+              <EmptyState
+                icon={Target}
+                title="Целевые доли не заданы"
+                description="Добавь целевые проценты по активам, чтобы видеть, что нужно докупить или сократить."
+                action={<Button disabled={activeInstruments.length === 0} onClick={() => openDialog({ type: "target-allocation", mode: "create" })}>Добавить цель</Button>}
+              />
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Стоимость портфеля</div>
+                    <div className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(rebalanceStatus.current_value_rub)}</div>
+                  </div>
+                  <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Вне допуска</div>
+                    <div className={offTargetPositions.length > 0 ? "mt-1 text-xl font-semibold text-destructive tabular-nums" : "mt-1 text-xl font-semibold text-emerald-600 tabular-nums"}>
+                      {offTargetPositions.length}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Целевые доли</div>
+                    <div className="mt-1 text-xl font-semibold tabular-nums">{formatPercent(targetAllocationSum)}</div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1040px] text-left text-sm">
+                    <thead className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                      <tr className="border-b border-border/70">
+                        <th className="py-3 pr-4">Актив</th>
+                        <th className="py-3 pr-4 text-right">Текущая</th>
+                        <th className="py-3 pr-4 text-right">Цель</th>
+                        <th className="py-3 pr-4 text-right">Допуск</th>
+                        <th className="py-3 pr-4 text-right">Отклонение</th>
+                        <th className="py-3 pr-4 text-right">Сумма</th>
+                        <th className="py-3 pr-4 text-right">Действие</th>
+                        <th className="py-3 text-right">Настройки</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rebalancePositions.map((position) => {
+                        const allocation = targetAllocationByInstrument.get(position.instrument_id)
+                        const isOverTarget = position.allocation_deviation_rub !== null && position.allocation_deviation_rub !== undefined && position.allocation_deviation_rub > 0
+                        const actionClass = position.is_within_tolerance
+                          ? "text-emerald-600"
+                          : isOverTarget
+                            ? "text-destructive"
+                            : "text-blue-600"
+                        return (
+                          <tr key={position.instrument_id} className="border-b border-border/50">
+                            <td className="py-3 pr-4">
+                              <div className="font-medium text-foreground">{position.instrument_ticker}</div>
+                              <div className="text-xs text-muted-foreground">{position.instrument_name}</div>
+                            </td>
+                            <td className="py-3 pr-4 text-right tabular-nums">{formatPercent(position.allocation_percent)}</td>
+                            <td className="py-3 pr-4 text-right tabular-nums">{formatPercent(position.target_allocation_percent)}</td>
+                            <td className="py-3 pr-4 text-right tabular-nums">{formatPercent(position.tolerance_percent)}</td>
+                            <td className={`py-3 pr-4 text-right tabular-nums ${actionClass}`}>
+                              {position.allocation_deviation_percent === null || position.allocation_deviation_percent === undefined
+                                ? "нет цели"
+                                : `${position.allocation_deviation_percent > 0 ? "+" : ""}${formatPercent(position.allocation_deviation_percent)}`}
+                            </td>
+                            <td className={`py-3 pr-4 text-right tabular-nums ${actionClass}`}>
+                              {position.allocation_deviation_rub === null || position.allocation_deviation_rub === undefined
+                                ? "нет цели"
+                                : `${position.allocation_deviation_rub > 0 ? "+" : ""}${formatCurrency(position.allocation_deviation_rub)}`}
+                            </td>
+                            <td className={`py-3 pr-4 text-right font-medium ${actionClass}`}>
+                              {rebalanceActionLabels[position.rebalance_action ?? ""] ?? "Нет цели"}
+                              {position.rebalance_amount_rub !== null && position.rebalance_amount_rub !== undefined && position.rebalance_amount_rub > 0 ? (
+                                <div className="text-xs font-normal tabular-nums">{formatCurrency(position.rebalance_amount_rub)}</div>
+                              ) : null}
+                            </td>
+                            <td className="py-3 text-right">
+                              {allocation ? (
+                                <div className="flex justify-end gap-1">
+                                  <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "target-allocation", mode: "edit", item: allocation })} aria-label="Редактировать целевую долю">
+                                    <PencilLine className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" onClick={() => void handleDelete("target-allocation", allocation.id, `целевую долю ${allocation.instrument_ticker ?? position.instrument_ticker}`)} aria-label="Удалить целевую долю">
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openDialog({ type: "target-allocation", mode: "create" })}
+                                >
+                                  Задать цель
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {rebalanceStatus.disclaimer ? (
+                  <p className="text-xs text-muted-foreground">{rebalanceStatus.disclaimer}</p>
+                ) : null}
               </div>
             )}
           </CardContent>
@@ -777,12 +964,14 @@ export default function InvestmentsPage() {
         onSaveInstrument={(id, payload) => saveInstrumentMutation.mutate({ id, payload })}
         onSavePrice={(payload) => savePriceMutation.mutate(payload)}
         onSaveAccount={(id, payload) => saveAccountMutation.mutate({ id, payload })}
+        onSaveTargetAllocation={(id, payload) => saveTargetAllocationMutation.mutate({ id, payload })}
         onSaveOperation={(id, payload) => saveOperationMutation.mutate({ id, payload })}
         isSaving={
           savePortfolioMutation.isPending ||
           saveInstrumentMutation.isPending ||
           savePriceMutation.isPending ||
           saveAccountMutation.isPending ||
+          saveTargetAllocationMutation.isPending ||
           saveOperationMutation.isPending
         }
       />
@@ -802,6 +991,7 @@ function InvestmentCrudDialog({
   onSaveInstrument,
   onSavePrice,
   onSaveAccount,
+  onSaveTargetAllocation,
   onSaveOperation,
   isSaving,
 }: {
@@ -816,6 +1006,10 @@ function InvestmentCrudDialog({
   onSaveInstrument: (id: string | undefined, payload: InstrumentPayload | Partial<InstrumentPayload>) => void
   onSavePrice: (payload: Partial<InstrumentPriceSnapshotPayload>) => void
   onSaveAccount: (id: string | undefined, payload: InvestmentAccountPayload | Partial<InvestmentAccountPayload>) => void
+  onSaveTargetAllocation: (
+    id: string | undefined,
+    payload: InvestmentTargetAllocationPayload | Partial<InvestmentTargetAllocationPayload>,
+  ) => void
   onSaveOperation: (id: string | undefined, payload: Partial<InvestmentOperationPayload>) => void
   isSaving: boolean
 }) {
@@ -880,6 +1074,16 @@ function InvestmentCrudDialog({
                 instruments={instruments}
                 isSaving={isSaving}
                 onSubmit={(payload) => onSaveOperation(dialog.item?.id, payload)}
+              />
+            ) : null}
+
+            {dialog?.type === "target-allocation" ? (
+              <TargetAllocationForm
+                allocation={dialog.item}
+                currentPortfolio={currentPortfolio}
+                instruments={instruments}
+                isSaving={isSaving}
+                onSubmit={(payload) => onSaveTargetAllocation(dialog.item?.id, payload)}
               />
             ) : null}
           </div>
@@ -1156,6 +1360,71 @@ function AccountForm({
       <div className="md:col-span-2">
         <Button type="submit" disabled={isSaving || !portfolio || !name.trim()}>
           {isSaving ? "Сохраняем..." : "Сохранить счет"}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function TargetAllocationForm({
+  allocation,
+  currentPortfolio,
+  instruments,
+  isSaving,
+  onSubmit,
+}: {
+  allocation?: InvestmentTargetAllocation
+  currentPortfolio: InvestmentPortfolio | null
+  instruments: Instrument[]
+  isSaving: boolean
+  onSubmit: (payload: InvestmentTargetAllocationPayload | Partial<InvestmentTargetAllocationPayload>) => void
+}) {
+  const activeInstruments = instruments.filter((instrument) => instrument.is_active || instrument.id === allocation?.instrument)
+  const [instrument, setInstrument] = useState(allocation?.instrument ?? activeInstruments[0]?.id ?? "")
+  const [targetPercent, setTargetPercent] = useState(formatInputNumber(allocation?.target_percent))
+  const [tolerancePercent, setTolerancePercent] = useState(formatInputNumber(allocation?.tolerance_percent ?? 5))
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    onSubmit({
+      portfolio: allocation?.portfolio ?? currentPortfolio?.id ?? "",
+      instrument,
+      target_percent: parseFormNumber(targetPercent),
+      tolerance_percent: parseFormNumber(tolerancePercent, 5),
+    })
+  }
+
+  return (
+    <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
+      <FormField label="Портфель">
+        <Input value={currentPortfolio?.name ?? allocation?.portfolio_name ?? ""} disabled />
+      </FormField>
+      <FormField label="Инструмент">
+        <Select value={instrument} onValueChange={setInstrument} disabled={!!allocation}>
+          <SelectTrigger>
+            <SelectValue placeholder="Выбери инструмент" />
+          </SelectTrigger>
+          <SelectContent>
+            {activeInstruments.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.ticker} · {item.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
+      <FormField label="Целевая доля, %">
+        <Input value={targetPercent} onChange={(event) => setTargetPercent(event.target.value)} required inputMode="decimal" placeholder="Например: 40" />
+      </FormField>
+      <FormField label="Допуск, %">
+        <Input value={tolerancePercent} onChange={(event) => setTolerancePercent(event.target.value)} required inputMode="decimal" placeholder="Например: 5" />
+      </FormField>
+      <div className="md:col-span-2">
+        <Button
+          type="submit"
+          disabled={isSaving || !currentPortfolio || !instrument || !targetPercent.trim() || !tolerancePercent.trim()}
+        >
+          {isSaving ? "Сохраняем..." : "Сохранить цель"}
         </Button>
       </div>
     </form>

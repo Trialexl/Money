@@ -93,7 +93,13 @@ export interface InvestmentPosition {
   sold_rub: number
   allocation_percent?: number | null
   target_allocation_percent?: number | null
+  tolerance_percent?: number | null
   allocation_deviation_percent?: number | null
+  target_value_rub?: number | null
+  allocation_deviation_rub?: number | null
+  rebalance_action?: "buy" | "sell" | "hold" | null
+  rebalance_amount_rub?: number | null
+  is_within_tolerance?: boolean | null
 }
 
 export interface InvestmentOverview {
@@ -136,6 +142,24 @@ export interface InvestmentPerformance {
   points: InvestmentPerformancePoint[]
 }
 
+export interface InvestmentTargetAllocation {
+  id: string
+  portfolio: string
+  portfolio_name?: string
+  instrument: string
+  instrument_ticker?: string
+  instrument_name?: string
+  target_percent: number
+  tolerance_percent: number
+}
+
+export interface InvestmentRebalanceStatus {
+  portfolio_id: string
+  current_value_rub: number
+  positions: InvestmentPosition[]
+  disclaimer: string
+}
+
 export type InstrumentPayload = Omit<Instrument, "id">
 export type InvestmentPortfolioPayload = Pick<InvestmentPortfolio, "name" | "is_default"> & {
   project?: string | null
@@ -146,6 +170,10 @@ export type InvestmentOperationPayload = Omit<
   "id" | "number" | "portfolio_name" | "account_name" | "account_to_name" | "instrument_ticker" | "instrument_name"
 >
 export type InstrumentPriceSnapshotPayload = Omit<InstrumentPriceSnapshot, "id" | "instrument_ticker" | "instrument_name">
+export type InvestmentTargetAllocationPayload = Omit<
+  InvestmentTargetAllocation,
+  "id" | "portfolio_name" | "instrument_ticker" | "instrument_name"
+>
 
 function fromApiNullableAmount(amount: string | number | undefined | null): number | null {
   if (amount === undefined || amount === null || amount === "") {
@@ -254,7 +282,26 @@ function mapPosition(raw: any): InvestmentPosition {
     sold_rub: fromApiAmount(raw.sold_rub),
     allocation_percent: fromApiNullableAmount(raw.allocation_percent),
     target_allocation_percent: fromApiNullableAmount(raw.target_allocation_percent),
+    tolerance_percent: fromApiNullableAmount(raw.tolerance_percent),
     allocation_deviation_percent: fromApiNullableAmount(raw.allocation_deviation_percent),
+    target_value_rub: fromApiNullableAmount(raw.target_value_rub),
+    allocation_deviation_rub: fromApiNullableAmount(raw.allocation_deviation_rub),
+    rebalance_action: raw.rebalance_action ?? null,
+    rebalance_amount_rub: fromApiNullableAmount(raw.rebalance_amount_rub),
+    is_within_tolerance: raw.is_within_tolerance ?? null,
+  }
+}
+
+function mapTargetAllocation(raw: any): InvestmentTargetAllocation {
+  return {
+    id: raw.id,
+    portfolio: raw.portfolio ?? "",
+    portfolio_name: raw.portfolio_name ?? undefined,
+    instrument: raw.instrument ?? "",
+    instrument_ticker: raw.instrument_ticker ?? undefined,
+    instrument_name: raw.instrument_name ?? undefined,
+    target_percent: fromApiAmount(raw.target_percent),
+    tolerance_percent: fromApiAmount(raw.tolerance_percent),
   }
 }
 
@@ -304,6 +351,15 @@ function mapPerformance(raw: any): InvestmentPerformance {
   }
 }
 
+function mapRebalanceStatus(raw: any): InvestmentRebalanceStatus {
+  return {
+    portfolio_id: raw.portfolio_id ?? "",
+    current_value_rub: fromApiAmount(raw.current_value_rub),
+    positions: Array.isArray(raw.positions) ? raw.positions.map(mapPosition) : [],
+    disclaimer: raw.disclaimer ?? "",
+  }
+}
+
 function toOperationPayload(payload: Partial<InvestmentOperationPayload>) {
   return {
     ...payload,
@@ -329,6 +385,14 @@ function toPricePayload(payload: Partial<InstrumentPriceSnapshotPayload>) {
   }
 }
 
+function toTargetAllocationPayload(payload: InvestmentTargetAllocationPayload | Partial<InvestmentTargetAllocationPayload>) {
+  return {
+    ...payload,
+    target_percent: payload.target_percent === undefined ? undefined : payload.target_percent.toString(),
+    tolerance_percent: payload.tolerance_percent === undefined ? undefined : payload.tolerance_percent.toString(),
+  }
+}
+
 export const InvestmentService = {
   async getOverview() {
     const response = await api.get("/investment/portfolio-overview/")
@@ -338,6 +402,11 @@ export const InvestmentService = {
   async getPortfolioPerformance(portfolioId: string, params?: { date_from?: string; date_to?: string; group_by?: "day" | "month" }) {
     const response = await api.get(`/investment/portfolios/${portfolioId}/performance/`, { params })
     return mapPerformance(response.data)
+  },
+
+  async getPortfolioRebalance(portfolioId: string) {
+    const response = await api.get(`/investment/portfolios/${portfolioId}/rebalance/`)
+    return mapRebalanceStatus(response.data)
   },
 
   async getInstruments() {
@@ -356,6 +425,12 @@ export const InvestmentService = {
     const response = await api.get("/investment/accounts/")
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data
     return Array.isArray(data) ? data.map(mapAccount) : []
+  },
+
+  async getTargetAllocations(params?: { portfolio?: string; instrument?: string }) {
+    const response = await api.get("/investment/target-allocations/", { params })
+    const data = Array.isArray(response.data?.results) ? response.data.results : response.data
+    return Array.isArray(data) ? data.map(mapTargetAllocation) : []
   },
 
   async getOperations(params?: {
@@ -421,6 +496,20 @@ export const InvestmentService = {
 
   async deleteAccount(id: string) {
     await api.delete(`/investment/accounts/${id}/`)
+  },
+
+  async createTargetAllocation(payload: InvestmentTargetAllocationPayload) {
+    const response = await api.post("/investment/target-allocations/", toTargetAllocationPayload(payload))
+    return mapTargetAllocation(response.data)
+  },
+
+  async updateTargetAllocation(id: string, payload: Partial<InvestmentTargetAllocationPayload>) {
+    const response = await api.patch(`/investment/target-allocations/${id}/`, toTargetAllocationPayload(payload))
+    return mapTargetAllocation(response.data)
+  },
+
+  async deleteTargetAllocation(id: string) {
+    await api.delete(`/investment/target-allocations/${id}/`)
   },
 
   async createOperation(payload: Partial<InvestmentOperationPayload>) {

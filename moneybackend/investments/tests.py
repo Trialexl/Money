@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from money.ai_service import AiOperationService
 from money.models import BudgetExpense, BudgetIncome, FlowOfFunds, OneCSyncOutbox, Wallet
 from users.models import CustomUser
 
@@ -311,6 +312,50 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(response.data['positions'][0]['allocation_deviation_percent'], Decimal('50.00'))
         self.assertEqual(response.data['positions'][0]['rebalance_action'], 'sell')
         self.assertIn('не является инвестиционной рекомендацией', response.data['disclaimer'])
+
+    def test_ai_service_returns_portfolio_overview(self):
+        self._create_buy_operation()
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('120000.00'),
+            price_currency='RUB',
+            fx_rate_to_rub=Decimal('1'),
+            price_rub=Decimal('120000.00'),
+            captured_at=timezone.now(),
+        )
+
+        result = AiOperationService().process(text='портфель', user=self.user, source='telegram', dry_run=True)
+
+        self.assertEqual(result['status'], 'info')
+        self.assertEqual(result['intent'], 'get_portfolio_overview')
+        self.assertIn('Стоимость', result['reply_text'])
+        self.assertEqual(result['investment_overview']['portfolio_id'], str(self.portfolio.id))
+
+    def test_ai_service_returns_instrument_position(self):
+        self._create_buy_operation()
+
+        result = AiOperationService().process(text='сколько btc', user=self.user, source='telegram', dry_run=True)
+
+        self.assertEqual(result['status'], 'info')
+        self.assertEqual(result['intent'], 'get_instrument_position')
+        self.assertEqual(result['investment_position']['instrument_ticker'], 'BTC')
+        self.assertIn('Количество', result['reply_text'])
+
+    def test_ai_service_returns_rebalance_status(self):
+        self._create_buy_operation()
+        InvestmentTargetAllocation.objects.create(
+            portfolio=self.portfolio,
+            instrument=self.instrument,
+            target_percent=Decimal('50.00'),
+            tolerance_percent=Decimal('5.00'),
+        )
+
+        result = AiOperationService().process(text='ребалансировка портфеля', user=self.user, source='telegram', dry_run=True)
+
+        self.assertEqual(result['status'], 'info')
+        self.assertEqual(result['intent'], 'get_rebalance_status')
+        self.assertEqual(result['investment_rebalance']['portfolio_id'], str(self.portfolio.id))
+        self.assertIn('Ребаланс', result['reply_text'])
 
     def test_portfolio_performance_uses_opening_value_before_period(self):
         InvestmentOperation.objects.create(
