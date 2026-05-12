@@ -75,6 +75,15 @@ export interface InstrumentPriceSnapshot {
   source: string
 }
 
+export interface FxRateSnapshot {
+  id: string
+  captured_at: string
+  base_currency: string
+  quote_currency: string
+  rate: number
+  source: string
+}
+
 export interface InvestmentPosition {
   instrument_id: string
   instrument_ticker: string
@@ -170,6 +179,7 @@ export type InvestmentOperationPayload = Omit<
   "id" | "number" | "portfolio_name" | "account_name" | "account_to_name" | "instrument_ticker" | "instrument_name"
 >
 export type InstrumentPriceSnapshotPayload = Omit<InstrumentPriceSnapshot, "id" | "instrument_ticker" | "instrument_name">
+export type FxRateSnapshotPayload = Omit<FxRateSnapshot, "id">
 export type InvestmentTargetAllocationPayload = Omit<
   InvestmentTargetAllocation,
   "id" | "portfolio_name" | "instrument_ticker" | "instrument_name"
@@ -259,6 +269,17 @@ function mapPriceSnapshot(raw: any): InstrumentPriceSnapshot {
     price_currency: raw.price_currency ?? "USD",
     fx_rate_to_rub: fromApiAmount(raw.fx_rate_to_rub),
     price_rub: fromApiAmount(raw.price_rub),
+    source: raw.source ?? "manual",
+  }
+}
+
+function mapFxRateSnapshot(raw: any): FxRateSnapshot {
+  return {
+    id: raw.id,
+    captured_at: fromApiDateTime(raw.captured_at) ?? "",
+    base_currency: raw.base_currency ?? "",
+    quote_currency: raw.quote_currency ?? "RUB",
+    rate: fromApiAmount(raw.rate),
     source: raw.source ?? "manual",
   }
 }
@@ -449,6 +470,12 @@ export const InvestmentService = {
     const response = await api.get("/investment/prices/", { params })
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data
     return Array.isArray(data) ? data.map(mapPriceSnapshot) : []
+  },
+
+  async getFxRates(params?: { base_currency?: string; quote_currency?: string }) {
+    const response = await api.get("/investment/fx-rates/", { params })
+    const data = Array.isArray(response.data?.results) ? response.data.results : response.data
+    return Array.isArray(data) ? data.map(mapFxRateSnapshot) : []
   },
 
   async createPortfolio(payload: InvestmentPortfolioPayload) {

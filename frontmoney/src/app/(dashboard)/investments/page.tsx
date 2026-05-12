@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { formatCurrency, formatDate } from "@/lib/formatters"
 import {
   InvestmentService,
+  type FxRateSnapshot,
   type Instrument,
   type InstrumentPriceSnapshotPayload,
   type InstrumentPayload,
@@ -55,6 +56,10 @@ const rebalanceActionLabels: Record<string, string> = {
   sell: "Сократить",
   hold: "В норме",
 }
+
+type DisplayCurrency = "RUB" | "USD" | "EUR"
+
+const displayCurrencies: DisplayCurrency[] = ["RUB", "USD", "EUR"]
 
 type InvestmentDialogState =
   | { type: "portfolio"; mode: "create" | "edit"; item?: InvestmentPortfolio }
@@ -124,6 +129,43 @@ function formatShortPerformanceLabel(value: string, groupBy: "day" | "month") {
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(date)
 }
 
+function getDisplayRate(currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
+  if (currency === "RUB") {
+    return 1
+  }
+  return fxRates.find((rate) => rate.base_currency === currency && rate.quote_currency === "RUB")?.rate ?? null
+}
+
+function convertRubAmount(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
+  if (amount === null || amount === undefined) {
+    return null
+  }
+  const rate = getDisplayRate(currency, fxRates)
+  if (!rate) {
+    return null
+  }
+  return currency === "RUB" ? amount : amount / rate
+}
+
+function formatCurrencyValue(amount: number, currency: DisplayCurrency) {
+  const digits = currency === "RUB" ? 0 : 2
+  return `${new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(amount)} ${currency}`
+}
+
+function formatMoneyInCurrency(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
+  const converted = convertRubAmount(amount, currency, fxRates)
+  if (converted === null) {
+    if (amount === null || amount === undefined) {
+      return "нет цены"
+    }
+    return "нет курса"
+  }
+  return formatCurrencyValue(converted, currency)
+}
+
 function getApiErrorMessage(error: unknown) {
   const data = (error as any)?.response?.data
   if (typeof data === "string") {
@@ -165,6 +207,7 @@ export default function InvestmentsPage() {
   const [operationDateTo, setOperationDateTo] = useState("")
   const [operationInstrument, setOperationInstrument] = useState("all")
   const [operationAccount, setOperationAccount] = useState("all")
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>("RUB")
   const performancePeriod = useMemo(() => yearDateRange(), [])
 
   const overviewQuery = useQuery({
@@ -193,6 +236,11 @@ export default function InvestmentsPage() {
   const accountsQuery = useQuery({
     queryKey: ["investment-accounts"],
     queryFn: InvestmentService.getAccounts,
+  })
+  const fxRatesQuery = useQuery({
+    queryKey: ["investment-fx-rates", displayCurrency],
+    queryFn: () => InvestmentService.getFxRates({ base_currency: displayCurrency, quote_currency: "RUB" }),
+    enabled: displayCurrency !== "RUB",
   })
   const activePortfolioId =
     overviewQuery.data?.portfolio?.id ??
@@ -309,6 +357,9 @@ export default function InvestmentsPage() {
   const currentPortfolioAccounts = currentPortfolio ? accounts.filter((account) => account.portfolio === currentPortfolio.id) : []
   const visibleAccounts = currentPortfolioAccounts.filter((account) => !account.hidden)
   const canCreateOperation = Boolean(currentPortfolio && activeInstruments.length > 0 && currentPortfolioAccounts.length > 0)
+  const fxRates = fxRatesQuery.data ?? []
+  const money = (amount: number | null | undefined) => formatMoneyInCurrency(amount, displayCurrency, fxRates)
+  const hasDisplayRate = displayCurrency === "RUB" || Boolean(getDisplayRate(displayCurrency, fxRates))
   const targetAllocations = targetAllocationsQuery.data ?? []
   const rebalanceStatus = rebalanceQuery.data
   const targetAllocationByInstrument = new Map(targetAllocations.map((allocation) => [allocation.instrument, allocation]))
@@ -325,11 +376,11 @@ export default function InvestmentsPage() {
   const performancePoints = performance ? [performance.opening, ...performance.points] : []
   const valueLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
-    y: point.current_value_rub,
+    y: convertRubAmount(point.current_value_rub, displayCurrency, fxRates) ?? 0,
   }))
   const plLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
-    y: point.total_pl_rub,
+    y: convertRubAmount(point.total_pl_rub, displayCurrency, fxRates) ?? 0,
   }))
   const operationTotals = operations.reduce(
     (totals, operation) => {
@@ -431,11 +482,40 @@ export default function InvestmentsPage() {
         }
       />
 
+      <div className="flex flex-wrap items-center gap-2 rounded-[22px] border border-border/70 bg-card/70 px-4 py-3">
+        <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Валюта отображения</span>
+        <div className="flex rounded-full border border-border/70 bg-muted/40 p-1">
+          {displayCurrencies.map((currency) => (
+            <Button
+              key={currency}
+              type="button"
+              size="sm"
+              variant={displayCurrency === currency ? "default" : "ghost"}
+              className="rounded-full"
+              onClick={() => setDisplayCurrency(currency)}
+            >
+              {currency}
+            </Button>
+          ))}
+        </div>
+        {displayCurrency !== "RUB" ? (
+          <span className="text-sm text-muted-foreground">
+            {fxRatesQuery.isLoading
+              ? "Загружаем курс..."
+              : getDisplayRate(displayCurrency, fxRates)
+                ? `1 ${displayCurrency} = ${formatCurrency(getDisplayRate(displayCurrency, fxRates) ?? 0)} RUB`
+                : "Курс не найден, обнови FX snapshots"}
+          </span>
+        ) : (
+          <span className="text-sm text-muted-foreground">Базовая учетная валюта не меняется.</span>
+        )}
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Текущая стоимость" value={formatCurrency(overview.current_value_rub)} hint={overview.valuation_complete ? "По последним ценам" : "Есть позиции без цены"} icon={Coins} variant="compact" />
-        <StatCard label="Себестоимость" value={formatCurrency(overview.cost_basis_rub)} hint="Остаток позиций в RUB" icon={Landmark} variant="compact" />
-        <StatCard label="Total P/L" value={formatCurrency(overview.total_pl_rub)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={overview.total_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
-        <StatCard label="Unrealized P/L" value={formatCurrency(overview.unrealized_pl_rub)} hint={`Realized: ${formatCurrency(overview.realized_pl_rub)}`} icon={BarChart3} tone={overview.unrealized_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
+        <StatCard label="Текущая стоимость" value={money(overview.current_value_rub)} hint={overview.valuation_complete ? "По последним ценам" : "Есть позиции без цены"} icon={Coins} variant="compact" />
+        <StatCard label="Себестоимость" value={money(overview.cost_basis_rub)} hint="Остаток позиций, пересчет только для просмотра" icon={Landmark} variant="compact" />
+        <StatCard label="Total P/L" value={money(overview.total_pl_rub)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={overview.total_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
+        <StatCard label="Unrealized P/L" value={money(overview.unrealized_pl_rub)} hint={`Realized: ${money(overview.realized_pl_rub)}`} icon={BarChart3} tone={overview.unrealized_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
       </div>
 
       {currentPortfolio ? (
@@ -478,6 +558,12 @@ export default function InvestmentsPage() {
                 description="Не удалось получить performance API. Остальные данные портфеля доступны."
                 action={<Button variant="outline" onClick={() => void performanceQuery.refetch()}>Повторить</Button>}
               />
+            ) : !hasDisplayRate ? (
+              <EmptyState
+                icon={LineChart}
+                title="Нет курса для выбранной валюты"
+                description="Графики остаются в RUB, пока не появится свежий FX snapshot для выбранной валюты."
+              />
             ) : performance.points.length === 0 ? (
               <EmptyState
                 icon={LineChart}
@@ -502,7 +588,7 @@ export default function InvestmentsPage() {
                       useMesh
                       tooltip={({ point }) => (
                         <div className="rounded border bg-background px-2 py-1 text-xs">
-                          {String(point.data.x)}: {formatCurrency(Number(point.data.y))}
+                          {String(point.data.x)}: {formatCurrencyValue(Number(point.data.y), displayCurrency)}
                         </div>
                       )}
                     />
@@ -524,7 +610,7 @@ export default function InvestmentsPage() {
                       useMesh
                       tooltip={({ point }) => (
                         <div className="rounded border bg-background px-2 py-1 text-xs">
-                          {String(point.data.x)}: {formatCurrency(Number(point.data.y))}
+                          {String(point.data.x)}: {formatCurrencyValue(Number(point.data.y), displayCurrency)}
                         </div>
                       )}
                     />
@@ -576,7 +662,7 @@ export default function InvestmentsPage() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
                     <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Стоимость портфеля</div>
-                    <div className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(rebalanceStatus.current_value_rub)}</div>
+                    <div className="mt-1 text-xl font-semibold tabular-nums">{money(rebalanceStatus.current_value_rub)}</div>
                   </div>
                   <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
                     <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Вне допуска</div>
@@ -630,12 +716,12 @@ export default function InvestmentsPage() {
                             <td className={`py-3 pr-4 text-right tabular-nums ${actionClass}`}>
                               {position.allocation_deviation_rub === null || position.allocation_deviation_rub === undefined
                                 ? "нет цели"
-                                : `${position.allocation_deviation_rub > 0 ? "+" : ""}${formatCurrency(position.allocation_deviation_rub)}`}
+                                : `${position.allocation_deviation_rub > 0 ? "+" : ""}${money(position.allocation_deviation_rub)}`}
                             </td>
                             <td className={`py-3 pr-4 text-right font-medium ${actionClass}`}>
                               {rebalanceActionLabels[position.rebalance_action ?? ""] ?? "Нет цели"}
                               {position.rebalance_amount_rub !== null && position.rebalance_amount_rub !== undefined && position.rebalance_amount_rub > 0 ? (
-                                <div className="text-xs font-normal tabular-nums">{formatCurrency(position.rebalance_amount_rub)}</div>
+                                <div className="text-xs font-normal tabular-nums">{money(position.rebalance_amount_rub)}</div>
                               ) : null}
                             </td>
                             <td className="py-3 text-right">
@@ -721,8 +807,8 @@ export default function InvestmentsPage() {
                           <div className="text-xs text-muted-foreground">{position.instrument_name}</div>
                         </td>
                         <td className="py-3 pr-4 text-right tabular-nums">{position.quantity}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums">{formatCurrency(position.cost_basis_rub)}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums">{formatCurrency(position.average_buy_price_rub)}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.cost_basis_rub)}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.average_buy_price_rub)}</td>
                         <td className="py-3 pr-4 text-right tabular-nums">
                           {position.latest_price_rub === null || position.latest_price_rub === undefined ? (
                             <Button variant="ghost" size="sm" onClick={() => openDialog({ type: "price", mode: "create", item: instruments.find((item) => item.id === position.instrument_id) })}>
@@ -730,19 +816,19 @@ export default function InvestmentsPage() {
                             </Button>
                           ) : (
                             <div>
-                              <div>{formatCurrency(position.latest_price_rub)}</div>
+                              <div>{money(position.latest_price_rub)}</div>
                               <div className="text-xs text-muted-foreground">{position.latest_price_at ? formatDate(position.latest_price_at) : ""}</div>
                             </div>
                           )}
                         </td>
                         <td className="py-3 pr-4 text-right tabular-nums">
-                          {position.current_value_rub === null || position.current_value_rub === undefined ? "нет цены" : formatCurrency(position.current_value_rub)}
+                          {money(position.current_value_rub)}
                         </td>
                         <td className={position.unrealized_pl_rub !== undefined && position.unrealized_pl_rub !== null && position.unrealized_pl_rub < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
-                          {position.unrealized_pl_rub === null || position.unrealized_pl_rub === undefined ? "нет цены" : formatCurrency(position.unrealized_pl_rub)}
+                          {money(position.unrealized_pl_rub)}
                         </td>
                         <td className={position.total_pl_rub < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
-                          {formatCurrency(position.total_pl_rub)}
+                          {money(position.total_pl_rub)}
                         </td>
                         <td className="py-3 text-right tabular-nums">
                           {formatPercent(position.return_percent)}
@@ -916,7 +1002,7 @@ export default function InvestmentsPage() {
                     <div className="flex items-center gap-1">
                       <div className="mr-2 text-right text-sm tabular-nums">
                         <div>{operation.quantity}</div>
-                        <div className="text-xs text-muted-foreground">{formatCurrency(operation.amount_rub)}</div>
+                        <div className="text-xs text-muted-foreground">{money(operation.amount_rub)}</div>
                       </div>
                       <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "operation", mode: "edit", item: operation })} aria-label="Редактировать операцию">
                         <PencilLine className="h-4 w-4" />
@@ -932,15 +1018,15 @@ export default function InvestmentsPage() {
             <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 text-sm sm:grid-cols-3">
               <div className="rounded-2xl bg-background/70 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Покупки</div>
-                <div className="mt-1 font-semibold tabular-nums">{formatCurrency(operationTotals.buy)}</div>
+                <div className="mt-1 font-semibold tabular-nums">{money(operationTotals.buy)}</div>
               </div>
               <div className="rounded-2xl bg-background/70 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Продажи</div>
-                <div className="mt-1 font-semibold tabular-nums">{formatCurrency(operationTotals.sell)}</div>
+                <div className="mt-1 font-semibold tabular-nums">{money(operationTotals.sell)}</div>
               </div>
               <div className="rounded-2xl bg-background/70 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Комиссии</div>
-                <div className="mt-1 font-semibold tabular-nums">{formatCurrency(operationTotals.fee)}</div>
+                <div className="mt-1 font-semibold tabular-nums">{money(operationTotals.fee)}</div>
               </div>
             </div>
           </CardContent>
