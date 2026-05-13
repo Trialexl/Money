@@ -2,6 +2,9 @@ services:
   db:
     image: postgres:14
     restart: unless-stopped
+    mem_limit: ${DB_MEMORY_LIMIT:-768m}
+    mem_reservation: ${DB_MEMORY_RESERVATION:-256m}
+    pids_limit: ${DB_PIDS_LIMIT:-256}
     environment:
       POSTGRES_DB: ${DB_NAME:-money}
       POSTGRES_USER: ${DB_USER:-money}
@@ -17,11 +20,20 @@ services:
   backend:
     image: trialexl/money-backend:latest
     restart: unless-stopped
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-768m}
+    mem_reservation: ${BACKEND_MEMORY_RESERVATION:-256m}
+    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
     env_file:
       - ./.env
     environment:
       DB_HOST: db
       DB_PORT: 5432
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-2}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-180}
+      GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-30}
+      GUNICORN_MAX_REQUESTS: ${GUNICORN_MAX_REQUESTS:-500}
+      GUNICORN_MAX_REQUESTS_JITTER: ${GUNICORN_MAX_REQUESTS_JITTER:-50}
     depends_on:
       db:
         condition: service_healthy
@@ -33,6 +45,11 @@ services:
   frontend:
     image: trialexl/money-frontend:latest
     restart: unless-stopped
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-512m}
+    mem_reservation: ${FRONTEND_MEMORY_RESERVATION:-128m}
+    pids_limit: ${FRONTEND_PIDS_LIMIT:-128}
+    environment:
+      NODE_OPTIONS: ${FRONTEND_NODE_OPTIONS:---max-old-space-size=256}
     depends_on:
       - backend
     expose:
@@ -41,6 +58,9 @@ services:
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped
+    mem_limit: ${CADDY_MEMORY_LIMIT:-128m}
+    mem_reservation: ${CADDY_MEMORY_RESERVATION:-32m}
+    pids_limit: ${CADDY_PIDS_LIMIT:-128}
     depends_on:
       - backend
       - frontend

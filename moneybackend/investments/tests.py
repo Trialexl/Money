@@ -47,11 +47,11 @@ class InvestmentModuleIsolationTests(TestCase):
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0000000000'),
             price=Decimal('100000.00000000'),
-            price_currency='RUB',
+            price_currency='USD',
             amount=Decimal('100000.00000000'),
-            amount_currency='RUB',
-            amount_rub=Decimal('100000.00'),
-            fx_rate_to_rub=Decimal('1.00000000'),
+            amount_currency='USD',
+            amount_usd=Decimal('100000.00'),
+            fx_rate_to_usd=Decimal('1.00000000'),
             date=timezone.now(),
         )
 
@@ -72,11 +72,11 @@ class InvestmentModuleIsolationTests(TestCase):
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('2.0000000000'),
             price=Decimal('200000.00000000'),
-            price_currency='RUB',
+            price_currency='USD',
             amount=Decimal('400000.00000000'),
-            amount_currency='RUB',
-            amount_rub=Decimal('400000.00'),
-            fx_rate_to_rub=Decimal('1.00000000'),
+            amount_currency='USD',
+            amount_usd=Decimal('400000.00'),
+            fx_rate_to_usd=Decimal('1.00000000'),
             date=timezone.now(),
         )
         return other_user, other_portfolio, other_account, other_operation
@@ -89,11 +89,11 @@ class InvestmentModuleIsolationTests(TestCase):
             'operation_type': InvestmentOperation.TYPE_BUY,
             'quantity': '0.1000000000',
             'price': '1000000.00000000',
-            'price_currency': 'RUB',
+            'price_currency': 'USD',
             'amount': '100000.00000000',
-            'amount_currency': 'RUB',
-            'amount_rub': '100000.00',
-            'fx_rate_to_rub': '1.00000000',
+            'amount_currency': 'USD',
+            'amount_usd': '100000.00',
+            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(response.status_code, 201, response.data)
@@ -112,11 +112,11 @@ class InvestmentModuleIsolationTests(TestCase):
             'operation_type': InvestmentOperation.TYPE_SELL,
             'quantity': '0.5000000000',
             'price': '120000.00000000',
-            'price_currency': 'RUB',
+            'price_currency': 'USD',
             'amount': '60000.00000000',
-            'amount_currency': 'RUB',
-            'amount_rub': '60000.00',
-            'fx_rate_to_rub': '1.00000000',
+            'amount_currency': 'USD',
+            'amount_usd': '60000.00',
+            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(response.status_code, 201, response.data)
@@ -134,11 +134,11 @@ class InvestmentModuleIsolationTests(TestCase):
             operation_type=InvestmentOperation.TYPE_SELL,
             quantity=Decimal('0.2500000000'),
             price=Decimal('120000.00000000'),
-            price_currency='RUB',
+            price_currency='USD',
             amount=Decimal('30000.00000000'),
-            amount_currency='RUB',
-            amount_rub=Decimal('30000.00'),
-            fx_rate_to_rub=Decimal('1.00000000'),
+            amount_currency='USD',
+            amount_usd=Decimal('30000.00'),
+            fx_rate_to_usd=Decimal('1.00000000'),
             date=operation.date + timedelta(hours=1),
         )
         date_from = (operation.date - timedelta(days=1)).isoformat()
@@ -171,7 +171,7 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('100.00'),
             amount=Decimal('100.00'),
-            amount_rub=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
         InvestmentOperation.objects.create(
@@ -182,7 +182,7 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('200.00'),
             amount=Decimal('200.00'),
-            amount_rub=Decimal('200.00'),
+            amount_usd=Decimal('200.00'),
             date=timezone.now(),
         )
         InvestmentOperation.objects.create(
@@ -193,16 +193,16 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('0.5'),
             price=Decimal('300.00'),
             amount=Decimal('150.00'),
-            amount_rub=Decimal('150.00'),
+            amount_usd=Decimal('150.00'),
             date=timezone.now(),
         )
 
         positions = calculate_positions(self.portfolio)
         self.assertEqual(len(positions), 1)
         self.assertEqual(positions[0]['quantity'], Decimal('1.5000000000'))
-        self.assertEqual(positions[0]['average_buy_price_rub'], Decimal('150.00'))
-        self.assertEqual(positions[0]['cost_basis_rub'], Decimal('225.00'))
-        self.assertEqual(positions[0]['realized_pl_rub'], Decimal('75.00'))
+        self.assertEqual(positions[0]['average_buy_price_usd'], Decimal('150.00'))
+        self.assertEqual(positions[0]['cost_basis_usd'], Decimal('225.00'))
+        self.assertEqual(positions[0]['realized_pl_usd'], Decimal('75.00'))
 
     def test_positions_use_latest_price_for_unrealized_pl(self):
         InvestmentOperation.objects.create(
@@ -213,31 +213,31 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('100.00'),
             amount=Decimal('100.00'),
-            amount_rub=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
         InstrumentPriceSnapshot.objects.create(
             instrument=self.instrument,
             price=Decimal('150.00'),
-            price_currency='RUB',
-            fx_rate_to_rub=Decimal('1'),
-            price_rub=Decimal('150.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('150.00'),
             captured_at=timezone.now(),
         )
 
         positions = calculate_positions(self.portfolio)
         totals = calculate_portfolio_totals(self.portfolio)
 
-        self.assertEqual(positions[0]['current_value_rub'], Decimal('150.00'))
-        self.assertEqual(positions[0]['unrealized_pl_rub'], Decimal('50.00'))
-        self.assertEqual(positions[0]['total_pl_rub'], Decimal('50.00'))
+        self.assertEqual(positions[0]['current_value_usd'], Decimal('150.00'))
+        self.assertEqual(positions[0]['unrealized_pl_usd'], Decimal('50.00'))
+        self.assertEqual(positions[0]['total_pl_usd'], Decimal('50.00'))
         self.assertEqual(positions[0]['return_percent'], Decimal('50.00'))
         self.assertEqual(positions[0]['allocation_percent'], Decimal('100.00'))
         self.assertIsNone(positions[0]['target_allocation_percent'])
         self.assertIsNone(positions[0]['allocation_deviation_percent'])
-        self.assertEqual(totals['current_value_rub'], Decimal('150.00'))
-        self.assertEqual(totals['unrealized_pl_rub'], Decimal('50.00'))
-        self.assertEqual(totals['total_pl_rub'], Decimal('50.00'))
+        self.assertEqual(totals['current_value_usd'], Decimal('150.00'))
+        self.assertEqual(totals['unrealized_pl_usd'], Decimal('50.00'))
+        self.assertEqual(totals['total_pl_usd'], Decimal('50.00'))
         self.assertTrue(totals['valuation_complete'])
         self.assertEqual(totals['largest_asset']['instrument_ticker'], 'BTC')
         self.assertIsNotNone(totals['latest_price_at'])
@@ -287,15 +287,15 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('100.00'),
             amount=Decimal('100.00'),
-            amount_rub=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
         InstrumentPriceSnapshot.objects.create(
             instrument=self.instrument,
             price=Decimal('100.00'),
-            price_currency='RUB',
-            fx_rate_to_rub=Decimal('1'),
-            price_rub=Decimal('100.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('100.00'),
             captured_at=timezone.now(),
         )
         InvestmentTargetAllocation.objects.create(
@@ -318,9 +318,9 @@ class InvestmentModuleIsolationTests(TestCase):
         InstrumentPriceSnapshot.objects.create(
             instrument=self.instrument,
             price=Decimal('120000.00'),
-            price_currency='RUB',
-            fx_rate_to_rub=Decimal('1'),
-            price_rub=Decimal('120000.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('120000.00'),
             captured_at=timezone.now(),
         )
 
@@ -366,15 +366,15 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('100.00'),
             amount=Decimal('100.00'),
-            amount_rub=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
             date=self._dt(2025, 12, 20),
         )
         InstrumentPriceSnapshot.objects.create(
             instrument=self.instrument,
             price=Decimal('120.00'),
-            price_currency='RUB',
-            fx_rate_to_rub=Decimal('1'),
-            price_rub=Decimal('120.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('120.00'),
             captured_at=self._dt(2025, 12, 31),
         )
         InvestmentOperation.objects.create(
@@ -385,15 +385,15 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('200.00'),
             amount=Decimal('200.00'),
-            amount_rub=Decimal('200.00'),
+            amount_usd=Decimal('200.00'),
             date=self._dt(2026, 1, 10),
         )
         InstrumentPriceSnapshot.objects.create(
             instrument=self.instrument,
             price=Decimal('150.00'),
-            price_currency='RUB',
-            fx_rate_to_rub=Decimal('1'),
-            price_rub=Decimal('150.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('150.00'),
             captured_at=self._dt(2026, 1, 31),
         )
 
@@ -404,10 +404,10 @@ class InvestmentModuleIsolationTests(TestCase):
             group_by='month',
         )
 
-        self.assertEqual(performance['opening']['cost_basis_rub'], Decimal('100.00'))
-        self.assertEqual(performance['opening']['current_value_rub'], Decimal('120.00'))
-        self.assertEqual(performance['points'][0]['cost_basis_rub'], Decimal('300.00'))
-        self.assertEqual(performance['points'][0]['current_value_rub'], Decimal('300.00'))
+        self.assertEqual(performance['opening']['cost_basis_usd'], Decimal('100.00'))
+        self.assertEqual(performance['opening']['current_value_usd'], Decimal('120.00'))
+        self.assertEqual(performance['points'][0]['cost_basis_usd'], Decimal('300.00'))
+        self.assertEqual(performance['points'][0]['current_value_usd'], Decimal('300.00'))
         self.assertEqual(performance['points'][0]['period_start'], '2026-01-01')
         self.assertEqual(performance['points'][0]['period_end'], '2026-01-31')
 
@@ -420,15 +420,15 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('100.00'),
             amount=Decimal('100.00'),
-            amount_rub=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
             date=self._dt(2026, 1, 10),
         )
         InstrumentPriceSnapshot.objects.create(
             instrument=self.instrument,
             price=Decimal('150.00'),
-            price_currency='RUB',
-            fx_rate_to_rub=Decimal('1'),
-            price_rub=Decimal('150.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('150.00'),
             captured_at=self._dt(2026, 1, 31),
         )
 
@@ -440,8 +440,8 @@ class InvestmentModuleIsolationTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['group_by'], 'month')
-        self.assertEqual(str(response.data['opening']['current_value_rub']), '0.00')
-        self.assertEqual(str(response.data['points'][0]['current_value_rub']), '150.00')
+        self.assertEqual(str(response.data['opening']['current_value_usd']), '0.00')
+        self.assertEqual(str(response.data['points'][0]['current_value_usd']), '150.00')
 
     def test_portfolio_overview_endpoint_returns_default_portfolio(self):
         InvestmentOperation.objects.create(
@@ -452,7 +452,7 @@ class InvestmentModuleIsolationTests(TestCase):
             quantity=Decimal('1.0'),
             price=Decimal('100.00'),
             amount=Decimal('100.00'),
-            amount_rub=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
 
@@ -460,7 +460,7 @@ class InvestmentModuleIsolationTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['portfolio']['id'], str(self.portfolio.id))
-        self.assertEqual(response.data['cost_basis_rub'], '100.00')
+        self.assertEqual(response.data['cost_basis_usd'], '100.00')
 
     def test_sell_more_than_position_is_rejected(self):
         response = self.client.post('/api/v1/investment/operations/', {
@@ -470,15 +470,42 @@ class InvestmentModuleIsolationTests(TestCase):
             'operation_type': InvestmentOperation.TYPE_SELL,
             'quantity': '1.0000000000',
             'price': '1000000.00000000',
-            'price_currency': 'RUB',
+            'price_currency': 'USD',
             'amount': '1000000.00000000',
-            'amount_currency': 'RUB',
-            'amount_rub': '1000000.00',
-            'fx_rate_to_rub': '1.00000000',
+            'amount_currency': 'USD',
+            'amount_usd': '1000000.00',
+            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('quantity', response.data)
+
+    def test_operation_api_normalizes_legacy_currency_fields_to_usd(self):
+        response = self.client.post('/api/v1/investment/operations/', {
+            'portfolio': str(self.portfolio.id),
+            'account': str(self.account.id),
+            'instrument': str(self.instrument.id),
+            'operation_type': InvestmentOperation.TYPE_BUY,
+            'quantity': '1.0000000000',
+            'price': '100.00000000',
+            'price_currency': 'EUR',
+            'amount': '110.00000000',
+            'amount_currency': 'EUR',
+            'amount_usd': '110.00',
+            'fx_rate_to_usd': '1.10000000',
+            'fee_amount': '2.00000000',
+            'fee_currency': 'EUR',
+            'fee_usd': '2.00',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        operation = InvestmentOperation.objects.get(id=response.data['id'])
+        self.assertEqual(operation.price_currency, 'USD')
+        self.assertEqual(operation.amount_currency, 'USD')
+        self.assertEqual(operation.fee_currency, 'USD')
+        self.assertEqual(operation.fx_rate_to_usd, Decimal('1'))
+        self.assertEqual(operation.amount, Decimal('110.00'))
+        self.assertEqual(operation.fee_amount, Decimal('2.00'))
 
     def test_openapi_schema_contains_investment_contract(self):
         response = self.client.get('/api/schema/')
@@ -512,16 +539,16 @@ class InvestmentModuleIsolationTests(TestCase):
                     instrument_id=str(instrument.id),
                     symbol=instrument.ticker,
                     price=Decimal('100.00'),
-                    price_currency='USD',
+                    price_currency='EUR',
                     source='test-price',
                 )
 
         class FxProvider:
-            def get_rate(self, base_currency, quote_currency='RUB'):
+            def get_rate(self, base_currency, quote_currency='USD'):
                 return FxRateQuote(
                     base_currency=base_currency,
                     quote_currency=quote_currency,
-                    rate=Decimal('90.00000000'),
+                    rate=Decimal('1.10000000'),
                     source='test-fx',
                 )
 
@@ -532,9 +559,9 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(InstrumentPriceSnapshot.objects.count(), 2)
         self.assertEqual(FxRateSnapshot.objects.count(), 1)
         eth_snapshot = InstrumentPriceSnapshot.objects.get(instrument=eth)
-        self.assertEqual(eth_snapshot.price_currency, 'USD')
-        self.assertEqual(eth_snapshot.fx_rate_to_rub, Decimal('90.00000000'))
-        self.assertEqual(eth_snapshot.price_rub, Decimal('9000.00'))
+        self.assertEqual(eth_snapshot.price_currency, 'EUR')
+        self.assertEqual(eth_snapshot.fx_rate_to_usd, Decimal('1.10000000'))
+        self.assertEqual(eth_snapshot.price_usd, Decimal('110.00'))
         self.assertEqual(eth_snapshot.source, 'test-price')
 
     def test_regular_user_does_not_see_foreign_portfolios_accounts_or_operations(self):
@@ -575,7 +602,7 @@ class InvestmentModuleIsolationTests(TestCase):
             'portfolio': str(other_portfolio.id),
             'name': 'Попытка чужого счета',
             'type': InvestmentAccount.TYPE_MANUAL,
-            'currency': 'RUB',
+            'currency': 'USD',
         }, format='json')
         operation_response = self.client.post('/api/v1/investment/operations/', {
             'portfolio': str(other_portfolio.id),
@@ -584,11 +611,11 @@ class InvestmentModuleIsolationTests(TestCase):
             'operation_type': InvestmentOperation.TYPE_BUY,
             'quantity': '1.0000000000',
             'price': '100000.00000000',
-            'price_currency': 'RUB',
+            'price_currency': 'USD',
             'amount': '100000.00000000',
-            'amount_currency': 'RUB',
-            'amount_rub': '100000.00',
-            'fx_rate_to_rub': '1.00000000',
+            'amount_currency': 'USD',
+            'amount_usd': '100000.00',
+            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(account_response.status_code, 400)
@@ -716,7 +743,7 @@ class InvestmentFxRateProviderTests(SimpleTestCase):
         self.assertEqual(quote.base_currency, 'RUB')
         self.assertEqual(quote.quote_currency, 'RUB')
 
-    def test_cbr_provider_returns_usd_and_eur_rates(self):
+    def test_cbr_provider_returns_cross_currency_rates(self):
         payload = (
             '<ValCurs Date="10.05.2026">'
             '<Valute><CharCode>USD</CharCode><Nominal>1</Nominal><Value>91,2500</Value></Valute>'
@@ -727,12 +754,12 @@ class InvestmentFxRateProviderTests(SimpleTestCase):
         provider = CbrFxRateProvider(base_url='https://rates.example/cbr.xml', timeout=4, opener=opener)
 
         usd_quote = provider.get_rate('USD', 'RUB')
-        eur_quote = provider.get_rate('EUR', 'RUB')
+        eur_quote = provider.get_rate('EUR', 'USD')
 
         self.assertEqual(opener.request_url, 'https://rates.example/cbr.xml')
         self.assertEqual(opener.timeout, 4)
         self.assertEqual(usd_quote.rate, Decimal('91.2500'))
-        self.assertEqual(eur_quote.rate, Decimal('101.5000'))
+        self.assertEqual(eur_quote.rate, Decimal('101.5000') / Decimal('91.2500'))
         self.assertEqual(usd_quote.source, 'cbr')
 
     def test_cbr_provider_raises_controlled_error_for_missing_currency(self):
@@ -742,11 +769,14 @@ class InvestmentFxRateProviderTests(SimpleTestCase):
         with self.assertRaises(FxRateProviderError):
             provider.get_rate('EUR', 'RUB')
 
-    def test_cbr_provider_rejects_non_rub_quote_currency(self):
+    def test_cbr_provider_returns_one_for_same_currency_without_fetching(self):
         provider = CbrFxRateProvider(opener=_FakeOpener('<ValCurs></ValCurs>'))
 
-        with self.assertRaises(FxRateProviderError):
-            provider.get_rate('USD', 'EUR')
+        quote = provider.get_rate('USD', 'USD')
+
+        self.assertEqual(quote.rate, Decimal('1'))
+        self.assertEqual(quote.base_currency, 'USD')
+        self.assertEqual(quote.quote_currency, 'USD')
 
     @override_settings(INVESTMENT_FX_PROVIDER='cbr')
     def test_fx_provider_factory_reads_settings(self):

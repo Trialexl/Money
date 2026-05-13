@@ -19,16 +19,16 @@ class PositionState:
     instrument_ticker: str
     instrument_name: str
     quantity: Decimal = ZERO_AMOUNT
-    cost_basis_rub: Decimal = ZERO_AMOUNT
-    realized_pl_rub: Decimal = ZERO_AMOUNT
-    bought_rub: Decimal = ZERO_AMOUNT
-    sold_rub: Decimal = ZERO_AMOUNT
+    cost_basis_usd: Decimal = ZERO_AMOUNT
+    realized_pl_usd: Decimal = ZERO_AMOUNT
+    bought_usd: Decimal = ZERO_AMOUNT
+    sold_usd: Decimal = ZERO_AMOUNT
 
     @property
-    def average_buy_price_rub(self):
+    def average_buy_price_usd(self):
         if self.quantity == ZERO_AMOUNT:
             return ZERO_AMOUNT
-        return self.cost_basis_rub / self.quantity
+        return self.cost_basis_usd / self.quantity
 
 
 def _money(value):
@@ -106,30 +106,30 @@ def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_o
             positions[instrument.id] = state
 
         quantity = operation.quantity or ZERO_AMOUNT
-        amount_rub = operation.amount_rub or ZERO_AMOUNT
-        fee_rub = operation.fee_rub or ZERO_AMOUNT
+        amount_usd = operation.amount_usd or ZERO_AMOUNT
+        fee_usd = operation.fee_usd or ZERO_AMOUNT
 
         if operation.operation_type == InvestmentOperation.TYPE_BUY:
             state.quantity += quantity
-            state.cost_basis_rub += amount_rub + fee_rub
-            state.bought_rub += amount_rub + fee_rub
+            state.cost_basis_usd += amount_usd + fee_usd
+            state.bought_usd += amount_usd + fee_usd
         elif operation.operation_type == InvestmentOperation.TYPE_SELL:
             if quantity > state.quantity:
                 raise ValueError(f'Продажа {instrument.ticker} превышает текущий остаток.')
-            average_price = state.average_buy_price_rub
+            average_price = state.average_buy_price_usd
             sold_cost_basis = average_price * quantity
-            proceeds = amount_rub - fee_rub
+            proceeds = amount_usd - fee_usd
             state.quantity -= quantity
-            state.cost_basis_rub -= sold_cost_basis
-            state.realized_pl_rub += proceeds - sold_cost_basis
-            state.sold_rub += proceeds
+            state.cost_basis_usd -= sold_cost_basis
+            state.realized_pl_usd += proceeds - sold_cost_basis
+            state.sold_usd += proceeds
             if state.quantity == ZERO_AMOUNT:
-                state.cost_basis_rub = ZERO_AMOUNT
+                state.cost_basis_usd = ZERO_AMOUNT
         elif operation.operation_type == InvestmentOperation.TYPE_CORRECTION:
             state.quantity += quantity
-            state.cost_basis_rub += amount_rub
+            state.cost_basis_usd += amount_usd
             if state.quantity == ZERO_AMOUNT:
-                state.cost_basis_rub = ZERO_AMOUNT
+                state.cost_basis_usd = ZERO_AMOUNT
         elif operation.operation_type == InvestmentOperation.TYPE_TRANSFER:
             # Перевод между инвестиционными счетами не меняет агрегированную позицию портфеля.
             continue
@@ -145,29 +145,29 @@ def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_o
         if not include_zero and state.quantity == ZERO_AMOUNT:
             continue
         snapshot = latest_prices.get(instrument_id)
-        latest_price_rub = _money(snapshot.price_rub) if snapshot is not None else None
-        current_value_rub = _money(latest_price_rub * state.quantity) if latest_price_rub is not None and state.quantity != ZERO_AMOUNT else None
-        unrealized_pl_rub = _money(current_value_rub - state.cost_basis_rub) if current_value_rub is not None else None
-        total_pl_rub = _money(state.realized_pl_rub + (unrealized_pl_rub or ZERO_AMOUNT))
+        latest_price_usd = _money(snapshot.price_usd) if snapshot is not None else None
+        current_value_usd = _money(latest_price_usd * state.quantity) if latest_price_usd is not None and state.quantity != ZERO_AMOUNT else None
+        unrealized_pl_usd = _money(current_value_usd - state.cost_basis_usd) if current_value_usd is not None else None
+        total_pl_usd = _money(state.realized_pl_usd + (unrealized_pl_usd or ZERO_AMOUNT))
         return_percent = None
-        if unrealized_pl_rub is not None and state.cost_basis_rub != ZERO_AMOUNT:
-            return_percent = _percent((total_pl_rub / state.cost_basis_rub) * Decimal('100'))
+        if unrealized_pl_usd is not None and state.cost_basis_usd != ZERO_AMOUNT:
+            return_percent = _percent((total_pl_usd / state.cost_basis_usd) * Decimal('100'))
         result.append({
             'instrument_id': state.instrument_id,
             'instrument_ticker': state.instrument_ticker,
             'instrument_name': state.instrument_name,
             'quantity': state.quantity,
-            'cost_basis_rub': _money(state.cost_basis_rub),
-            'average_buy_price_rub': _money(state.average_buy_price_rub),
-            'latest_price_rub': latest_price_rub,
+            'cost_basis_usd': _money(state.cost_basis_usd),
+            'average_buy_price_usd': _money(state.average_buy_price_usd),
+            'latest_price_usd': latest_price_usd,
             'latest_price_at': snapshot.captured_at if snapshot is not None else None,
-            'current_value_rub': current_value_rub,
-            'realized_pl_rub': _money(state.realized_pl_rub),
-            'unrealized_pl_rub': unrealized_pl_rub,
-            'total_pl_rub': total_pl_rub,
+            'current_value_usd': current_value_usd,
+            'realized_pl_usd': _money(state.realized_pl_usd),
+            'unrealized_pl_usd': unrealized_pl_usd,
+            'total_pl_usd': total_pl_usd,
             'return_percent': return_percent,
-            'bought_rub': _money(state.bought_rub),
-            'sold_rub': _money(state.sold_rub),
+            'bought_usd': _money(state.bought_usd),
+            'sold_usd': _money(state.sold_usd),
         })
 
     if include_targets:
@@ -180,31 +180,31 @@ def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_o
                 'instrument_ticker': allocation.instrument.ticker,
                 'instrument_name': allocation.instrument.name,
                 'quantity': ZERO_AMOUNT,
-                'cost_basis_rub': ZERO_AMOUNT,
-                'average_buy_price_rub': ZERO_AMOUNT,
-                'latest_price_rub': None,
+                'cost_basis_usd': ZERO_AMOUNT,
+                'average_buy_price_usd': ZERO_AMOUNT,
+                'latest_price_usd': None,
                 'latest_price_at': None,
-                'current_value_rub': ZERO_AMOUNT,
-                'realized_pl_rub': ZERO_AMOUNT,
-                'unrealized_pl_rub': ZERO_AMOUNT,
-                'total_pl_rub': ZERO_AMOUNT,
+                'current_value_usd': ZERO_AMOUNT,
+                'realized_pl_usd': ZERO_AMOUNT,
+                'unrealized_pl_usd': ZERO_AMOUNT,
+                'total_pl_usd': ZERO_AMOUNT,
                 'return_percent': None,
-                'bought_rub': ZERO_AMOUNT,
-                'sold_rub': ZERO_AMOUNT,
+                'bought_usd': ZERO_AMOUNT,
+                'sold_usd': ZERO_AMOUNT,
             })
 
     total_current_value = sum(
-        (row['current_value_rub'] for row in result if row['current_value_rub'] is not None),
+        (row['current_value_usd'] for row in result if row['current_value_usd'] is not None),
         ZERO_AMOUNT,
     )
     for row in result:
         allocation = target_allocations.get(row['instrument_id'])
-        current_value_rub = row['current_value_rub'] or ZERO_AMOUNT
+        current_value_usd = row['current_value_usd'] or ZERO_AMOUNT
         target_percent = allocation.target_percent if allocation is not None else None
         tolerance_percent = allocation.tolerance_percent if allocation is not None else None
         row['allocation_percent'] = (
-            _percent((row['current_value_rub'] / total_current_value) * Decimal('100'))
-            if row['current_value_rub'] is not None and total_current_value != ZERO_AMOUNT
+            _percent((row['current_value_usd'] / total_current_value) * Decimal('100'))
+            if row['current_value_usd'] is not None and total_current_value != ZERO_AMOUNT
             else None
         )
         row['target_allocation_percent'] = target_percent
@@ -214,24 +214,24 @@ def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_o
             if target_percent is not None
             else None
         )
-        target_value_rub = _money((total_current_value * target_percent / Decimal('100'))) if target_percent is not None else None
-        allocation_deviation_rub = _money(current_value_rub - target_value_rub) if target_value_rub is not None else None
-        row['target_value_rub'] = target_value_rub
-        row['allocation_deviation_rub'] = allocation_deviation_rub
+        target_value_usd = _money((total_current_value * target_percent / Decimal('100'))) if target_percent is not None else None
+        allocation_deviation_usd = _money(current_value_usd - target_value_usd) if target_value_usd is not None else None
+        row['target_value_usd'] = target_value_usd
+        row['allocation_deviation_usd'] = allocation_deviation_usd
         row['is_within_tolerance'] = (
             abs(row['allocation_deviation_percent']) <= tolerance_percent
             if row['allocation_deviation_percent'] is not None and tolerance_percent is not None
             else None
         )
-        if allocation_deviation_rub is None or allocation_deviation_rub == ZERO_AMOUNT:
+        if allocation_deviation_usd is None or allocation_deviation_usd == ZERO_AMOUNT:
             row['rebalance_action'] = 'hold'
-            row['rebalance_amount_rub'] = ZERO_AMOUNT
-        elif allocation_deviation_rub > ZERO_AMOUNT:
+            row['rebalance_amount_usd'] = ZERO_AMOUNT
+        elif allocation_deviation_usd > ZERO_AMOUNT:
             row['rebalance_action'] = 'sell'
-            row['rebalance_amount_rub'] = allocation_deviation_rub
+            row['rebalance_amount_usd'] = allocation_deviation_usd
         else:
             row['rebalance_action'] = 'buy'
-            row['rebalance_amount_rub'] = abs(allocation_deviation_rub)
+            row['rebalance_amount_usd'] = abs(allocation_deviation_usd)
 
     return sorted(result, key=lambda row: row['instrument_ticker'])
 
@@ -264,40 +264,40 @@ def calculate_portfolio_totals(portfolio, *, as_of=None):
     valuation_complete = True
 
     for position in positions:
-        totals['cost_basis_rub'] += position['cost_basis_rub']
-        totals['realized_pl_rub'] += position['realized_pl_rub']
-        if position['current_value_rub'] is None and position['quantity'] != ZERO_AMOUNT:
+        totals['cost_basis_usd'] += position['cost_basis_usd']
+        totals['realized_pl_usd'] += position['realized_pl_usd']
+        if position['current_value_usd'] is None and position['quantity'] != ZERO_AMOUNT:
             valuation_complete = False
-        if position['current_value_rub'] is not None:
-            totals['current_value_rub'] += position['current_value_rub']
-        if position['unrealized_pl_rub'] is not None:
-            totals['unrealized_pl_rub'] += position['unrealized_pl_rub']
-        totals['bought_rub'] += position['bought_rub']
-        totals['sold_rub'] += position['sold_rub']
+        if position['current_value_usd'] is not None:
+            totals['current_value_usd'] += position['current_value_usd']
+        if position['unrealized_pl_usd'] is not None:
+            totals['unrealized_pl_usd'] += position['unrealized_pl_usd']
+        totals['bought_usd'] += position['bought_usd']
+        totals['sold_usd'] += position['sold_usd']
 
-    total_pl_rub = totals['realized_pl_rub'] + totals['unrealized_pl_rub']
+    total_pl_usd = totals['realized_pl_usd'] + totals['unrealized_pl_usd']
     return_percent = None
-    if valuation_complete and totals['cost_basis_rub'] != ZERO_AMOUNT:
-        return_percent = _percent((total_pl_rub / totals['cost_basis_rub']) * Decimal('100'))
+    if valuation_complete and totals['cost_basis_usd'] != ZERO_AMOUNT:
+        return_percent = _percent((total_pl_usd / totals['cost_basis_usd']) * Decimal('100'))
     largest_asset = None
-    positions_with_value = [position for position in positions if position['current_value_rub'] is not None]
+    positions_with_value = [position for position in positions if position['current_value_usd'] is not None]
     if positions_with_value:
-        largest_asset = max(positions_with_value, key=lambda position: position['current_value_rub'])
+        largest_asset = max(positions_with_value, key=lambda position: position['current_value_usd'])
     latest_price_at = None
     latest_price_dates = [position['latest_price_at'] for position in positions if position['latest_price_at'] is not None]
     if latest_price_dates:
         latest_price_at = max(latest_price_dates)
 
     return {
-        'cost_basis_rub': _money(totals['cost_basis_rub']),
-        'current_value_rub': _money(totals['current_value_rub']),
-        'realized_pl_rub': _money(totals['realized_pl_rub']),
-        'unrealized_pl_rub': _money(totals['unrealized_pl_rub']),
-        'total_pl_rub': _money(total_pl_rub),
+        'cost_basis_usd': _money(totals['cost_basis_usd']),
+        'current_value_usd': _money(totals['current_value_usd']),
+        'realized_pl_usd': _money(totals['realized_pl_usd']),
+        'unrealized_pl_usd': _money(totals['unrealized_pl_usd']),
+        'total_pl_usd': _money(total_pl_usd),
         'return_percent': return_percent,
         'valuation_complete': valuation_complete,
-        'bought_rub': _money(totals['bought_rub']),
-        'sold_rub': _money(totals['sold_rub']),
+        'bought_usd': _money(totals['bought_usd']),
+        'sold_usd': _money(totals['sold_usd']),
         'largest_asset': largest_asset,
         'latest_price_at': latest_price_at,
         'positions': positions,
@@ -356,8 +356,8 @@ def calculate_rebalance_status(portfolio):
     positions = calculate_positions(portfolio, include_zero=True, include_targets=True)
     return {
         'portfolio_id': str(portfolio.id),
-        'current_value_rub': _money(sum(
-            (position['current_value_rub'] for position in positions if position['current_value_rub'] is not None),
+        'current_value_usd': _money(sum(
+            (position['current_value_usd'] for position in positions if position['current_value_usd'] is not None),
             ZERO_AMOUNT,
         )),
         'positions': positions,
@@ -369,13 +369,13 @@ def _performance_totals_for_cutoff(portfolio, cutoff, *, label):
     totals = calculate_portfolio_totals(portfolio, as_of=cutoff)
     return {
         'label': label,
-        'cost_basis_rub': totals['cost_basis_rub'],
-        'current_value_rub': totals['current_value_rub'],
-        'realized_pl_rub': totals['realized_pl_rub'],
-        'unrealized_pl_rub': totals['unrealized_pl_rub'],
-        'total_pl_rub': totals['total_pl_rub'],
-        'bought_rub': totals['bought_rub'],
-        'sold_rub': totals['sold_rub'],
+        'cost_basis_usd': totals['cost_basis_usd'],
+        'current_value_usd': totals['current_value_usd'],
+        'realized_pl_usd': totals['realized_pl_usd'],
+        'unrealized_pl_usd': totals['unrealized_pl_usd'],
+        'total_pl_usd': totals['total_pl_usd'],
+        'bought_usd': totals['bought_usd'],
+        'sold_usd': totals['sold_usd'],
         'valuation_complete': totals['valuation_complete'],
     }
 
@@ -399,9 +399,9 @@ def refresh_price_snapshots(*, price_provider=None, fx_provider=None, instrument
             fx_rate = Decimal('1')
             fx_snapshot_id = None
 
-            if price_currency != 'RUB':
+            if price_currency != 'USD':
                 if price_currency not in fx_cache:
-                    fx_quote = fx_provider.get_rate(price_currency, 'RUB')
+                    fx_quote = fx_provider.get_rate(price_currency, 'USD')
                     fx_snapshot = FxRateSnapshot.objects.create(
                         captured_at=captured_at,
                         base_currency=fx_quote.base_currency,
@@ -417,8 +417,8 @@ def refresh_price_snapshots(*, price_provider=None, fx_provider=None, instrument
                 captured_at=captured_at,
                 price=price_quote.price,
                 price_currency=price_currency,
-                fx_rate_to_rub=fx_rate,
-                price_rub=_money(price_quote.price * fx_rate),
+                fx_rate_to_usd=fx_rate,
+                price_usd=_money(price_quote.price * fx_rate),
                 source=price_quote.source,
             )
             results.append({
@@ -429,8 +429,8 @@ def refresh_price_snapshots(*, price_provider=None, fx_provider=None, instrument
                 'fx_rate_snapshot_id': fx_snapshot_id,
                 'price': str(price_quote.price),
                 'price_currency': price_currency,
-                'fx_rate_to_rub': str(fx_rate),
-                'price_rub': f'{snapshot.price_rub:.2f}',
+                'fx_rate_to_usd': str(fx_rate),
+                'price_usd': f'{snapshot.price_usd:.2f}',
                 'source': price_quote.source,
             })
         except (PriceProviderError, FxRateProviderError) as exc:

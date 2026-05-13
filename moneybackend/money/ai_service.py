@@ -412,6 +412,16 @@ def _format_compact_money_whole(value):
     return f'{int(amount):,}'.replace(',', ' ') + ' ₽'
 
 
+def _format_compact_usd(value):
+    amount = _parse_amount(value)
+    if amount is None:
+        return '0 USD'
+    amount = amount.quantize(Decimal('0.01'))
+    if amount == amount.to_integral_value():
+        return f'{int(amount):,}'.replace(',', ' ') + ' USD'
+    return f'{amount:,.2f}'.replace(',', ' ') + ' USD'
+
+
 def _format_budget_deviation_percent(*, actual, budget):
     actual_amount = _parse_amount(actual) or ZERO_AMOUNT
     budget_amount = _parse_amount(budget)
@@ -1533,15 +1543,15 @@ def _serialize_investment_position(position):
         'instrument_ticker': position.get('instrument_ticker') or '',
         'instrument_name': position.get('instrument_name') or '',
         'quantity': str(position.get('quantity') or ZERO_AMOUNT),
-        'current_value_rub': _serialize_decimal(position.get('current_value_rub')),
-        'total_pl_rub': _serialize_decimal(position.get('total_pl_rub')),
+        'current_value_usd': _serialize_decimal(position.get('current_value_usd')),
+        'total_pl_usd': _serialize_decimal(position.get('total_pl_usd')),
         'return_percent': _serialize_decimal(position.get('return_percent')),
         'allocation_percent': _serialize_decimal(position.get('allocation_percent')),
         'target_allocation_percent': _serialize_decimal(position.get('target_allocation_percent')),
         'allocation_deviation_percent': _serialize_decimal(position.get('allocation_deviation_percent')),
-        'allocation_deviation_rub': _serialize_decimal(position.get('allocation_deviation_rub')),
+        'allocation_deviation_usd': _serialize_decimal(position.get('allocation_deviation_usd')),
         'rebalance_action': position.get('rebalance_action'),
-        'rebalance_amount_rub': _serialize_decimal(position.get('rebalance_amount_rub')),
+        'rebalance_amount_usd': _serialize_decimal(position.get('rebalance_amount_usd')),
         'is_within_tolerance': position.get('is_within_tolerance'),
     }
 
@@ -1626,19 +1636,19 @@ class AiOperationService:
         totals = calculate_portfolio_totals(portfolio)
         positions = sorted(
             totals.get('positions') or [],
-            key=lambda item: item.get('current_value_rub') or ZERO_AMOUNT,
+            key=lambda item: item.get('current_value_usd') or ZERO_AMOUNT,
             reverse=True,
         )
         lines = [
             f'💼 {portfolio.name}',
-            f'Стоимость: {_format_compact_money(totals["current_value_rub"])}',
-            f'Total P/L: {_format_compact_money(totals["total_pl_rub"])} ({_serialize_decimal(totals.get("return_percent")) or "н/д"}%)',
+            f'Стоимость: {_format_compact_usd(totals["current_value_usd"])}',
+            f'Total P/L: {_format_compact_usd(totals["total_pl_usd"])} ({_serialize_decimal(totals.get("return_percent")) or "н/д"}%)',
         ]
         if not totals.get('valuation_complete', True):
             lines.append('Есть активы без актуальной цены.')
         for index, position in enumerate(positions[:5], start=1):
-            value = _format_compact_money(position.get('current_value_rub'))
-            pl = _format_compact_money(position.get('total_pl_rub'))
+            value = _format_compact_usd(position.get('current_value_usd'))
+            pl = _format_compact_usd(position.get('total_pl_usd'))
             lines.append(f'{index}. {position["instrument_ticker"]}: {value} | P/L {pl}')
         return {
             'status': 'info',
@@ -1649,8 +1659,8 @@ class AiOperationService:
             'investment_overview': {
                 'portfolio_id': str(portfolio.id),
                 'portfolio_name': portfolio.name,
-                'current_value_rub': _serialize_decimal(totals.get('current_value_rub')),
-                'total_pl_rub': _serialize_decimal(totals.get('total_pl_rub')),
+                'current_value_usd': _serialize_decimal(totals.get('current_value_usd')),
+                'total_pl_usd': _serialize_decimal(totals.get('total_pl_usd')),
                 'return_percent': _serialize_decimal(totals.get('return_percent')),
                 'valuation_complete': bool(totals.get('valuation_complete', True)),
                 'positions': [_serialize_investment_position(position) for position in positions],
@@ -1690,21 +1700,21 @@ class AiOperationService:
                 'instrument_ticker': instrument.ticker,
                 'instrument_name': instrument.name,
                 'quantity': ZERO_AMOUNT,
-                'current_value_rub': ZERO_AMOUNT,
-                'total_pl_rub': ZERO_AMOUNT,
+                'current_value_usd': ZERO_AMOUNT,
+                'total_pl_usd': ZERO_AMOUNT,
                 'return_percent': None,
             }
 
         value_text = (
             'нет цены'
-            if position.get('current_value_rub') is None
-            else _format_compact_money(position.get('current_value_rub'))
+            if position.get('current_value_usd') is None
+            else _format_compact_usd(position.get('current_value_usd'))
         )
         lines = [
             f'🪙 {position["instrument_ticker"]}',
             f'Количество: {position.get("quantity")}',
             f'Стоимость: {value_text}',
-            f'Total P/L: {_format_compact_money(position.get("total_pl_rub"))} ({_serialize_decimal(position.get("return_percent")) or "н/д"}%)',
+            f'Total P/L: {_format_compact_usd(position.get("total_pl_usd"))} ({_serialize_decimal(position.get("return_percent")) or "н/д"}%)',
         ]
         return {
             'status': 'info',
@@ -1731,12 +1741,12 @@ class AiOperationService:
             if position.get('target_allocation_percent') is not None
         ]
         positions.sort(
-            key=lambda item: abs(item.get('allocation_deviation_rub') or ZERO_AMOUNT),
+            key=lambda item: abs(item.get('allocation_deviation_usd') or ZERO_AMOUNT),
             reverse=True,
         )
         lines = [
             f'🎯 Ребаланс: {portfolio.name}',
-            f'Стоимость: {_format_compact_money(status["current_value_rub"])}',
+            f'Стоимость: {_format_compact_usd(status["current_value_usd"])}',
         ]
         if not positions:
             lines.append('Целевые доли не заданы.')
@@ -1751,7 +1761,7 @@ class AiOperationService:
                     f'{index}. {position["instrument_ticker"]}: '
                     f'{_serialize_decimal(position.get("allocation_percent")) or "0.00"}% / '
                     f'{_serialize_decimal(position.get("target_allocation_percent")) or "0.00"}% | '
-                    f'{action} {_format_compact_money(position.get("rebalance_amount_rub"))}'
+                    f'{action} {_format_compact_usd(position.get("rebalance_amount_usd"))}'
                 )
         return {
             'status': 'info',
@@ -1761,7 +1771,7 @@ class AiOperationService:
             'reply_text': '\n'.join(lines),
             'investment_rebalance': {
                 'portfolio_id': str(portfolio.id),
-                'current_value_rub': _serialize_decimal(status.get('current_value_rub')),
+                'current_value_usd': _serialize_decimal(status.get('current_value_usd')),
                 'positions': [_serialize_investment_position(position) for position in positions],
             },
             'parsed': normalized,

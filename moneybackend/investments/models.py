@@ -11,6 +11,8 @@ from money.utils import generate_document_number
 
 
 ZERO_AMOUNT = Decimal('0')
+SUPPORTED_CURRENCIES = ('USD', 'EUR', 'RUB')
+CURRENCY_CHOICES = [(currency, currency) for currency in SUPPORTED_CURRENCIES]
 
 
 class Instrument(models.Model):
@@ -57,9 +59,9 @@ class InstrumentPriceSnapshot(models.Model):
     instrument = models.ForeignKey(Instrument, on_delete=models.CASCADE, related_name='price_snapshots')
     captured_at = models.DateTimeField(default=timezone.now)
     price = models.DecimalField(max_digits=24, decimal_places=8)
-    price_currency = models.CharField(max_length=10, default='USD')
-    fx_rate_to_rub = models.DecimalField(max_digits=18, decimal_places=8, default=Decimal('1'))
-    price_rub = models.DecimalField(max_digits=18, decimal_places=2)
+    price_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
+    fx_rate_to_usd = models.DecimalField(max_digits=18, decimal_places=8, default=Decimal('1'))
+    price_usd = models.DecimalField(max_digits=18, decimal_places=2)
     source = models.CharField(max_length=50, default=SOURCE_MANUAL)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -77,7 +79,7 @@ class InstrumentPriceSnapshot(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.instrument.ticker}: {self.price_rub} RUB'
+        return f'{self.instrument.ticker}: {self.price_usd} USD'
 
 
 class FxRateSnapshot(models.Model):
@@ -86,7 +88,7 @@ class FxRateSnapshot(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     captured_at = models.DateTimeField(default=timezone.now)
     base_currency = models.CharField(max_length=10)
-    quote_currency = models.CharField(max_length=10, default='RUB')
+    quote_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
     rate = models.DecimalField(max_digits=18, decimal_places=8)
     source = models.CharField(max_length=50, default=SOURCE_MANUAL)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -101,7 +103,7 @@ class FxRateSnapshot(models.Model):
 
     def save(self, *args, **kwargs):
         self.base_currency = (self.base_currency or '').strip().upper()
-        self.quote_currency = (self.quote_currency or 'RUB').strip().upper()
+        self.quote_currency = (self.quote_currency or 'USD').strip().upper()
         self.source = (self.source or self.SOURCE_MANUAL).strip()
         super().save(*args, **kwargs)
 
@@ -117,7 +119,7 @@ class InvestmentPortfolio(models.Model):
         related_name='investment_portfolios',
     )
     name = models.CharField(max_length=100)
-    base_currency = models.CharField(max_length=10, default='RUB')
+    base_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
     project = models.ForeignKey('money.Project', on_delete=models.PROTECT, null=True, blank=True)
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -136,7 +138,7 @@ class InvestmentPortfolio(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        self.base_currency = 'RUB'
+        self.base_currency = 'USD'
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -189,7 +191,7 @@ class InvestmentAccount(models.Model):
     portfolio = models.ForeignKey(InvestmentPortfolio, on_delete=models.PROTECT, related_name='accounts')
     name = models.CharField(max_length=100)
     type = models.CharField(max_length=20, choices=TYPES, default=TYPE_MANUAL)
-    currency = models.CharField(max_length=10, default='RUB')
+    currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
     hidden = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -203,7 +205,7 @@ class InvestmentAccount(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        self.currency = (self.currency or 'RUB').strip().upper()
+        self.currency = (self.currency or 'USD').strip().upper()
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -238,14 +240,14 @@ class InvestmentOperation(models.Model):
     operation_type = models.CharField(max_length=30, choices=TYPES)
     quantity = models.DecimalField(max_digits=24, decimal_places=10)
     price = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
-    price_currency = models.CharField(max_length=10, default='RUB')
+    price_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
     amount = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
-    amount_currency = models.CharField(max_length=10, default='RUB')
-    amount_rub = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
-    fx_rate_to_rub = models.DecimalField(max_digits=18, decimal_places=8, default=Decimal('1'))
+    amount_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
+    amount_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    fx_rate_to_usd = models.DecimalField(max_digits=18, decimal_places=8, default=Decimal('1'))
     fee_amount = models.DecimalField(max_digits=24, decimal_places=8, default=ZERO_AMOUNT)
-    fee_currency = models.CharField(max_length=10, default='RUB')
-    fee_rub = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    fee_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
+    fee_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
     comment = models.CharField(max_length=200, blank=True, default='')
     deleted = models.BooleanField(default=False)
     posted = models.BooleanField(default=True)
@@ -279,8 +281,8 @@ class InvestmentOperation(models.Model):
         if self.operation_type in (self.TYPE_BUY, self.TYPE_SELL):
             if self.price is None or self.price <= ZERO_AMOUNT:
                 errors['price'] = 'Укажите положительную цену.'
-            if self.amount_rub <= ZERO_AMOUNT:
-                errors['amount_rub'] = 'Укажите положительную сумму в RUB.'
+            if self.amount_usd <= ZERO_AMOUNT:
+                errors['amount_usd'] = 'Укажите положительную сумму в USD.'
         if self.operation_type == self.TYPE_CORRECTION and self.account_to is not None:
             errors['account_to'] = 'Корректировка выполняется по одному счету.'
 
@@ -290,9 +292,18 @@ class InvestmentOperation(models.Model):
     def save(self, *args, **kwargs):
         if not self.number:
             self.number = generate_document_number('INV', InvestmentOperation)
-        self.price_currency = (self.price_currency or 'RUB').strip().upper()
-        self.amount_currency = (self.amount_currency or 'RUB').strip().upper()
-        self.fee_currency = (self.fee_currency or 'RUB').strip().upper()
+        self.price_currency = 'USD'
+        self.amount_currency = 'USD'
+        self.fee_currency = 'USD'
+        self.fx_rate_to_usd = Decimal('1')
+        if (self.amount_usd is None or self.amount_usd == ZERO_AMOUNT) and self.amount not in (None, ZERO_AMOUNT):
+            self.amount_usd = self.amount
+        if self.amount_usd is not None:
+            self.amount = self.amount_usd
+        if (self.fee_usd is None or self.fee_usd == ZERO_AMOUNT) and self.fee_amount not in (None, ZERO_AMOUNT):
+            self.fee_usd = self.fee_amount
+        if self.fee_usd is not None:
+            self.fee_amount = self.fee_usd
         super().save(*args, **kwargs)
 
     def __str__(self):

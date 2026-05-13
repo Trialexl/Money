@@ -22,7 +22,7 @@ class FxRateQuote:
 class BaseFxRateProvider:
     source = 'base'
 
-    def get_rate(self, base_currency, quote_currency='RUB'):
+    def get_rate(self, base_currency, quote_currency='USD'):
         raise NotImplementedError
 
 
@@ -35,9 +35,9 @@ class StaticFxRateProvider(BaseFxRateProvider):
             for (base, quote), rate in rates.items()
         }
 
-    def get_rate(self, base_currency, quote_currency='RUB'):
+    def get_rate(self, base_currency, quote_currency='USD'):
         base = str(base_currency or '').strip().upper()
-        quote = str(quote_currency or 'RUB').strip().upper()
+        quote = str(quote_currency or 'USD').strip().upper()
         if base == quote:
             return FxRateQuote(base_currency=base, quote_currency=quote, rate=Decimal('1'), source=self.source)
         try:
@@ -62,22 +62,21 @@ class CbrFxRateProvider(BaseFxRateProvider):
         self.opener = opener or urlrequest.urlopen
         self._rates = None
 
-    def get_rate(self, base_currency, quote_currency='RUB'):
+    def get_rate(self, base_currency, quote_currency='USD'):
         base = str(base_currency or '').strip().upper()
-        quote = str(quote_currency or 'RUB').strip().upper()
+        quote = str(quote_currency or 'USD').strip().upper()
         if not base:
             raise FxRateProviderError('Не указана базовая валюта курса.')
         if base == quote:
             return FxRateQuote(base_currency=base, quote_currency=quote, rate=Decimal('1'), source=self.source)
-        if quote != 'RUB':
-            raise FxRateProviderError(f'CBR provider поддерживает только курсы к RUB, получено {base}/{quote}.')
 
         rates = self._get_rates()
         try:
-            rate = rates[base]
+            base_to_rub = rates[base]
+            quote_to_rub = rates[quote]
         except KeyError as exc:
-            raise FxRateProviderError(f'CBR provider не вернул курс {base}/RUB.') from exc
-        return FxRateQuote(base_currency=base, quote_currency='RUB', rate=rate, source=self.source)
+            raise FxRateProviderError(f'CBR provider не вернул курс для пары {base}/{quote}.') from exc
+        return FxRateQuote(base_currency=base, quote_currency=quote, rate=base_to_rub / quote_to_rub, source=self.source)
 
     def _get_rates(self):
         if self._rates is not None:
@@ -94,7 +93,7 @@ class CbrFxRateProvider(BaseFxRateProvider):
         except (HTTPError, URLError, TimeoutError, OSError, ET.ParseError) as exc:
             raise FxRateProviderError('Не удалось получить курсы CBR.') from exc
 
-        rates = {}
+        rates = {'RUB': Decimal('1')}
         for node in root.findall('Valute'):
             code_node = node.find('CharCode')
             nominal_node = node.find('Nominal')

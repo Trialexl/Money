@@ -2355,8 +2355,8 @@ paths:
   /api/v1/investment/fx-rates/:
     get:
       operationId: v1_investment_fx_rates_list
-      description: Снимки валютных курсов. Используются для переоценки инструментов
-        в RUB.
+      description: Снимки валютных курсов. Используются для пересчета USD-учета в
+        валюту отображения.
       parameters:
       - in: query
         name: base_currency
@@ -2379,7 +2379,7 @@ paths:
         name: quote_currency
         schema:
           type: string
-        description: Валюта котировки, по умолчанию RUB.
+        description: Валюта котировки, по умолчанию USD.
       - in: query
         name: source
         schema:
@@ -5355,6 +5355,16 @@ components:
         edited_message:
           type: object
           additionalProperties: {}
+    AmountCurrencyEnum:
+      enum:
+      - USD
+      - EUR
+      - RUB
+      type: string
+      description: |-
+        * `USD` - USD
+        * `EUR` - EUR
+        * `RUB` - RUB
     AutoPayment:
       type: object
       properties:
@@ -5489,6 +5499,16 @@ components:
           nullable: true
       required:
       - amount
+    BaseCurrencyEnum:
+      enum:
+      - USD
+      - EUR
+      - RUB
+      type: string
+      description: |-
+        * `USD` - USD
+        * `EUR` - EUR
+        * `RUB` - RUB
     Budget:
       type: object
       properties:
@@ -6010,6 +6030,16 @@ components:
       required:
       - expense
       - income
+    CurrencyEnum:
+      enum:
+      - USD
+      - EUR
+      - RUB
+      type: string
+      description: |-
+        * `USD` - USD
+        * `EUR` - EUR
+        * `RUB` - RUB
     CustomUser:
       type: object
       properties:
@@ -6499,6 +6529,16 @@ components:
           nullable: true
       required:
       - amount
+    FeeCurrencyEnum:
+      enum:
+      - USD
+      - EUR
+      - RUB
+      type: string
+      description: |-
+        * `USD` - USD
+        * `EUR` - EUR
+        * `RUB` - RUB
     FlowOfFunds:
       type: object
       description: Сериализатор для регистра движения средств
@@ -6577,8 +6617,7 @@ components:
           type: string
           maxLength: 10
         quote_currency:
-          type: string
-          maxLength: 10
+          $ref: '#/components/schemas/QuoteCurrencyEnum'
         rate:
           type: string
           format: decimal
@@ -6606,9 +6645,7 @@ components:
           minLength: 1
           maxLength: 10
         quote_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
+          $ref: '#/components/schemas/QuoteCurrencyEnum'
         rate:
           type: string
           format: decimal
@@ -6685,13 +6722,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
         price_currency:
-          type: string
-          maxLength: 10
-        fx_rate_to_rub:
+          $ref: '#/components/schemas/PriceCurrencyEnum'
+        fx_rate_to_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
-        price_rub:
+        price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -6723,14 +6759,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
         price_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
-        fx_rate_to_rub:
+          $ref: '#/components/schemas/PriceCurrencyEnum'
+        fx_rate_to_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
-        price_rub:
+        price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -6797,8 +6831,7 @@ components:
         type:
           $ref: '#/components/schemas/InvestmentAccountTypeEnum'
         currency:
-          type: string
-          maxLength: 10
+          $ref: '#/components/schemas/CurrencyEnum'
         hidden:
           type: boolean
         created_at:
@@ -6829,9 +6862,7 @@ components:
         type:
           $ref: '#/components/schemas/InvestmentAccountTypeEnum'
         currency:
-          type: string
-          minLength: 1
-          maxLength: 10
+          $ref: '#/components/schemas/CurrencyEnum'
         hidden:
           type: boolean
       required:
@@ -6902,21 +6933,19 @@ components:
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
         price_currency:
-          type: string
-          maxLength: 10
+          $ref: '#/components/schemas/PriceCurrencyEnum'
         amount:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
         amount_currency:
-          type: string
-          maxLength: 10
-        amount_rub:
+          $ref: '#/components/schemas/AmountCurrencyEnum'
+        amount_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        fx_rate_to_rub:
+        fx_rate_to_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
@@ -6925,9 +6954,8 @@ components:
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
         fee_currency:
-          type: string
-          maxLength: 10
-        fee_rub:
+          $ref: '#/components/schemas/FeeCurrencyEnum'
+        fee_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -6991,23 +7019,19 @@ components:
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
         price_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
+          $ref: '#/components/schemas/PriceCurrencyEnum'
         amount:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
         amount_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
-        amount_rub:
+          $ref: '#/components/schemas/AmountCurrencyEnum'
+        amount_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        fx_rate_to_rub:
+        fx_rate_to_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
@@ -7016,10 +7040,8 @@ components:
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
         fee_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
-        fee_rub:
+          $ref: '#/components/schemas/FeeCurrencyEnum'
+        fee_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7077,48 +7099,48 @@ components:
         period_end:
           type: string
           format: date
-        cost_basis_rub:
+        cost_basis_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        current_value_rub:
+        current_value_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        realized_pl_rub:
+        realized_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        unrealized_pl_rub:
+        unrealized_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        total_pl_rub:
+        total_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        bought_rub:
+        bought_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        sold_rub:
+        sold_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
         valuation_complete:
           type: boolean
       required:
-      - bought_rub
-      - cost_basis_rub
-      - current_value_rub
+      - bought_usd
+      - cost_basis_usd
+      - current_value_usd
       - date
       - label
       - period_end
       - period_start
-      - realized_pl_rub
-      - sold_rub
-      - total_pl_rub
-      - unrealized_pl_rub
+      - realized_pl_usd
+      - sold_usd
+      - total_pl_usd
+      - unrealized_pl_usd
       - valuation_complete
     InvestmentPortfolio:
       type: object
@@ -7135,7 +7157,8 @@ components:
           type: string
           maxLength: 100
         base_currency:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/BaseCurrencyEnum'
           readOnly: true
         project:
           type: string
@@ -7163,23 +7186,23 @@ components:
       properties:
         portfolio:
           $ref: '#/components/schemas/InvestmentPortfolio'
-        cost_basis_rub:
+        cost_basis_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        current_value_rub:
+        current_value_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        realized_pl_rub:
+        realized_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        unrealized_pl_rub:
+        unrealized_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        total_pl_rub:
+        total_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7190,11 +7213,11 @@ components:
           nullable: true
         valuation_complete:
           type: boolean
-        bought_rub:
+        bought_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        sold_rub:
+        sold_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7211,18 +7234,18 @@ components:
           items:
             $ref: '#/components/schemas/InvestmentPosition'
       required:
-      - bought_rub
-      - cost_basis_rub
-      - current_value_rub
+      - bought_usd
+      - cost_basis_usd
+      - current_value_usd
       - largest_asset
       - latest_price_at
       - portfolio
       - positions
-      - realized_pl_rub
+      - realized_pl_usd
       - return_percent
-      - sold_rub
-      - total_pl_rub
-      - unrealized_pl_rub
+      - sold_usd
+      - total_pl_usd
+      - unrealized_pl_usd
       - valuation_complete
     InvestmentPortfolioRequest:
       type: object
@@ -7253,15 +7276,15 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,14}(?:\.\d{0,10})?$
-        cost_basis_rub:
+        cost_basis_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        average_buy_price_rub:
+        average_buy_price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        latest_price_rub:
+        latest_price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7270,21 +7293,21 @@ components:
           type: string
           format: date-time
           nullable: true
-        current_value_rub:
+        current_value_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
           nullable: true
-        realized_pl_rub:
+        realized_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        unrealized_pl_rub:
+        unrealized_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
           nullable: true
-        total_pl_rub:
+        total_pl_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7293,11 +7316,11 @@ components:
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
           nullable: true
-        bought_rub:
+        bought_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        sold_rub:
+        sold_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7321,12 +7344,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
           nullable: true
-        target_value_rub:
+        target_value_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
           nullable: true
-        allocation_deviation_rub:
+        allocation_deviation_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7334,7 +7357,7 @@ components:
         rebalance_action:
           type: string
           nullable: true
-        rebalance_amount_rub:
+        rebalance_amount_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7344,36 +7367,36 @@ components:
           nullable: true
       required:
       - allocation_deviation_percent
-      - allocation_deviation_rub
+      - allocation_deviation_usd
       - allocation_percent
-      - average_buy_price_rub
-      - bought_rub
-      - cost_basis_rub
-      - current_value_rub
+      - average_buy_price_usd
+      - bought_usd
+      - cost_basis_usd
+      - current_value_usd
       - instrument_id
       - instrument_name
       - instrument_ticker
       - is_within_tolerance
       - latest_price_at
-      - latest_price_rub
+      - latest_price_usd
       - quantity
-      - realized_pl_rub
+      - realized_pl_usd
       - rebalance_action
-      - rebalance_amount_rub
+      - rebalance_amount_usd
       - return_percent
-      - sold_rub
+      - sold_usd
       - target_allocation_percent
-      - target_value_rub
+      - target_value_usd
       - tolerance_percent
-      - total_pl_rub
-      - unrealized_pl_rub
+      - total_pl_usd
+      - unrealized_pl_usd
     InvestmentRebalanceStatus:
       type: object
       properties:
         portfolio_id:
           type: string
           format: uuid
-        current_value_rub:
+        current_value_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7384,7 +7407,7 @@ components:
         disclaimer:
           type: string
       required:
-      - current_value_rub
+      - current_value_usd
       - disclaimer
       - portfolio_id
       - positions
@@ -7839,9 +7862,7 @@ components:
           minLength: 1
           maxLength: 10
         quote_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
+          $ref: '#/components/schemas/QuoteCurrencyEnum'
         rate:
           type: string
           format: decimal
@@ -7864,14 +7885,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
         price_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
-        fx_rate_to_rub:
+          $ref: '#/components/schemas/PriceCurrencyEnum'
+        fx_rate_to_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
-        price_rub:
+        price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -7918,9 +7937,7 @@ components:
         type:
           $ref: '#/components/schemas/InvestmentAccountTypeEnum'
         currency:
-          type: string
-          minLength: 1
-          maxLength: 10
+          $ref: '#/components/schemas/CurrencyEnum'
         hidden:
           type: boolean
     PatchedInvestmentOperationRequest:
@@ -7954,23 +7971,19 @@ components:
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
         price_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
+          $ref: '#/components/schemas/PriceCurrencyEnum'
         amount:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
         amount_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
-        amount_rub:
+          $ref: '#/components/schemas/AmountCurrencyEnum'
+        amount_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        fx_rate_to_rub:
+        fx_rate_to_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
@@ -7979,10 +7992,8 @@ components:
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
         fee_currency:
-          type: string
-          minLength: 1
-          maxLength: 10
-        fee_rub:
+          $ref: '#/components/schemas/FeeCurrencyEnum'
+        fee_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
@@ -8139,6 +8150,16 @@ components:
           type: boolean
         hidden:
           type: boolean
+    PriceCurrencyEnum:
+      enum:
+      - USD
+      - EUR
+      - RUB
+      type: string
+      description: |-
+        * `USD` - USD
+        * `EUR` - EUR
+        * `RUB` - RUB
     ProfileCustomUser:
       type: object
       properties:
@@ -8221,6 +8242,16 @@ components:
           maxLength: 25
         deleted:
           type: boolean
+    QuoteCurrencyEnum:
+      enum:
+      - USD
+      - EUR
+      - RUB
+      type: string
+      description: |-
+        * `USD` - USD
+        * `EUR` - EUR
+        * `RUB` - RUB
     Receipt:
       type: object
       properties:

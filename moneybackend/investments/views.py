@@ -48,7 +48,7 @@ price_list_parameters = [
 
 fx_rate_list_parameters = [
     OpenApiParameter('base_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Базовая валюта, например USD.'),
-    OpenApiParameter('quote_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Валюта котировки, по умолчанию RUB.'),
+    OpenApiParameter('quote_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Валюта котировки, по умолчанию USD.'),
     OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка курса с YYYY-MM-DD.'),
     OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата снимка курса по YYYY-MM-DD включительно.'),
     OpenApiParameter('source', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Источник курса, например manual или cbr.'),
@@ -170,7 +170,7 @@ class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
 @extend_schema_view(
     list=extend_schema(
         parameters=fx_rate_list_parameters,
-        description='Снимки валютных курсов. Используются для переоценки инструментов в RUB.',
+        description='Снимки валютных курсов. Используются для пересчета USD-учета в валюту отображения.',
     ),
     create=extend_schema(description='Создать ручной снимок валютного курса.'),
     retrieve=extend_schema(description='Получить снимок валютного курса.'),
@@ -400,15 +400,15 @@ class InvestmentOverviewViewSet(viewsets.ViewSet):
         if portfolio is None:
             return Response({
                 'portfolio': None,
-                'cost_basis_rub': '0.00',
-                'current_value_rub': '0.00',
-                'realized_pl_rub': '0.00',
-                'unrealized_pl_rub': '0.00',
-                'total_pl_rub': '0.00',
+                'cost_basis_usd': '0.00',
+                'current_value_usd': '0.00',
+                'realized_pl_usd': '0.00',
+                'unrealized_pl_usd': '0.00',
+                'total_pl_usd': '0.00',
                 'return_percent': None,
                 'valuation_complete': True,
-                'bought_rub': '0.00',
-                'sold_rub': '0.00',
+                'bought_usd': '0.00',
+                'sold_usd': '0.00',
                 'positions': [],
             })
         return Response(serialize_portfolio_overview(portfolio))

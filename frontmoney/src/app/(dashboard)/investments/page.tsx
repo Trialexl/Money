@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { formatCurrency, formatDate } from "@/lib/formatters"
+import { formatDate } from "@/lib/formatters"
 import {
   InvestmentService,
   type FxRateSnapshot,
@@ -59,7 +59,8 @@ const rebalanceActionLabels: Record<string, string> = {
 
 type DisplayCurrency = "RUB" | "USD" | "EUR"
 
-const displayCurrencies: DisplayCurrency[] = ["RUB", "USD", "EUR"]
+const displayCurrencies: DisplayCurrency[] = ["USD", "EUR", "RUB"]
+const currencyOptions = displayCurrencies
 
 type InvestmentDialogState =
   | { type: "portfolio"; mode: "create" | "edit"; item?: InvestmentPortfolio }
@@ -130,13 +131,13 @@ function formatShortPerformanceLabel(value: string, groupBy: "day" | "month") {
 }
 
 function getDisplayRate(currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
-  if (currency === "RUB") {
+  if (currency === "USD") {
     return 1
   }
-  return fxRates.find((rate) => rate.base_currency === currency && rate.quote_currency === "RUB")?.rate ?? null
+  return fxRates.find((rate) => rate.base_currency === "USD" && rate.quote_currency === currency)?.rate ?? null
 }
 
-function convertRubAmount(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
+function convertUsdAmount(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
   if (amount === null || amount === undefined) {
     return null
   }
@@ -144,7 +145,7 @@ function convertRubAmount(amount: number | null | undefined, currency: DisplayCu
   if (!rate) {
     return null
   }
-  return currency === "RUB" ? amount : amount / rate
+  return currency === "USD" ? amount : amount * rate
 }
 
 function formatCurrencyValue(amount: number, currency: DisplayCurrency) {
@@ -156,7 +157,7 @@ function formatCurrencyValue(amount: number, currency: DisplayCurrency) {
 }
 
 function formatMoneyInCurrency(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
-  const converted = convertRubAmount(amount, currency, fxRates)
+  const converted = convertUsdAmount(amount, currency, fxRates)
   if (converted === null) {
     if (amount === null || amount === undefined) {
       return "нет цены"
@@ -198,6 +199,23 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
   )
 }
 
+function CurrencySelect({ value, onChange }: { value: string; onChange: (value: DisplayCurrency) => void }) {
+  return (
+    <Select value={value || "USD"} onValueChange={(nextValue) => onChange(nextValue as DisplayCurrency)}>
+      <SelectTrigger>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {currencyOptions.map((currency) => (
+          <SelectItem key={currency} value={currency}>
+            {currency}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 export default function InvestmentsPage() {
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<InvestmentDialogState>(null)
@@ -207,7 +225,7 @@ export default function InvestmentsPage() {
   const [operationDateTo, setOperationDateTo] = useState("")
   const [operationInstrument, setOperationInstrument] = useState("all")
   const [operationAccount, setOperationAccount] = useState("all")
-  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>("RUB")
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>("USD")
   const performancePeriod = useMemo(() => yearDateRange(), [])
 
   const overviewQuery = useQuery({
@@ -239,8 +257,8 @@ export default function InvestmentsPage() {
   })
   const fxRatesQuery = useQuery({
     queryKey: ["investment-fx-rates", displayCurrency],
-    queryFn: () => InvestmentService.getFxRates({ base_currency: displayCurrency, quote_currency: "RUB" }),
-    enabled: displayCurrency !== "RUB",
+    queryFn: () => InvestmentService.getFxRates({ base_currency: "USD", quote_currency: displayCurrency }),
+    enabled: displayCurrency !== "USD",
   })
   const activePortfolioId =
     overviewQuery.data?.portfolio?.id ??
@@ -359,7 +377,7 @@ export default function InvestmentsPage() {
   const canCreateOperation = Boolean(currentPortfolio && activeInstruments.length > 0 && currentPortfolioAccounts.length > 0)
   const fxRates = fxRatesQuery.data ?? []
   const money = (amount: number | null | undefined) => formatMoneyInCurrency(amount, displayCurrency, fxRates)
-  const hasDisplayRate = displayCurrency === "RUB" || Boolean(getDisplayRate(displayCurrency, fxRates))
+  const hasDisplayRate = displayCurrency === "USD" || Boolean(getDisplayRate(displayCurrency, fxRates))
   const targetAllocations = targetAllocationsQuery.data ?? []
   const rebalanceStatus = rebalanceQuery.data
   const targetAllocationByInstrument = new Map(targetAllocations.map((allocation) => [allocation.instrument, allocation]))
@@ -370,33 +388,33 @@ export default function InvestmentsPage() {
   const rebalancePositions = rebalanceStatus?.positions.filter(
     (position) =>
       position.target_allocation_percent !== null ||
-      (position.current_value_rub !== null && position.current_value_rub !== undefined && position.current_value_rub > 0),
+      (position.current_value_usd !== null && position.current_value_usd !== undefined && position.current_value_usd > 0),
   ) ?? []
   const performance = performanceQuery.data
   const performancePoints = performance ? [performance.opening, ...performance.points] : []
   const valueLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
-    y: convertRubAmount(point.current_value_rub, displayCurrency, fxRates) ?? 0,
+    y: convertUsdAmount(point.current_value_usd, displayCurrency, fxRates) ?? 0,
   }))
   const plLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
-    y: convertRubAmount(point.total_pl_rub, displayCurrency, fxRates) ?? 0,
+    y: convertUsdAmount(point.total_pl_usd, displayCurrency, fxRates) ?? 0,
   }))
   const operationTotals = operations.reduce(
     (totals, operation) => {
       if (operation.operation_type === "buy") {
-        totals.buy += operation.amount_rub
+        totals.buy += operation.amount_usd
       }
       if (operation.operation_type === "sell") {
-        totals.sell += operation.amount_rub
+        totals.sell += operation.amount_usd
       }
-      totals.fee += operation.fee_rub
+      totals.fee += operation.fee_usd
       return totals
     },
     { buy: 0, sell: 0, fee: 0 },
   )
   const exportOperationsCsv = () => {
-    const header = ["Дата", "Номер", "Тип", "Инструмент", "Счет", "Количество", "Сумма RUB", "Комиссия RUB", "Комментарий"]
+    const header = ["Дата", "Номер", "Тип", "Инструмент", "Счет", "Количество", "Сумма USD", "Комиссия USD", "Комментарий"]
     const rows = operations.map((operation) => [
       formatDate(operation.date),
       operation.number ?? "",
@@ -404,8 +422,8 @@ export default function InvestmentsPage() {
       operation.instrument_ticker ?? "",
       operation.account_name ?? "",
       operation.quantity,
-      operation.amount_rub,
-      operation.fee_rub,
+      operation.amount_usd,
+      operation.fee_usd,
       operation.comment ?? "",
     ])
     const csv = [header, ...rows].map((row) => row.map(escapeCsvValue).join(";")).join("\n")
@@ -498,24 +516,24 @@ export default function InvestmentsPage() {
             </Button>
           ))}
         </div>
-        {displayCurrency !== "RUB" ? (
+        {displayCurrency !== "USD" ? (
           <span className="text-sm text-muted-foreground">
             {fxRatesQuery.isLoading
               ? "Загружаем курс..."
               : getDisplayRate(displayCurrency, fxRates)
-                ? `1 ${displayCurrency} = ${formatCurrency(getDisplayRate(displayCurrency, fxRates) ?? 0)} RUB`
+                ? `1 USD = ${formatCurrencyValue(getDisplayRate(displayCurrency, fxRates) ?? 0, displayCurrency)}`
                 : "Курс не найден, обнови FX snapshots"}
           </span>
         ) : (
-          <span className="text-sm text-muted-foreground">Базовая учетная валюта не меняется.</span>
+          <span className="text-sm text-muted-foreground">Базовая учетная валюта: USD.</span>
         )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Текущая стоимость" value={money(overview.current_value_rub)} hint={overview.valuation_complete ? "По последним ценам" : "Есть позиции без цены"} icon={Coins} variant="compact" />
-        <StatCard label="Себестоимость" value={money(overview.cost_basis_rub)} hint="Остаток позиций, пересчет только для просмотра" icon={Landmark} variant="compact" />
-        <StatCard label="Total P/L" value={money(overview.total_pl_rub)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={overview.total_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
-        <StatCard label="Unrealized P/L" value={money(overview.unrealized_pl_rub)} hint={`Realized: ${money(overview.realized_pl_rub)}`} icon={BarChart3} tone={overview.unrealized_pl_rub < 0 ? "danger" : "positive"} variant="compact" />
+        <StatCard label="Текущая стоимость" value={money(overview.current_value_usd)} hint={overview.valuation_complete ? "По последним ценам" : "Есть позиции без цены"} icon={Coins} variant="compact" />
+        <StatCard label="Себестоимость" value={money(overview.cost_basis_usd)} hint="Остаток позиций, пересчет только для просмотра" icon={Landmark} variant="compact" />
+        <StatCard label="Total P/L" value={money(overview.total_pl_usd)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={overview.total_pl_usd < 0 ? "danger" : "positive"} variant="compact" />
+        <StatCard label="Unrealized P/L" value={money(overview.unrealized_pl_usd)} hint={`Realized: ${money(overview.realized_pl_usd)}`} icon={BarChart3} tone={overview.unrealized_pl_usd < 0 ? "danger" : "positive"} variant="compact" />
       </div>
 
       {currentPortfolio ? (
@@ -562,7 +580,7 @@ export default function InvestmentsPage() {
               <EmptyState
                 icon={LineChart}
                 title="Нет курса для выбранной валюты"
-                description="Графики остаются в RUB, пока не появится свежий FX snapshot для выбранной валюты."
+                description="Графики остаются в USD, пока не появится свежий FX snapshot для выбранной валюты."
               />
             ) : performance.points.length === 0 ? (
               <EmptyState
@@ -606,7 +624,7 @@ export default function InvestmentsPage() {
                       axisLeft={{ tickSize: 0, tickPadding: 8 }}
                       curve="monotoneX"
                       pointSize={7}
-                      colors={[overview.total_pl_rub < 0 ? "#ef4444" : "#10b981"]}
+                      colors={[overview.total_pl_usd < 0 ? "#ef4444" : "#10b981"]}
                       useMesh
                       tooltip={({ point }) => (
                         <div className="rounded border bg-background px-2 py-1 text-xs">
@@ -662,7 +680,7 @@ export default function InvestmentsPage() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
                     <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Стоимость портфеля</div>
-                    <div className="mt-1 text-xl font-semibold tabular-nums">{money(rebalanceStatus.current_value_rub)}</div>
+                    <div className="mt-1 text-xl font-semibold tabular-nums">{money(rebalanceStatus.current_value_usd)}</div>
                   </div>
                   <div className="rounded-[20px] border border-border/70 bg-background/70 px-4 py-3">
                     <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Вне допуска</div>
@@ -693,7 +711,7 @@ export default function InvestmentsPage() {
                     <tbody>
                       {rebalancePositions.map((position) => {
                         const allocation = targetAllocationByInstrument.get(position.instrument_id)
-                        const isOverTarget = position.allocation_deviation_rub !== null && position.allocation_deviation_rub !== undefined && position.allocation_deviation_rub > 0
+                        const isOverTarget = position.allocation_deviation_usd !== null && position.allocation_deviation_usd !== undefined && position.allocation_deviation_usd > 0
                         const actionClass = position.is_within_tolerance
                           ? "text-emerald-600"
                           : isOverTarget
@@ -714,14 +732,14 @@ export default function InvestmentsPage() {
                                 : `${position.allocation_deviation_percent > 0 ? "+" : ""}${formatPercent(position.allocation_deviation_percent)}`}
                             </td>
                             <td className={`py-3 pr-4 text-right tabular-nums ${actionClass}`}>
-                              {position.allocation_deviation_rub === null || position.allocation_deviation_rub === undefined
+                              {position.allocation_deviation_usd === null || position.allocation_deviation_usd === undefined
                                 ? "нет цели"
-                                : `${position.allocation_deviation_rub > 0 ? "+" : ""}${money(position.allocation_deviation_rub)}`}
+                                : `${position.allocation_deviation_usd > 0 ? "+" : ""}${money(position.allocation_deviation_usd)}`}
                             </td>
                             <td className={`py-3 pr-4 text-right font-medium ${actionClass}`}>
                               {rebalanceActionLabels[position.rebalance_action ?? ""] ?? "Нет цели"}
-                              {position.rebalance_amount_rub !== null && position.rebalance_amount_rub !== undefined && position.rebalance_amount_rub > 0 ? (
-                                <div className="text-xs font-normal tabular-nums">{money(position.rebalance_amount_rub)}</div>
+                              {position.rebalance_amount_usd !== null && position.rebalance_amount_usd !== undefined && position.rebalance_amount_usd > 0 ? (
+                                <div className="text-xs font-normal tabular-nums">{money(position.rebalance_amount_usd)}</div>
                               ) : null}
                             </td>
                             <td className="py-3 text-right">
@@ -807,28 +825,28 @@ export default function InvestmentsPage() {
                           <div className="text-xs text-muted-foreground">{position.instrument_name}</div>
                         </td>
                         <td className="py-3 pr-4 text-right tabular-nums">{position.quantity}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.cost_basis_rub)}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.average_buy_price_rub)}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.cost_basis_usd)}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.average_buy_price_usd)}</td>
                         <td className="py-3 pr-4 text-right tabular-nums">
-                          {position.latest_price_rub === null || position.latest_price_rub === undefined ? (
+                          {position.latest_price_usd === null || position.latest_price_usd === undefined ? (
                             <Button variant="ghost" size="sm" onClick={() => openDialog({ type: "price", mode: "create", item: instruments.find((item) => item.id === position.instrument_id) })}>
                               Добавить
                             </Button>
                           ) : (
                             <div>
-                              <div>{money(position.latest_price_rub)}</div>
+                              <div>{money(position.latest_price_usd)}</div>
                               <div className="text-xs text-muted-foreground">{position.latest_price_at ? formatDate(position.latest_price_at) : ""}</div>
                             </div>
                           )}
                         </td>
                         <td className="py-3 pr-4 text-right tabular-nums">
-                          {money(position.current_value_rub)}
+                          {money(position.current_value_usd)}
                         </td>
-                        <td className={position.unrealized_pl_rub !== undefined && position.unrealized_pl_rub !== null && position.unrealized_pl_rub < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
-                          {money(position.unrealized_pl_rub)}
+                        <td className={position.unrealized_pl_usd !== undefined && position.unrealized_pl_usd !== null && position.unrealized_pl_usd < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
+                          {money(position.unrealized_pl_usd)}
                         </td>
-                        <td className={position.total_pl_rub < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
-                          {money(position.total_pl_rub)}
+                        <td className={position.total_pl_usd < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
+                          {money(position.total_pl_usd)}
                         </td>
                         <td className="py-3 text-right tabular-nums">
                           {formatPercent(position.return_percent)}
@@ -1002,7 +1020,7 @@ export default function InvestmentsPage() {
                     <div className="flex items-center gap-1">
                       <div className="mr-2 text-right text-sm tabular-nums">
                         <div>{operation.quantity}</div>
-                        <div className="text-xs text-muted-foreground">{money(operation.amount_rub)}</div>
+                        <div className="text-xs text-muted-foreground">{money(operation.amount_usd)}</div>
                       </div>
                       <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "operation", mode: "edit", item: operation })} aria-label="Редактировать операцию">
                         <PencilLine className="h-4 w-4" />
@@ -1269,7 +1287,7 @@ function InstrumentForm({
         <Input value={providerSymbol} onChange={(event) => setProviderSymbol(event.target.value)} placeholder="BTCUSDT" />
       </FormField>
       <FormField label="Валюта котировки">
-        <Input value={quoteCurrency} onChange={(event) => setQuoteCurrency(event.target.value)} placeholder="USD" />
+        <CurrencySelect value={quoteCurrency} onChange={setQuoteCurrency} />
       </FormField>
       <FormField label="Точность">
         <Input value={precision} onChange={(event) => setPrecision(event.target.value)} inputMode="numeric" />
@@ -1303,8 +1321,8 @@ function PriceSnapshotForm({
   const [capturedAt, setCapturedAt] = useState(todayInputDate())
   const [price, setPrice] = useState("")
   const [priceCurrency, setPriceCurrency] = useState(selectedInstrument?.quote_currency ?? "USD")
-  const [fxRateToRub, setFxRateToRub] = useState(priceCurrency.toUpperCase() === "RUB" ? "1" : "")
-  const [priceRub, setPriceRub] = useState("")
+  const [fxRateToUsd, setFxRateToUsd] = useState(priceCurrency.toUpperCase() === "USD" ? "1" : "")
+  const [priceUsd, setPriceUsd] = useState("")
   const [source, setSource] = useState("manual")
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1314,8 +1332,8 @@ function PriceSnapshotForm({
       captured_at: capturedAt,
       price: parseFormNumber(price),
       price_currency: priceCurrency.trim().toUpperCase() || selectedInstrument?.quote_currency || "USD",
-      fx_rate_to_rub: parseFormNumber(fxRateToRub, 1),
-      price_rub: priceRub.trim() ? parseFormNumber(priceRub) : undefined,
+      fx_rate_to_usd: parseFormNumber(fxRateToUsd, 1),
+      price_usd: priceUsd.trim() ? parseFormNumber(priceUsd) : undefined,
       source: source.trim() || "manual",
     })
   }
@@ -1330,7 +1348,7 @@ function PriceSnapshotForm({
             const nextInstrument = instruments.find((item) => item.id === value)
             if (nextInstrument) {
               setPriceCurrency(nextInstrument.quote_currency)
-              setFxRateToRub(nextInstrument.quote_currency.toUpperCase() === "RUB" ? "1" : fxRateToRub)
+              setFxRateToUsd(nextInstrument.quote_currency.toUpperCase() === "USD" ? "1" : fxRateToUsd)
             }
           }}
         >
@@ -1353,19 +1371,19 @@ function PriceSnapshotForm({
         <Input value={price} onChange={(event) => setPrice(event.target.value)} required inputMode="decimal" placeholder="Например: 62000" />
       </FormField>
       <FormField label="Валюта цены">
-        <Input value={priceCurrency} onChange={(event) => setPriceCurrency(event.target.value)} placeholder="USD" />
+        <CurrencySelect value={priceCurrency} onChange={setPriceCurrency} />
       </FormField>
-      <FormField label="Курс к RUB">
-        <Input value={fxRateToRub} onChange={(event) => setFxRateToRub(event.target.value)} required inputMode="decimal" placeholder="Например: 92.5" />
+      <FormField label="Курс к USD">
+        <Input value={fxRateToUsd} onChange={(event) => setFxRateToUsd(event.target.value)} required inputMode="decimal" placeholder="Например: 1" />
       </FormField>
-      <FormField label="Цена в RUB">
-        <Input value={priceRub} onChange={(event) => setPriceRub(event.target.value)} inputMode="decimal" placeholder="Можно оставить пустым" />
+      <FormField label="Цена в USD">
+        <Input value={priceUsd} onChange={(event) => setPriceUsd(event.target.value)} inputMode="decimal" placeholder="Можно оставить пустым" />
       </FormField>
       <FormField label="Источник">
         <Input value={source} onChange={(event) => setSource(event.target.value)} placeholder="manual" />
       </FormField>
       <div className="flex items-end">
-        <Button type="submit" disabled={isSaving || !instrumentId || !price.trim() || !fxRateToRub.trim()}>
+        <Button type="submit" disabled={isSaving || !instrumentId || !price.trim() || !fxRateToUsd.trim()}>
           {isSaving ? "Сохраняем..." : "Сохранить цену"}
         </Button>
       </div>
@@ -1390,7 +1408,7 @@ function AccountForm({
   const [portfolio, setPortfolio] = useState(defaultPortfolioId)
   const [name, setName] = useState(account?.name ?? "")
   const [type, setType] = useState(account?.type ?? "manual")
-  const [currency, setCurrency] = useState(account?.currency ?? "RUB")
+  const [currency, setCurrency] = useState(account?.currency ?? "USD")
   const [hidden, setHidden] = useState(account?.hidden ?? false)
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1399,7 +1417,7 @@ function AccountForm({
       portfolio,
       name: name.trim(),
       type,
-      currency: currency.trim().toUpperCase() || "RUB",
+      currency: currency.trim().toUpperCase() || "USD",
       hidden,
     })
   }
@@ -1437,7 +1455,7 @@ function AccountForm({
         <Input value={name} onChange={(event) => setName(event.target.value)} required placeholder="Binance" />
       </FormField>
       <FormField label="Валюта">
-        <Input value={currency} onChange={(event) => setCurrency(event.target.value)} placeholder="RUB" />
+        <CurrencySelect value={currency} onChange={setCurrency} />
       </FormField>
       <label className="flex items-center gap-3 rounded-2xl border border-border/70 bg-background/70 px-4 py-3 text-sm md:col-span-2">
         <Checkbox checked={hidden} onCheckedChange={(checked) => setHidden(checked === true)} />
@@ -1540,14 +1558,8 @@ function OperationForm({
   const [instrument, setInstrument] = useState(operation?.instrument ?? activeInstruments[0]?.id ?? "")
   const [quantity, setQuantity] = useState(formatInputNumber(operation?.quantity))
   const [price, setPrice] = useState(formatInputNumber(operation?.price))
-  const [priceCurrency, setPriceCurrency] = useState(operation?.price_currency ?? "RUB")
-  const [amount, setAmount] = useState(formatInputNumber(operation?.amount))
-  const [amountCurrency, setAmountCurrency] = useState(operation?.amount_currency ?? "RUB")
-  const [amountRub, setAmountRub] = useState(formatInputNumber(operation?.amount_rub))
-  const [fxRateToRub, setFxRateToRub] = useState(formatInputNumber(operation?.fx_rate_to_rub ?? 1))
-  const [feeAmount, setFeeAmount] = useState(formatInputNumber(operation?.fee_amount ?? 0))
-  const [feeCurrency, setFeeCurrency] = useState(operation?.fee_currency ?? "RUB")
-  const [feeRub, setFeeRub] = useState(formatInputNumber(operation?.fee_rub ?? 0))
+  const [amountUsd, setAmountUsd] = useState(formatInputNumber(operation?.amount_usd))
+  const [feeUsd, setFeeUsd] = useState(formatInputNumber(operation?.fee_usd ?? 0))
   const [posted, setPosted] = useState(operation?.posted ?? true)
   const [deleted, setDeleted] = useState(operation?.deleted ?? false)
   const [comment, setComment] = useState(operation?.comment ?? "")
@@ -1563,14 +1575,14 @@ function OperationForm({
       operation_type: operationType,
       quantity: parseFormNumber(quantity),
       price: price.trim() ? parseFormNumber(price) : undefined,
-      price_currency: priceCurrency.trim().toUpperCase() || "RUB",
-      amount: amount.trim() ? parseFormNumber(amount) : undefined,
-      amount_currency: amountCurrency.trim().toUpperCase() || "RUB",
-      amount_rub: parseFormNumber(amountRub),
-      fx_rate_to_rub: parseFormNumber(fxRateToRub, 1),
-      fee_amount: parseFormNumber(feeAmount),
-      fee_currency: feeCurrency.trim().toUpperCase() || "RUB",
-      fee_rub: parseFormNumber(feeRub),
+      price_currency: "USD",
+      amount: parseFormNumber(amountUsd),
+      amount_currency: "USD",
+      amount_usd: parseFormNumber(amountUsd),
+      fx_rate_to_usd: 1,
+      fee_amount: parseFormNumber(feeUsd),
+      fee_currency: "USD",
+      fee_usd: parseFormNumber(feeUsd),
       comment: comment.trim(),
       posted,
       deleted,
@@ -1645,34 +1657,15 @@ function OperationForm({
       <FormField label="Количество">
         <Input value={quantity} onChange={(event) => setQuantity(event.target.value)} required inputMode="decimal" placeholder="0.01" />
       </FormField>
-      <FormField label="Цена">
-        <Input value={price} onChange={(event) => setPrice(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Цена за единицу" />
+      <FormField label="Цена USD">
+        <Input value={price} onChange={(event) => setPrice(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Цена за единицу в USD" />
       </FormField>
-      <FormField label="Валюта цены">
-        <Input value={priceCurrency} onChange={(event) => setPriceCurrency(event.target.value)} placeholder="RUB" />
+      <FormField label="Сумма USD">
+        <Input value={amountUsd} onChange={(event) => setAmountUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Итог в USD" />
       </FormField>
-      <FormField label="Сумма">
-        <Input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="В валюте операции" />
+      <FormField label="Комиссия USD">
+        <Input value={feeUsd} onChange={(event) => setFeeUsd(event.target.value)} inputMode="decimal" />
       </FormField>
-      <FormField label="Валюта суммы">
-        <Input value={amountCurrency} onChange={(event) => setAmountCurrency(event.target.value)} placeholder="RUB" />
-      </FormField>
-      <FormField label="Сумма RUB">
-        <Input value={amountRub} onChange={(event) => setAmountRub(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Итог в рублях" />
-      </FormField>
-      <FormField label="Курс к RUB">
-        <Input value={fxRateToRub} onChange={(event) => setFxRateToRub(event.target.value)} inputMode="decimal" />
-      </FormField>
-      <FormField label="Комиссия">
-        <Input value={feeAmount} onChange={(event) => setFeeAmount(event.target.value)} inputMode="decimal" />
-      </FormField>
-      <FormField label="Валюта комиссии">
-        <Input value={feeCurrency} onChange={(event) => setFeeCurrency(event.target.value)} placeholder="RUB" />
-      </FormField>
-      <FormField label="Комиссия RUB">
-        <Input value={feeRub} onChange={(event) => setFeeRub(event.target.value)} inputMode="decimal" />
-      </FormField>
-      <div />
       <div className="md:col-span-2">
         <FormField label="Комментарий">
           <Textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} />
@@ -1698,7 +1691,7 @@ function OperationForm({
             !instrument ||
             !quantity.trim() ||
             (operationType === "transfer_instrument" && !accountTo) ||
-            (needsAmount && (!price.trim() || !amountRub.trim()))
+            (needsAmount && (!price.trim() || !amountUsd.trim()))
           }
         >
           {isSaving ? "Сохраняем..." : "Сохранить операцию"}

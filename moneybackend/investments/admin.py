@@ -20,7 +20,7 @@ class InstrumentAdmin(admin.ModelAdmin):
 
 @admin.register(InstrumentPriceSnapshot)
 class InstrumentPriceSnapshotAdmin(admin.ModelAdmin):
-    list_display = ('instrument', 'captured_at', 'price', 'price_currency', 'fx_rate_to_rub', 'price_rub', 'source')
+    list_display = ('instrument', 'captured_at', 'price', 'price_currency', 'fx_rate_to_usd', 'price_usd', 'source')
     list_filter = ('price_currency', 'source', 'captured_at')
     search_fields = ('instrument__ticker', 'instrument__name', 'source')
     autocomplete_fields = ('instrument',)
@@ -57,7 +57,7 @@ class InvestmentAccountAdmin(admin.ModelAdmin):
 
 @admin.register(InvestmentOperation)
 class InvestmentOperationAdmin(admin.ModelAdmin):
-    list_display = ('number', 'date', 'operation_type', 'instrument', 'quantity', 'amount_rub', 'portfolio', 'account')
+    list_display = ('number', 'date', 'operation_type', 'instrument', 'quantity', 'amount_usd', 'portfolio', 'account')
     list_filter = ('operation_type', 'instrument', 'posted', 'deleted')
     search_fields = ('number', 'instrument__ticker', 'instrument__name', 'comment')
     autocomplete_fields = ('portfolio', 'account', 'account_to', 'instrument')

@@ -11,12 +11,21 @@ from .models import (
     InvestmentOperation,
     InvestmentPortfolio,
     InvestmentTargetAllocation,
+    SUPPORTED_CURRENCIES,
+    ZERO_AMOUNT,
 )
 from .services import calculate_instrument_quantity, calculate_portfolio_totals, calculate_positions
 
 
 def _serialize_decimal(value):
     return f'{value:.2f}' if value is not None else None
+
+
+def _normalize_currency(value, default='USD'):
+    currency = (value or default).strip().upper()
+    if currency not in SUPPORTED_CURRENCIES:
+        raise serializers.ValidationError(f'Поддерживаются валюты: {", ".join(SUPPORTED_CURRENCIES)}.')
+    return currency
 
 
 def get_default_portfolio(user):
@@ -50,7 +59,7 @@ class InstrumentSerializer(serializers.ModelSerializer):
         return (value or '').strip()
 
     def validate_quote_currency(self, value):
-        return (value or 'USD').strip().upper()
+        return _normalize_currency(value)
 
 
 class InstrumentPriceSnapshotSerializer(serializers.ModelSerializer):
@@ -67,40 +76,40 @@ class InstrumentPriceSnapshotSerializer(serializers.ModelSerializer):
             'captured_at',
             'price',
             'price_currency',
-            'fx_rate_to_rub',
-            'price_rub',
+            'fx_rate_to_usd',
+            'price_usd',
             'source',
             'created_at',
         ]
         read_only_fields = ['id', 'instrument_ticker', 'instrument_name', 'created_at']
         extra_kwargs = {
-            'price_rub': {'required': False},
+            'price_usd': {'required': False},
             'source': {'required': False},
         }
 
     def validate_price_currency(self, value):
-        return (value or 'USD').strip().upper()
+        return _normalize_currency(value)
 
     def validate_source(self, value):
         return (value or InstrumentPriceSnapshot.SOURCE_MANUAL).strip()
 
     def validate(self, attrs):
         price = attrs.get('price') if 'price' in attrs else getattr(self.instance, 'price', None)
-        fx_rate_to_rub = attrs.get('fx_rate_to_rub') if 'fx_rate_to_rub' in attrs else getattr(self.instance, 'fx_rate_to_rub', Decimal('1'))
-        price_rub = attrs.get('price_rub') if 'price_rub' in attrs else getattr(self.instance, 'price_rub', None)
+        fx_rate_to_usd = attrs.get('fx_rate_to_usd') if 'fx_rate_to_usd' in attrs else getattr(self.instance, 'fx_rate_to_usd', Decimal('1'))
+        price_usd = attrs.get('price_usd') if 'price_usd' in attrs else getattr(self.instance, 'price_usd', None)
 
         if price is None or price <= 0:
             raise serializers.ValidationError({'price': 'Укажите положительную цену.'})
-        if fx_rate_to_rub is None or fx_rate_to_rub <= 0:
-            raise serializers.ValidationError({'fx_rate_to_rub': 'Укажите положительный курс к RUB.'})
+        if fx_rate_to_usd is None or fx_rate_to_usd <= 0:
+            raise serializers.ValidationError({'fx_rate_to_usd': 'Укажите положительный курс к USD.'})
 
-        should_recalculate_price_rub = (
-            price_rub is None or price_rub <= 0 or 'price' in attrs or 'fx_rate_to_rub' in attrs
+        should_recalculate_price_usd = (
+            price_usd is None or price_usd <= 0 or 'price' in attrs or 'fx_rate_to_usd' in attrs
         )
-        if should_recalculate_price_rub:
-            attrs['price_rub'] = (price * fx_rate_to_rub).quantize(Decimal('0.01'))
-        elif price_rub <= 0:
-            raise serializers.ValidationError({'price_rub': 'Укажите положительную цену в RUB.'})
+        if should_recalculate_price_usd:
+            attrs['price_usd'] = (price * fx_rate_to_usd).quantize(Decimal('0.01'))
+        elif price_usd <= 0:
+            raise serializers.ValidationError({'price_usd': 'Укажите положительную цену в USD.'})
 
         return attrs
 
@@ -124,10 +133,10 @@ class FxRateSnapshotSerializer(serializers.ModelSerializer):
         }
 
     def validate_base_currency(self, value):
-        return (value or '').strip().upper()
+        return _normalize_currency(value, default='')
 
     def validate_quote_currency(self, value):
-        return (value or 'RUB').strip().upper()
+        return _normalize_currency(value)
 
     def validate_source(self, value):
         return (value or FxRateSnapshot.SOURCE_MANUAL).strip()
@@ -182,6 +191,9 @@ class InvestmentAccountSerializer(serializers.ModelSerializer):
         if request and not request.user.is_staff and portfolio.user_id != request.user.id:
             raise serializers.ValidationError('Портфель недоступен.')
         return portfolio
+
+    def validate_currency(self, value):
+        return _normalize_currency(value)
 
 
 class InvestmentTargetAllocationSerializer(serializers.ModelSerializer):
@@ -258,11 +270,11 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
             'price_currency',
             'amount',
             'amount_currency',
-            'amount_rub',
-            'fx_rate_to_rub',
+            'amount_usd',
+            'fx_rate_to_usd',
             'fee_amount',
             'fee_currency',
-            'fee_rub',
+            'fee_usd',
             'comment',
             'deleted',
             'posted',
@@ -287,6 +299,25 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         request = self.context.get('request')
         user = getattr(request, 'user', None)
+
+        attrs['price_currency'] = 'USD'
+        attrs['amount_currency'] = 'USD'
+        attrs['fee_currency'] = 'USD'
+        attrs['fx_rate_to_usd'] = Decimal('1')
+        if (
+            ('amount_usd' not in attrs or attrs.get('amount_usd') in (None, ZERO_AMOUNT))
+            and attrs.get('amount') not in (None, ZERO_AMOUNT)
+        ):
+            attrs['amount_usd'] = attrs['amount']
+        if attrs.get('amount_usd') is not None:
+            attrs['amount'] = attrs['amount_usd']
+        if (
+            ('fee_usd' not in attrs or attrs.get('fee_usd') in (None, ZERO_AMOUNT))
+            and attrs.get('fee_amount') not in (None, ZERO_AMOUNT)
+        ):
+            attrs['fee_usd'] = attrs['fee_amount']
+        if attrs.get('fee_usd') is not None:
+            attrs['fee_amount'] = attrs['fee_usd']
 
         portfolio = attrs.get('portfolio') or getattr(self.instance, 'portfolio', None)
         account = attrs.get('account') or getattr(self.instance, 'account', None)
@@ -343,45 +374,54 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def validate_price_currency(self, value):
+        return _normalize_currency(value)
+
+    def validate_amount_currency(self, value):
+        return _normalize_currency(value)
+
+    def validate_fee_currency(self, value):
+        return _normalize_currency(value)
+
 
 class InvestmentPositionSerializer(serializers.Serializer):
     instrument_id = serializers.UUIDField()
     instrument_ticker = serializers.CharField()
     instrument_name = serializers.CharField()
     quantity = serializers.DecimalField(max_digits=24, decimal_places=10)
-    cost_basis_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    average_buy_price_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    latest_price_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    cost_basis_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    average_buy_price_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    latest_price_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     latest_price_at = serializers.DateTimeField(allow_null=True)
-    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    realized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    unrealized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    total_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    current_value_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    realized_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    unrealized_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    total_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     return_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
-    bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    bought_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    sold_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     target_allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     tolerance_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     allocation_deviation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
-    target_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
-    allocation_deviation_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    target_value_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    allocation_deviation_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     rebalance_action = serializers.CharField(allow_null=True)
-    rebalance_amount_rub = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    rebalance_amount_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     is_within_tolerance = serializers.BooleanField(allow_null=True)
 
 
 class InvestmentPortfolioOverviewSerializer(serializers.Serializer):
     portfolio = InvestmentPortfolioSerializer()
-    cost_basis_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    realized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    unrealized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    total_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    cost_basis_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    current_value_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    realized_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    unrealized_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    total_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     return_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     valuation_complete = serializers.BooleanField()
-    bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    bought_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    sold_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     largest_asset = InvestmentPositionSerializer(allow_null=True)
     latest_price_at = serializers.DateTimeField(allow_null=True)
     positions = InvestmentPositionSerializer(many=True)
@@ -392,13 +432,13 @@ class InvestmentPerformancePointSerializer(serializers.Serializer):
     date = serializers.DateField()
     period_start = serializers.DateField(allow_null=True)
     period_end = serializers.DateField()
-    cost_basis_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    realized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    unrealized_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    total_pl_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    bought_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
-    sold_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    cost_basis_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    current_value_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    realized_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    unrealized_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    total_pl_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    bought_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    sold_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     valuation_complete = serializers.BooleanField()
 
 
@@ -413,7 +453,7 @@ class InvestmentPerformanceSerializer(serializers.Serializer):
 
 class InvestmentRebalanceStatusSerializer(serializers.Serializer):
     portfolio_id = serializers.UUIDField()
-    current_value_rub = serializers.DecimalField(max_digits=18, decimal_places=2)
+    current_value_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     positions = InvestmentPositionSerializer(many=True)
     disclaimer = serializers.CharField()
 

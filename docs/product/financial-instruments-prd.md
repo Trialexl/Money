@@ -1,6 +1,6 @@
 # PRD: Финансовые инструменты
 
-Дата: 2026-05-10  
+Дата: 2026-05-13
 Статус: концепция / черновик PRD  
 Приоритет MVP: криптовалюты  
 План расширения: акции и другие биржевые инструменты
@@ -38,7 +38,7 @@ Money сейчас ведет учет денежных потоков в руб
 - какие активы отклоняются от целевых долей;
 - что нужно купить или продать для ребалансировки.
 
-Базовая валюта учета - RUB. Переключение в USD/EUR должно быть только отображением текущей оценки, а не сменой учетной валюты.
+Базовая валюта учета investment-модуля - USD. Переключение в EUR/RUB должно быть только отображением текущей оценки, а не сменой учетной валюты.
 
 ## 3. Не цели MVP
 
@@ -98,7 +98,7 @@ Money сейчас ведет учет денежных потоков в руб
 
 Ожидаемый результат:
 
-- видит текущую стоимость в RUB;
+- видит текущую стоимость в USD и отображение в EUR/RUB;
 - может переключить отображение на USD/EUR;
 - видит P/L по портфелю и по каждому активу;
 - видит доли активов;
@@ -128,7 +128,7 @@ Money сейчас ведет учет денежных потоков в руб
 - `ticker`: BTC, ETH, SOL;
 - `name`;
 - `provider_symbol`;
-- `quote_currency`: USD, USDT, RUB;
+- `quote_currency`: USD, EUR, RUB;
 - `precision`;
 - `is_active`;
 - `created_at`;
@@ -144,7 +144,7 @@ Money сейчас ведет учет денежных потоков в руб
 
 - `id`;
 - `name`;
-- `base_currency`: всегда RUB для MVP;
+- `base_currency`: всегда USD для MVP;
 - `project`: nullable, опциональная связь с текущим справочником проектов;
 - `is_default`;
 - `created_at`;
@@ -202,15 +202,15 @@ Money сейчас ведет учет денежных потоков в руб
 - `price_currency`;
 - `amount`;
 - `amount_currency`;
-- `amount_rub`;
-- `fx_rate_to_rub`;
+- `amount_usd`;
+- `fx_rate_to_usd`;
 - `fee_amount`;
 - `fee_currency`;
 - `comment`;
 - `deleted`;
 - `posted`.
 
-Важно: `amount_rub` и `fx_rate_to_rub` фиксируются на дату операции. Это делает исторический учет стабильным.
+Важно: `amount_usd` и `fx_rate_to_usd` фиксируются на дату операции. Это делает исторический учет стабильным.
 
 Связь с денежным кошельком в MVP не предусматривается. Денежная часть покупки/продажи ведется существующими документами учета денег, например переводом в скрытый кошелек.
 
@@ -276,77 +276,77 @@ quantity =
 + ручные корректировки
 ```
 
-### 6.2. Текущая стоимость в RUB
+### 6.2. Текущая стоимость в USD
 
 ```text
-current_value_rub =
-quantity * current_price_in_quote_currency * current_quote_currency_rub_rate
+current_value_usd =
+quantity * current_price_in_quote_currency * current_quote_currency_usd_rate
 ```
 
-Если инструмент котируется сразу в RUB, валютный множитель равен 1.
+Если инструмент котируется сразу в USD, валютный множитель равен 1.
 
 ### 6.3. Средняя цена покупки
 
 Для MVP используем метод средневзвешенной цены.
 
 ```text
-average_buy_price_rub =
-remaining_cost_basis_rub / current_quantity
+average_buy_price_usd =
+remaining_cost_basis_usd / current_quantity
 ```
 
 При продаже часть себестоимости списывается пропорционально проданному количеству:
 
 ```text
-sold_cost_basis_rub =
-average_buy_price_rub_before_sell * sold_quantity
+sold_cost_basis_usd =
+average_buy_price_usd_before_sell * sold_quantity
 ```
 
 ### 6.4. Реализованная прибыль/убыток
 
 ```text
-realized_pl_rub =
-sell_proceeds_rub - sold_cost_basis_rub - sell_fee_rub
+realized_pl_usd =
+sell_proceeds_usd - sold_cost_basis_usd - sell_fee_usd
 ```
 
 ### 6.5. Нереализованная прибыль/убыток
 
 ```text
-unrealized_pl_rub =
-current_value_rub - remaining_cost_basis_rub
+unrealized_pl_usd =
+current_value_usd - remaining_cost_basis_usd
 ```
 
 ### 6.6. Общий результат
 
 ```text
-total_pl_rub =
-realized_pl_rub + unrealized_pl_rub
+total_pl_usd =
+realized_pl_usd + unrealized_pl_usd
 ```
 
 ```text
 total_return_percent =
-total_pl_rub / invested_cost_basis_rub * 100
+total_pl_usd / invested_cost_basis_usd * 100
 ```
 
 ### 6.7. Доля актива
 
 ```text
 allocation_percent =
-instrument_current_value_rub / portfolio_current_value_rub * 100
+instrument_current_value_usd / portfolio_current_value_usd * 100
 ```
 
 ### 6.8. Ребалансировка
 
 ```text
-target_value_rub =
-portfolio_current_value_rub * target_percent / 100
+target_value_usd =
+portfolio_current_value_usd * target_percent / 100
 ```
 
 ```text
-rebalance_delta_rub =
-target_value_rub - current_value_rub
+rebalance_delta_usd =
+target_value_usd - current_value_usd
 ```
 
-Если `rebalance_delta_rub > 0`, актив ниже цели. Если меньше нуля, актив выше цели.
+Если `rebalance_delta_usd > 0`, актив ниже цели. Если меньше нуля, актив выше цели.
 
 ## 7. Граница с текущим денежным учетом
 
@@ -360,7 +360,7 @@ target_value_rub - current_value_rub
 
 - количество актива;
 - цену;
-- сумму в RUB для себестоимости;
+- сумму в USD для себестоимости;
 - среднюю покупку;
 - P/L.
 
@@ -389,7 +389,7 @@ target_value_rub - current_value_rub
 
 Комиссии должны входить в себестоимость покупки или уменьшать результат продажи.
 
-Если комиссия списана отдельной валютой или инструментом, MVP может хранить ее в RUB как отдельное поле операции, а детальный учет комиссий активами оставить на следующий этап.
+Если комиссия списана отдельной валютой или инструментом, MVP хранит ее USD-эквивалентом в операции, а детальный учет комиссий активами остается следующим этапом.
 
 Если комиссия оплачена с денежного кошелька и ее нужно видеть в обычном учете денег, пользователь отражает ее отдельным документом текущего учета.
 
@@ -446,7 +446,7 @@ FxRateProvider
 Потенциальные источники:
 
 - криптовалюты: CoinGecko, Binance, CoinMarketCap;
-- валюты: ЦБ РФ для USD/RUB и EUR/RUB;
+- валюты: ЦБ РФ для USD/RUB и EUR/RUB, cross-rate для USD/EUR/RUB;
 - акции позже: брокерский API или market data provider.
 
 ## 9. Backend API MVP
@@ -510,11 +510,11 @@ POST /api/v1/investment/prices/refresh/
 
 Переключатель отображения:
 
-- RUB - базовый;
-- USD;
+- USD - базовый;
+- RUB;
 - EUR.
 
-Переключение USD/EUR пересчитывает только текущие значения на экране.
+Переключение EUR/RUB пересчитывает только текущие значения на экране.
 
 ### 10.2. Таблица активов
 
@@ -629,8 +629,8 @@ MVP считается готовым, если:
 - денежный кошелек после инвестиционной продажи не меняется автоматически;
 - рассчитывается средняя покупка;
 - рассчитываются realized и unrealized P/L;
-- отображается стоимость портфеля в RUB;
-- USD/EUR переключатель пересчитывает только текущее отображение;
+- отображается стоимость портфеля в USD;
+- EUR/RUB переключатель пересчитывает только текущее отображение;
 - отображаются доли активов;
 - можно задать целевые доли;
 - система показывает отклонение от целевых долей;
@@ -664,7 +664,7 @@ MVP считается готовым, если:
 - список активов;
 - операции;
 - форма покупки/продажи;
-- переключатель RUB/USD/EUR.
+- переключатель USD/EUR/RUB.
 
 ### Этап 4. Аналитика
 
@@ -708,8 +708,8 @@ MVP считается готовым, если:
 - Зафиксированную прибыль пользователь при необходимости отражает ручным приходом в скрытый кошелек со статьей вроде `прибыль крипта`.
 - Для MVP используется один портфель по умолчанию; поддержка нескольких портфелей может быть расширена позже.
 - P/L считать только в инвестиционном модуле.
-- Базовую стоимость операции фиксировать в RUB на дату операции.
-- USD/EUR использовать только как текущий пересчет интерфейса.
+- Базовую стоимость операции фиксировать в USD на дату операции.
+- EUR/RUB использовать только как текущий пересчет интерфейса.
 - Финансовые инструменты не синхронизировать с 1С.
 
 ## 20. Backlog задач

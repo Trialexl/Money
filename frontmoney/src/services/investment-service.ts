@@ -52,11 +52,11 @@ export interface InvestmentOperation {
   price_currency: string
   amount?: number
   amount_currency: string
-  amount_rub: number
-  fx_rate_to_rub: number
+  amount_usd: number
+  fx_rate_to_usd: number
   fee_amount: number
   fee_currency: string
-  fee_rub: number
+  fee_usd: number
   comment?: string
   deleted: boolean
   posted: boolean
@@ -70,8 +70,8 @@ export interface InstrumentPriceSnapshot {
   captured_at: string
   price: number
   price_currency: string
-  fx_rate_to_rub: number
-  price_rub: number
+  fx_rate_to_usd: number
+  price_usd: number
   source: string
 }
 
@@ -89,39 +89,39 @@ export interface InvestmentPosition {
   instrument_ticker: string
   instrument_name: string
   quantity: number
-  cost_basis_rub: number
-  average_buy_price_rub: number
-  latest_price_rub?: number | null
+  cost_basis_usd: number
+  average_buy_price_usd: number
+  latest_price_usd?: number | null
   latest_price_at?: string | null
-  current_value_rub?: number | null
-  realized_pl_rub: number
-  unrealized_pl_rub?: number | null
-  total_pl_rub: number
+  current_value_usd?: number | null
+  realized_pl_usd: number
+  unrealized_pl_usd?: number | null
+  total_pl_usd: number
   return_percent?: number | null
-  bought_rub: number
-  sold_rub: number
+  bought_usd: number
+  sold_usd: number
   allocation_percent?: number | null
   target_allocation_percent?: number | null
   tolerance_percent?: number | null
   allocation_deviation_percent?: number | null
-  target_value_rub?: number | null
-  allocation_deviation_rub?: number | null
+  target_value_usd?: number | null
+  allocation_deviation_usd?: number | null
   rebalance_action?: "buy" | "sell" | "hold" | null
-  rebalance_amount_rub?: number | null
+  rebalance_amount_usd?: number | null
   is_within_tolerance?: boolean | null
 }
 
 export interface InvestmentOverview {
   portfolio: InvestmentPortfolio | null
-  cost_basis_rub: number
-  current_value_rub: number
-  realized_pl_rub: number
-  unrealized_pl_rub: number
-  total_pl_rub: number
+  cost_basis_usd: number
+  current_value_usd: number
+  realized_pl_usd: number
+  unrealized_pl_usd: number
+  total_pl_usd: number
   return_percent?: number | null
   valuation_complete: boolean
-  bought_rub: number
-  sold_rub: number
+  bought_usd: number
+  sold_usd: number
   largest_asset?: InvestmentPosition | null
   latest_price_at?: string | null
   positions: InvestmentPosition[]
@@ -132,13 +132,13 @@ export interface InvestmentPerformancePoint {
   date: string
   period_start?: string | null
   period_end: string
-  cost_basis_rub: number
-  current_value_rub: number
-  realized_pl_rub: number
-  unrealized_pl_rub: number
-  total_pl_rub: number
-  bought_rub: number
-  sold_rub: number
+  cost_basis_usd: number
+  current_value_usd: number
+  realized_pl_usd: number
+  unrealized_pl_usd: number
+  total_pl_usd: number
+  bought_usd: number
+  sold_usd: number
   valuation_complete: boolean
 }
 
@@ -164,7 +164,7 @@ export interface InvestmentTargetAllocation {
 
 export interface InvestmentRebalanceStatus {
   portfolio_id: string
-  current_value_rub: number
+  current_value_usd: number
   positions: InvestmentPosition[]
   disclaimer: string
 }
@@ -209,7 +209,7 @@ function mapPortfolio(raw: any): InvestmentPortfolio {
   return {
     id: raw.id,
     name: raw.name ?? "",
-    base_currency: raw.base_currency ?? "RUB",
+    base_currency: raw.base_currency ?? "USD",
     project: raw.project ?? null,
     is_default: !!raw.is_default,
   }
@@ -222,7 +222,7 @@ function mapAccount(raw: any): InvestmentAccount {
     portfolio_name: raw.portfolio_name ?? undefined,
     name: raw.name ?? "",
     type: raw.type ?? "manual",
-    currency: raw.currency ?? "RUB",
+    currency: raw.currency ?? "USD",
     hidden: !!raw.hidden,
   }
 }
@@ -244,14 +244,14 @@ function mapOperation(raw: any): InvestmentOperation {
     operation_type: raw.operation_type,
     quantity: fromApiAmount(raw.quantity),
     price: raw.price === null || raw.price === undefined ? undefined : fromApiAmount(raw.price),
-    price_currency: raw.price_currency ?? "RUB",
+    price_currency: raw.price_currency ?? "USD",
     amount: raw.amount === null || raw.amount === undefined ? undefined : fromApiAmount(raw.amount),
-    amount_currency: raw.amount_currency ?? "RUB",
-    amount_rub: fromApiAmount(raw.amount_rub),
-    fx_rate_to_rub: fromApiAmount(raw.fx_rate_to_rub),
+    amount_currency: raw.amount_currency ?? "USD",
+    amount_usd: fromApiAmount(raw.amount_usd),
+    fx_rate_to_usd: fromApiAmount(raw.fx_rate_to_usd),
     fee_amount: fromApiAmount(raw.fee_amount),
-    fee_currency: raw.fee_currency ?? "RUB",
-    fee_rub: fromApiAmount(raw.fee_rub),
+    fee_currency: raw.fee_currency ?? "USD",
+    fee_usd: fromApiAmount(raw.fee_usd),
     comment: raw.comment ?? undefined,
     deleted: !!raw.deleted,
     posted: !!raw.posted,
@@ -267,8 +267,8 @@ function mapPriceSnapshot(raw: any): InstrumentPriceSnapshot {
     captured_at: fromApiDateTime(raw.captured_at) ?? "",
     price: fromApiAmount(raw.price),
     price_currency: raw.price_currency ?? "USD",
-    fx_rate_to_rub: fromApiAmount(raw.fx_rate_to_rub),
-    price_rub: fromApiAmount(raw.price_rub),
+    fx_rate_to_usd: fromApiAmount(raw.fx_rate_to_usd),
+    price_usd: fromApiAmount(raw.price_usd),
     source: raw.source ?? "manual",
   }
 }
@@ -278,7 +278,7 @@ function mapFxRateSnapshot(raw: any): FxRateSnapshot {
     id: raw.id,
     captured_at: fromApiDateTime(raw.captured_at) ?? "",
     base_currency: raw.base_currency ?? "",
-    quote_currency: raw.quote_currency ?? "RUB",
+    quote_currency: raw.quote_currency ?? "USD",
     rate: fromApiAmount(raw.rate),
     source: raw.source ?? "manual",
   }
@@ -290,25 +290,25 @@ function mapPosition(raw: any): InvestmentPosition {
     instrument_ticker: raw.instrument_ticker ?? "",
     instrument_name: raw.instrument_name ?? "",
     quantity: fromApiAmount(raw.quantity),
-    cost_basis_rub: fromApiAmount(raw.cost_basis_rub),
-    average_buy_price_rub: fromApiAmount(raw.average_buy_price_rub),
-    latest_price_rub: fromApiNullableAmount(raw.latest_price_rub),
+    cost_basis_usd: fromApiAmount(raw.cost_basis_usd),
+    average_buy_price_usd: fromApiAmount(raw.average_buy_price_usd),
+    latest_price_usd: fromApiNullableAmount(raw.latest_price_usd),
     latest_price_at: fromApiDateTime(raw.latest_price_at) ?? null,
-    current_value_rub: fromApiNullableAmount(raw.current_value_rub),
-    realized_pl_rub: fromApiAmount(raw.realized_pl_rub),
-    unrealized_pl_rub: fromApiNullableAmount(raw.unrealized_pl_rub),
-    total_pl_rub: fromApiAmount(raw.total_pl_rub),
+    current_value_usd: fromApiNullableAmount(raw.current_value_usd),
+    realized_pl_usd: fromApiAmount(raw.realized_pl_usd),
+    unrealized_pl_usd: fromApiNullableAmount(raw.unrealized_pl_usd),
+    total_pl_usd: fromApiAmount(raw.total_pl_usd),
     return_percent: fromApiNullableAmount(raw.return_percent),
-    bought_rub: fromApiAmount(raw.bought_rub),
-    sold_rub: fromApiAmount(raw.sold_rub),
+    bought_usd: fromApiAmount(raw.bought_usd),
+    sold_usd: fromApiAmount(raw.sold_usd),
     allocation_percent: fromApiNullableAmount(raw.allocation_percent),
     target_allocation_percent: fromApiNullableAmount(raw.target_allocation_percent),
     tolerance_percent: fromApiNullableAmount(raw.tolerance_percent),
     allocation_deviation_percent: fromApiNullableAmount(raw.allocation_deviation_percent),
-    target_value_rub: fromApiNullableAmount(raw.target_value_rub),
-    allocation_deviation_rub: fromApiNullableAmount(raw.allocation_deviation_rub),
+    target_value_usd: fromApiNullableAmount(raw.target_value_usd),
+    allocation_deviation_usd: fromApiNullableAmount(raw.allocation_deviation_usd),
     rebalance_action: raw.rebalance_action ?? null,
-    rebalance_amount_rub: fromApiNullableAmount(raw.rebalance_amount_rub),
+    rebalance_amount_usd: fromApiNullableAmount(raw.rebalance_amount_usd),
     is_within_tolerance: raw.is_within_tolerance ?? null,
   }
 }
@@ -329,15 +329,15 @@ function mapTargetAllocation(raw: any): InvestmentTargetAllocation {
 function mapOverview(raw: any): InvestmentOverview {
   return {
     portfolio: raw.portfolio ? mapPortfolio(raw.portfolio) : null,
-    cost_basis_rub: fromApiAmount(raw.cost_basis_rub),
-    current_value_rub: fromApiAmount(raw.current_value_rub),
-    realized_pl_rub: fromApiAmount(raw.realized_pl_rub),
-    unrealized_pl_rub: fromApiAmount(raw.unrealized_pl_rub),
-    total_pl_rub: fromApiAmount(raw.total_pl_rub),
+    cost_basis_usd: fromApiAmount(raw.cost_basis_usd),
+    current_value_usd: fromApiAmount(raw.current_value_usd),
+    realized_pl_usd: fromApiAmount(raw.realized_pl_usd),
+    unrealized_pl_usd: fromApiAmount(raw.unrealized_pl_usd),
+    total_pl_usd: fromApiAmount(raw.total_pl_usd),
     return_percent: fromApiNullableAmount(raw.return_percent),
     valuation_complete: raw.valuation_complete !== false,
-    bought_rub: fromApiAmount(raw.bought_rub),
-    sold_rub: fromApiAmount(raw.sold_rub),
+    bought_usd: fromApiAmount(raw.bought_usd),
+    sold_usd: fromApiAmount(raw.sold_usd),
     largest_asset: raw.largest_asset ? mapPosition(raw.largest_asset) : null,
     latest_price_at: fromApiDateTime(raw.latest_price_at) ?? null,
     positions: Array.isArray(raw.positions) ? raw.positions.map(mapPosition) : [],
@@ -350,13 +350,13 @@ function mapPerformancePoint(raw: any): InvestmentPerformancePoint {
     date: raw.date ?? "",
     period_start: raw.period_start ?? null,
     period_end: raw.period_end ?? "",
-    cost_basis_rub: fromApiAmount(raw.cost_basis_rub),
-    current_value_rub: fromApiAmount(raw.current_value_rub),
-    realized_pl_rub: fromApiAmount(raw.realized_pl_rub),
-    unrealized_pl_rub: fromApiAmount(raw.unrealized_pl_rub),
-    total_pl_rub: fromApiAmount(raw.total_pl_rub),
-    bought_rub: fromApiAmount(raw.bought_rub),
-    sold_rub: fromApiAmount(raw.sold_rub),
+    cost_basis_usd: fromApiAmount(raw.cost_basis_usd),
+    current_value_usd: fromApiAmount(raw.current_value_usd),
+    realized_pl_usd: fromApiAmount(raw.realized_pl_usd),
+    unrealized_pl_usd: fromApiAmount(raw.unrealized_pl_usd),
+    total_pl_usd: fromApiAmount(raw.total_pl_usd),
+    bought_usd: fromApiAmount(raw.bought_usd),
+    sold_usd: fromApiAmount(raw.sold_usd),
     valuation_complete: raw.valuation_complete !== false,
   }
 }
@@ -375,7 +375,7 @@ function mapPerformance(raw: any): InvestmentPerformance {
 function mapRebalanceStatus(raw: any): InvestmentRebalanceStatus {
   return {
     portfolio_id: raw.portfolio_id ?? "",
-    current_value_rub: fromApiAmount(raw.current_value_rub),
+    current_value_usd: fromApiAmount(raw.current_value_usd),
     positions: Array.isArray(raw.positions) ? raw.positions.map(mapPosition) : [],
     disclaimer: raw.disclaimer ?? "",
   }
@@ -389,10 +389,10 @@ function toOperationPayload(payload: Partial<InvestmentOperationPayload>) {
     quantity: payload.quantity === undefined ? undefined : payload.quantity.toString(),
     price: payload.price === undefined ? undefined : payload.price.toString(),
     amount: payload.amount === undefined ? undefined : payload.amount.toString(),
-    amount_rub: toApiAmount(payload.amount_rub),
+    amount_usd: toApiAmount(payload.amount_usd),
     fee_amount: payload.fee_amount === undefined ? undefined : payload.fee_amount.toString(),
-    fee_rub: toApiAmount(payload.fee_rub),
-    fx_rate_to_rub: payload.fx_rate_to_rub === undefined ? undefined : payload.fx_rate_to_rub.toString(),
+    fee_usd: toApiAmount(payload.fee_usd),
+    fx_rate_to_usd: payload.fx_rate_to_usd === undefined ? undefined : payload.fx_rate_to_usd.toString(),
   }
 }
 
@@ -401,8 +401,8 @@ function toPricePayload(payload: Partial<InstrumentPriceSnapshotPayload>) {
     ...payload,
     captured_at: toApiDateTime(payload.captured_at),
     price: payload.price === undefined ? undefined : payload.price.toString(),
-    fx_rate_to_rub: payload.fx_rate_to_rub === undefined ? undefined : payload.fx_rate_to_rub.toString(),
-    price_rub: toApiAmount(payload.price_rub),
+    fx_rate_to_usd: payload.fx_rate_to_usd === undefined ? undefined : payload.fx_rate_to_usd.toString(),
+    price_usd: toApiAmount(payload.price_usd),
   }
 }
 
