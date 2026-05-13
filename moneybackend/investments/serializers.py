@@ -12,7 +12,6 @@ from .models import (
     InvestmentPortfolio,
     InvestmentTargetAllocation,
     SUPPORTED_CURRENCIES,
-    ZERO_AMOUNT,
 )
 from .services import calculate_instrument_quantity, calculate_portfolio_totals, calculate_positions
 
@@ -266,14 +265,8 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
             'instrument_name',
             'operation_type',
             'quantity',
-            'price',
-            'price_currency',
-            'amount',
-            'amount_currency',
+            'price_usd',
             'amount_usd',
-            'fx_rate_to_usd',
-            'fee_amount',
-            'fee_currency',
             'fee_usd',
             'comment',
             'deleted',
@@ -299,25 +292,6 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         request = self.context.get('request')
         user = getattr(request, 'user', None)
-
-        attrs['price_currency'] = 'USD'
-        attrs['amount_currency'] = 'USD'
-        attrs['fee_currency'] = 'USD'
-        attrs['fx_rate_to_usd'] = Decimal('1')
-        if (
-            ('amount_usd' not in attrs or attrs.get('amount_usd') in (None, ZERO_AMOUNT))
-            and attrs.get('amount') not in (None, ZERO_AMOUNT)
-        ):
-            attrs['amount_usd'] = attrs['amount']
-        if attrs.get('amount_usd') is not None:
-            attrs['amount'] = attrs['amount_usd']
-        if (
-            ('fee_usd' not in attrs or attrs.get('fee_usd') in (None, ZERO_AMOUNT))
-            and attrs.get('fee_amount') not in (None, ZERO_AMOUNT)
-        ):
-            attrs['fee_usd'] = attrs['fee_amount']
-        if attrs.get('fee_usd') is not None:
-            attrs['fee_amount'] = attrs['fee_usd']
 
         portfolio = attrs.get('portfolio') or getattr(self.instance, 'portfolio', None)
         account = attrs.get('account') or getattr(self.instance, 'account', None)
@@ -373,15 +347,6 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
                 })
 
         return attrs
-
-    def validate_price_currency(self, value):
-        return _normalize_currency(value)
-
-    def validate_amount_currency(self, value):
-        return _normalize_currency(value)
-
-    def validate_fee_currency(self, value):
-        return _normalize_currency(value)
 
 
 class InvestmentPositionSerializer(serializers.Serializer):

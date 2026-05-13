@@ -46,12 +46,8 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0000000000'),
-            price=Decimal('100000.00000000'),
-            price_currency='USD',
-            amount=Decimal('100000.00000000'),
-            amount_currency='USD',
+            price_usd=Decimal('100000.00000000'),
             amount_usd=Decimal('100000.00'),
-            fx_rate_to_usd=Decimal('1.00000000'),
             date=timezone.now(),
         )
 
@@ -71,12 +67,8 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('2.0000000000'),
-            price=Decimal('200000.00000000'),
-            price_currency='USD',
-            amount=Decimal('400000.00000000'),
-            amount_currency='USD',
+            price_usd=Decimal('200000.00000000'),
             amount_usd=Decimal('400000.00'),
-            fx_rate_to_usd=Decimal('1.00000000'),
             date=timezone.now(),
         )
         return other_user, other_portfolio, other_account, other_operation
@@ -88,12 +80,8 @@ class InvestmentModuleIsolationTests(TestCase):
             'instrument': str(self.instrument.id),
             'operation_type': InvestmentOperation.TYPE_BUY,
             'quantity': '0.1000000000',
-            'price': '1000000.00000000',
-            'price_currency': 'USD',
-            'amount': '100000.00000000',
-            'amount_currency': 'USD',
+            'price_usd': '1000000.00000000',
             'amount_usd': '100000.00',
-            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(response.status_code, 201, response.data)
@@ -111,12 +99,8 @@ class InvestmentModuleIsolationTests(TestCase):
             'instrument': str(self.instrument.id),
             'operation_type': InvestmentOperation.TYPE_SELL,
             'quantity': '0.5000000000',
-            'price': '120000.00000000',
-            'price_currency': 'USD',
-            'amount': '60000.00000000',
-            'amount_currency': 'USD',
+            'price_usd': '120000.00000000',
             'amount_usd': '60000.00',
-            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(response.status_code, 201, response.data)
@@ -133,12 +117,8 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_SELL,
             quantity=Decimal('0.2500000000'),
-            price=Decimal('120000.00000000'),
-            price_currency='USD',
-            amount=Decimal('30000.00000000'),
-            amount_currency='USD',
+            price_usd=Decimal('120000.00000000'),
             amount_usd=Decimal('30000.00'),
-            fx_rate_to_usd=Decimal('1.00000000'),
             date=operation.date + timedelta(hours=1),
         )
         date_from = (operation.date - timedelta(days=1)).isoformat()
@@ -169,8 +149,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('100.00'),
-            amount=Decimal('100.00'),
+            price_usd=Decimal('100.00'),
             amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
@@ -180,8 +159,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('200.00'),
-            amount=Decimal('200.00'),
+            price_usd=Decimal('200.00'),
             amount_usd=Decimal('200.00'),
             date=timezone.now(),
         )
@@ -191,8 +169,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_SELL,
             quantity=Decimal('0.5'),
-            price=Decimal('300.00'),
-            amount=Decimal('150.00'),
+            price_usd=Decimal('300.00'),
             amount_usd=Decimal('150.00'),
             date=timezone.now(),
         )
@@ -211,8 +188,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('100.00'),
-            amount=Decimal('100.00'),
+            price_usd=Decimal('100.00'),
             amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
@@ -285,8 +261,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('100.00'),
-            amount=Decimal('100.00'),
+            price_usd=Decimal('100.00'),
             amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
@@ -364,8 +339,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('100.00'),
-            amount=Decimal('100.00'),
+            price_usd=Decimal('100.00'),
             amount_usd=Decimal('100.00'),
             date=self._dt(2025, 12, 20),
         )
@@ -383,8 +357,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('200.00'),
-            amount=Decimal('200.00'),
+            price_usd=Decimal('200.00'),
             amount_usd=Decimal('200.00'),
             date=self._dt(2026, 1, 10),
         )
@@ -418,8 +391,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('100.00'),
-            amount=Decimal('100.00'),
+            price_usd=Decimal('100.00'),
             amount_usd=Decimal('100.00'),
             date=self._dt(2026, 1, 10),
         )
@@ -450,8 +422,7 @@ class InvestmentModuleIsolationTests(TestCase):
             instrument=self.instrument,
             operation_type=InvestmentOperation.TYPE_BUY,
             quantity=Decimal('1.0'),
-            price=Decimal('100.00'),
-            amount=Decimal('100.00'),
+            price_usd=Decimal('100.00'),
             amount_usd=Decimal('100.00'),
             date=timezone.now(),
         )
@@ -469,43 +440,30 @@ class InvestmentModuleIsolationTests(TestCase):
             'instrument': str(self.instrument.id),
             'operation_type': InvestmentOperation.TYPE_SELL,
             'quantity': '1.0000000000',
-            'price': '1000000.00000000',
-            'price_currency': 'USD',
-            'amount': '1000000.00000000',
-            'amount_currency': 'USD',
+            'price_usd': '1000000.00000000',
             'amount_usd': '1000000.00',
-            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('quantity', response.data)
 
-    def test_operation_api_normalizes_legacy_currency_fields_to_usd(self):
+    def test_operation_api_uses_usd_fields_only(self):
         response = self.client.post('/api/v1/investment/operations/', {
             'portfolio': str(self.portfolio.id),
             'account': str(self.account.id),
             'instrument': str(self.instrument.id),
             'operation_type': InvestmentOperation.TYPE_BUY,
             'quantity': '1.0000000000',
-            'price': '100.00000000',
-            'price_currency': 'EUR',
-            'amount': '110.00000000',
-            'amount_currency': 'EUR',
+            'price_usd': '110.00000000',
             'amount_usd': '110.00',
-            'fx_rate_to_usd': '1.10000000',
-            'fee_amount': '2.00000000',
-            'fee_currency': 'EUR',
             'fee_usd': '2.00',
         }, format='json')
 
         self.assertEqual(response.status_code, 201, response.data)
         operation = InvestmentOperation.objects.get(id=response.data['id'])
-        self.assertEqual(operation.price_currency, 'USD')
-        self.assertEqual(operation.amount_currency, 'USD')
-        self.assertEqual(operation.fee_currency, 'USD')
-        self.assertEqual(operation.fx_rate_to_usd, Decimal('1'))
-        self.assertEqual(operation.amount, Decimal('110.00'))
-        self.assertEqual(operation.fee_amount, Decimal('2.00'))
+        self.assertEqual(operation.price_usd, Decimal('110.00000000'))
+        self.assertEqual(operation.amount_usd, Decimal('110.00'))
+        self.assertEqual(operation.fee_usd, Decimal('2.00'))
 
     def test_openapi_schema_contains_investment_contract(self):
         response = self.client.get('/api/schema/')
@@ -610,12 +568,8 @@ class InvestmentModuleIsolationTests(TestCase):
             'instrument': str(self.instrument.id),
             'operation_type': InvestmentOperation.TYPE_BUY,
             'quantity': '1.0000000000',
-            'price': '100000.00000000',
-            'price_currency': 'USD',
-            'amount': '100000.00000000',
-            'amount_currency': 'USD',
+            'price_usd': '100000.00000000',
             'amount_usd': '100000.00',
-            'fx_rate_to_usd': '1.00000000',
         }, format='json')
 
         self.assertEqual(account_response.status_code, 400)

@@ -48,14 +48,8 @@ export interface InvestmentOperation {
   instrument_name?: string
   operation_type: InvestmentOperationType
   quantity: number
-  price?: number
-  price_currency: string
-  amount?: number
-  amount_currency: string
+  price_usd?: number
   amount_usd: number
-  fx_rate_to_usd: number
-  fee_amount: number
-  fee_currency: string
   fee_usd: number
   comment?: string
   deleted: boolean
@@ -243,14 +237,8 @@ function mapOperation(raw: any): InvestmentOperation {
     instrument_name: raw.instrument_name ?? undefined,
     operation_type: raw.operation_type,
     quantity: fromApiAmount(raw.quantity),
-    price: raw.price === null || raw.price === undefined ? undefined : fromApiAmount(raw.price),
-    price_currency: raw.price_currency ?? "USD",
-    amount: raw.amount === null || raw.amount === undefined ? undefined : fromApiAmount(raw.amount),
-    amount_currency: raw.amount_currency ?? "USD",
+    price_usd: raw.price_usd === null || raw.price_usd === undefined ? undefined : fromApiAmount(raw.price_usd),
     amount_usd: fromApiAmount(raw.amount_usd),
-    fx_rate_to_usd: fromApiAmount(raw.fx_rate_to_usd),
-    fee_amount: fromApiAmount(raw.fee_amount),
-    fee_currency: raw.fee_currency ?? "USD",
     fee_usd: fromApiAmount(raw.fee_usd),
     comment: raw.comment ?? undefined,
     deleted: !!raw.deleted,
@@ -387,12 +375,9 @@ function toOperationPayload(payload: Partial<InvestmentOperationPayload>) {
     date: toApiDateTime(payload.date),
     account_to: payload.account_to || null,
     quantity: payload.quantity === undefined ? undefined : payload.quantity.toString(),
-    price: payload.price === undefined ? undefined : payload.price.toString(),
-    amount: payload.amount === undefined ? undefined : payload.amount.toString(),
+    price_usd: payload.price_usd === undefined ? undefined : payload.price_usd.toString(),
     amount_usd: toApiAmount(payload.amount_usd),
-    fee_amount: payload.fee_amount === undefined ? undefined : payload.fee_amount.toString(),
     fee_usd: toApiAmount(payload.fee_usd),
-    fx_rate_to_usd: payload.fx_rate_to_usd === undefined ? undefined : payload.fx_rate_to_usd.toString(),
   }
 }
 

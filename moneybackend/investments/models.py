@@ -239,14 +239,8 @@ class InvestmentOperation(models.Model):
     instrument = models.ForeignKey(Instrument, on_delete=models.PROTECT, related_name='operations')
     operation_type = models.CharField(max_length=30, choices=TYPES)
     quantity = models.DecimalField(max_digits=24, decimal_places=10)
-    price = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
-    price_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
-    amount = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
-    amount_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
+    price_usd = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
     amount_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
-    fx_rate_to_usd = models.DecimalField(max_digits=18, decimal_places=8, default=Decimal('1'))
-    fee_amount = models.DecimalField(max_digits=24, decimal_places=8, default=ZERO_AMOUNT)
-    fee_currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='USD')
     fee_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
     comment = models.CharField(max_length=200, blank=True, default='')
     deleted = models.BooleanField(default=False)
@@ -279,8 +273,8 @@ class InvestmentOperation(models.Model):
         if self.operation_type in (self.TYPE_BUY, self.TYPE_SELL, self.TYPE_TRANSFER) and self.quantity < ZERO_AMOUNT:
             errors['quantity'] = 'Количество должно быть положительным.'
         if self.operation_type in (self.TYPE_BUY, self.TYPE_SELL):
-            if self.price is None or self.price <= ZERO_AMOUNT:
-                errors['price'] = 'Укажите положительную цену.'
+            if self.price_usd is None or self.price_usd <= ZERO_AMOUNT:
+                errors['price_usd'] = 'Укажите положительную цену в USD.'
             if self.amount_usd <= ZERO_AMOUNT:
                 errors['amount_usd'] = 'Укажите положительную сумму в USD.'
         if self.operation_type == self.TYPE_CORRECTION and self.account_to is not None:
@@ -292,18 +286,6 @@ class InvestmentOperation(models.Model):
     def save(self, *args, **kwargs):
         if not self.number:
             self.number = generate_document_number('INV', InvestmentOperation)
-        self.price_currency = 'USD'
-        self.amount_currency = 'USD'
-        self.fee_currency = 'USD'
-        self.fx_rate_to_usd = Decimal('1')
-        if (self.amount_usd is None or self.amount_usd == ZERO_AMOUNT) and self.amount not in (None, ZERO_AMOUNT):
-            self.amount_usd = self.amount
-        if self.amount_usd is not None:
-            self.amount = self.amount_usd
-        if (self.fee_usd is None or self.fee_usd == ZERO_AMOUNT) and self.fee_amount not in (None, ZERO_AMOUNT):
-            self.fee_usd = self.fee_amount
-        if self.fee_usd is not None:
-            self.fee_amount = self.fee_usd
         super().save(*args, **kwargs)
 
     def __str__(self):
