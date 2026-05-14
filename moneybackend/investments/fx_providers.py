@@ -1,6 +1,8 @@
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
+from urllib import parse as urlparse
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
@@ -22,7 +24,7 @@ class FxRateQuote:
 class BaseFxRateProvider:
     source = 'base'
 
-    def get_rate(self, base_currency, quote_currency='USD'):
+    def get_rate(self, base_currency, quote_currency='USD', on_date=None):
         raise NotImplementedError
 
 
@@ -35,7 +37,7 @@ class StaticFxRateProvider(BaseFxRateProvider):
             for (base, quote), rate in rates.items()
         }
 
-    def get_rate(self, base_currency, quote_currency='USD'):
+    def get_rate(self, base_currency, quote_currency='USD', on_date=None):
         base = str(base_currency or '').strip().upper()
         quote = str(quote_currency or 'USD').strip().upper()
         if base == quote:
@@ -60,9 +62,9 @@ class CbrFxRateProvider(BaseFxRateProvider):
         )
         self.timeout = timeout if timeout is not None else getattr(settings, 'INVESTMENT_FX_PROVIDER_TIMEOUT', 10)
         self.opener = opener or urlrequest.urlopen
-        self._rates = None
+        self._rates_by_date = {}
 
-    def get_rate(self, base_currency, quote_currency='USD'):
+    def get_rate(self, base_currency, quote_currency='USD', on_date=None):
         base = str(base_currency or '').strip().upper()
         quote = str(quote_currency or 'USD').strip().upper()
         if not base:
@@ -70,7 +72,7 @@ class CbrFxRateProvider(BaseFxRateProvider):
         if base == quote:
             return FxRateQuote(base_currency=base, quote_currency=quote, rate=Decimal('1'), source=self.source)
 
-        rates = self._get_rates()
+        rates = self._get_rates(on_date=on_date)
         try:
             base_to_rub = rates[base]
             quote_to_rub = rates[quote]
@@ -78,12 +80,19 @@ class CbrFxRateProvider(BaseFxRateProvider):
             raise FxRateProviderError(f'CBR provider не вернул курс для пары {base}/{quote}.') from exc
         return FxRateQuote(base_currency=base, quote_currency=quote, rate=base_to_rub / quote_to_rub, source=self.source)
 
-    def _get_rates(self):
-        if self._rates is not None:
-            return self._rates
+    def _get_rates(self, on_date=None):
+        rate_date = _normalize_rate_date(on_date)
+        cache_key = rate_date.isoformat() if rate_date is not None else 'latest'
+        if cache_key in self._rates_by_date:
+            return self._rates_by_date[cache_key]
+
+        url = self.base_url
+        if rate_date is not None:
+            separator = '&' if '?' in url else '?'
+            url = f'{url}{separator}{urlparse.urlencode({"date_req": rate_date.strftime("%d/%m/%Y")})}'
 
         request = urlrequest.Request(
-            self.base_url,
+            url,
             headers={'User-Agent': 'MoneyInvestmentFxProvider/1.0'},
         )
         try:
@@ -110,8 +119,18 @@ class CbrFxRateProvider(BaseFxRateProvider):
             if code and rate > 0:
                 rates[code] = rate
 
-        self._rates = rates
+        self._rates_by_date[cache_key] = rates
         return rates
+
+
+def _normalize_rate_date(value):
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if hasattr(value, 'date'):
+        return value.date()
+    return None
 
 
 def get_fx_rate_provider(name=None):

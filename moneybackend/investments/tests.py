@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
@@ -26,6 +27,8 @@ from .services import (
     calculate_positions,
     calculate_portfolio_totals,
     refresh_price_snapshots,
+    refresh_fx_rate_snapshots,
+    backfill_price_snapshots,
 )
 
 
@@ -474,6 +477,7 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertIn('/api/v1/investment/prices/', content)
         self.assertIn('/api/v1/investment/prices/refresh/', content)
         self.assertIn('/api/v1/investment/fx-rates/', content)
+        self.assertIn('/api/v1/investment/fx-rates/refresh/', content)
         self.assertIn('/api/v1/investment/portfolios/', content)
         self.assertIn('/api/v1/investment/portfolios/{id}/performance/', content)
         self.assertIn('/api/v1/investment/portfolios/{id}/rebalance/', content)
@@ -521,6 +525,52 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(eth_snapshot.fx_rate_to_usd, Decimal('1.10000000'))
         self.assertEqual(eth_snapshot.price_usd, Decimal('110.00'))
         self.assertEqual(eth_snapshot.source, 'test-price')
+
+    def test_backfill_price_snapshots_creates_daily_prices(self):
+        eth = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='ETH', name='Ethereum')
+
+        class PriceProvider:
+            def get_historical_price(self, instrument, on_date):
+                return PriceQuote(
+                    instrument_id=str(instrument.id),
+                    symbol=instrument.ticker,
+                    price=Decimal('100.00'),
+                    price_currency='USD',
+                    source='test-price',
+                )
+
+        result = backfill_price_snapshots(
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 1, 2),
+            price_provider=PriceProvider(),
+            instruments=Instrument.objects.filter(id=eth.id),
+        )
+
+        self.assertEqual(result['created'], 2)
+        self.assertEqual(result['failed'], 0)
+        self.assertEqual(InstrumentPriceSnapshot.objects.filter(instrument=eth).count(), 2)
+
+    def test_refresh_fx_rate_snapshots_creates_supported_cross_rates(self):
+        result = refresh_fx_rate_snapshots(
+            fx_provider=StaticFxRateProvider({
+                ('USD', 'RUB'): '91.25',
+                ('USD', 'EUR'): '0.90',
+            }),
+            pairs=[('USD', 'RUB'), ('USD', 'EUR')],
+        )
+
+        self.assertEqual(result['created'], 2)
+        self.assertEqual(result['failed'], 0)
+        self.assertEqual(FxRateSnapshot.objects.count(), 2)
+        self.assertTrue(FxRateSnapshot.objects.filter(base_currency='USD', quote_currency='RUB', rate=Decimal('91.25000000')).exists())
+        self.assertTrue(FxRateSnapshot.objects.filter(base_currency='USD', quote_currency='EUR', rate=Decimal('0.90000000')).exists())
+
+    def test_refresh_fx_rates_api_endpoint(self):
+        with patch('investments.views.refresh_fx_rate_snapshots', return_value={'created': 1, 'failed': 0, 'results': []}):
+            response = self.client.post('/api/v1/investment/fx-rates/refresh/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['created'], 1)
 
     def test_regular_user_does_not_see_foreign_portfolios_accounts_or_operations(self):
         _, other_portfolio, other_account, other_operation = self._create_foreign_investment_data()
@@ -625,6 +675,11 @@ class _FakeOpener:
 
 
 class InvestmentPriceProviderTests(SimpleTestCase):
+    def test_crypto_instrument_save_normalizes_common_ticker_to_provider_id(self):
+        provider_symbol = Instrument.normalize_provider_symbol(Instrument.TYPE_CRYPTO, 'BTC', 'BTC')
+
+        self.assertEqual(provider_symbol, 'bitcoin')
+
     def test_static_provider_returns_configured_quote(self):
         instrument = SimpleNamespace(id='btc-id', provider_symbol='BTC', ticker='BTC', quote_currency='USD')
         provider = StaticPriceProvider({('BTC', 'USD'): '62000.50'})
@@ -659,20 +714,9 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         self.assertEqual(quote.price_currency, 'USD')
         self.assertEqual(quote.source, 'coingecko')
 
-    def test_coingecko_provider_maps_exchange_pairs_to_coin_ids(self):
-        opener = _FakeOpener('{"bitcoin": {"usd": 62000.5}}')
-        instrument = SimpleNamespace(id='btc-id', provider_symbol='BTCUSDT', ticker='BTC', quote_currency='USD')
-        provider = CoinGeckoPriceProvider(base_url='https://prices.example/simple', opener=opener)
-
-        quote = provider.get_price(instrument)
-
-        self.assertIn('ids=bitcoin', opener.request_url)
-        self.assertEqual(quote.symbol, 'bitcoin')
-        self.assertEqual(quote.price, Decimal('62000.5'))
-
     def test_coingecko_provider_maps_sol_ticker(self):
         opener = _FakeOpener('{"solana": {"usd": 150.25}}')
-        instrument = SimpleNamespace(id='sol-id', provider_symbol='SOLUSDT', ticker='SOL', quote_currency='USD')
+        instrument = SimpleNamespace(id='sol-id', provider_symbol='SOL', ticker='SOL', quote_currency='USD')
         provider = CoinGeckoPriceProvider(base_url='https://prices.example/simple', opener=opener)
 
         quote = provider.get_price(instrument)
@@ -680,6 +724,28 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         self.assertIn('ids=solana', opener.request_url)
         self.assertEqual(quote.symbol, 'solana')
         self.assertEqual(quote.price, Decimal('150.25'))
+
+    def test_coingecko_provider_reads_historical_price(self):
+        opener = _FakeOpener('{"market_data": {"current_price": {"usd": 62000.5}}}')
+        instrument = SimpleNamespace(id='btc-id', provider_symbol='BTC', ticker='BTC', quote_currency='USD')
+        provider = CoinGeckoPriceProvider(history_base_url='https://prices.example/coins', opener=opener)
+
+        quote = provider.get_historical_price(instrument, date(2026, 1, 10))
+
+        self.assertIn('/bitcoin/history?', opener.request_url)
+        self.assertIn('date=10-01-2026', opener.request_url)
+        self.assertIn('localization=false', opener.request_url)
+        self.assertEqual(quote.symbol, 'bitcoin')
+        self.assertEqual(quote.price, Decimal('62000.5'))
+
+    def test_coingecko_provider_does_not_map_exchange_pairs(self):
+        opener = _FakeOpener('{"bitcoin": {"usd": 62000.5}}')
+        instrument = SimpleNamespace(id='btc-id', provider_symbol='BTCUSDT', ticker='BTC', quote_currency='USD')
+        provider = CoinGeckoPriceProvider(base_url='https://prices.example/simple', opener=opener)
+
+        with self.assertRaises(PriceProviderError):
+            provider.get_price(instrument)
+        self.assertIn('ids=btcusdt', opener.request_url)
 
     def test_coingecko_provider_raises_controlled_error_for_missing_price(self):
         opener = _FakeOpener('{"bitcoin": {}}')
@@ -737,6 +803,20 @@ class InvestmentFxRateProviderTests(SimpleTestCase):
         self.assertEqual(usd_quote.rate, Decimal('91.2500'))
         self.assertEqual(eur_quote.rate, Decimal('101.5000') / Decimal('91.2500'))
         self.assertEqual(usd_quote.source, 'cbr')
+
+    def test_cbr_provider_requests_historical_rate_date(self):
+        payload = (
+            '<ValCurs Date="10.01.2026">'
+            '<Valute><CharCode>USD</CharCode><Nominal>1</Nominal><Value>91,2500</Value></Valute>'
+            '</ValCurs>'
+        )
+        opener = _FakeOpener(payload)
+        provider = CbrFxRateProvider(base_url='https://rates.example/cbr.xml', opener=opener)
+
+        quote = provider.get_rate('USD', 'RUB', on_date=date(2026, 1, 10))
+
+        self.assertIn('date_req=10%2F01%2F2026', opener.request_url)
+        self.assertEqual(quote.rate, Decimal('91.2500'))
 
     def test_cbr_provider_raises_controlled_error_for_missing_currency(self):
         opener = _FakeOpener('<ValCurs><Valute><CharCode>USD</CharCode><Nominal>1</Nominal><Value>91,25</Value></Valute></ValCurs>')

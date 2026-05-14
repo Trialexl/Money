@@ -1,11 +1,14 @@
 import json
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib import parse as urlparse
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
 from django.conf import settings
+
+from .models import COMMON_CRYPTO_PROVIDER_SYMBOLS
 
 
 class PriceProviderError(Exception):
@@ -26,6 +29,9 @@ class BasePriceProvider:
 
     def get_price(self, instrument):
         raise NotImplementedError
+
+    def get_historical_price(self, instrument, on_date):
+        raise PriceProviderError('Provider не поддерживает исторические цены.')
 
 
 class StaticPriceProvider(BasePriceProvider):
@@ -55,28 +61,17 @@ class StaticPriceProvider(BasePriceProvider):
 
 class CoinGeckoPriceProvider(BasePriceProvider):
     source = 'coingecko'
-    COMMON_CRYPTO_IDS = {
-        'ada': 'cardano',
-        'bnb': 'binancecoin',
-        'btc': 'bitcoin',
-        'doge': 'dogecoin',
-        'dot': 'polkadot',
-        'eth': 'ethereum',
-        'matic': 'matic-network',
-        'pol': 'polygon-ecosystem-token',
-        'sol': 'solana',
-        'ton': 'the-open-network',
-        'usdc': 'usd-coin',
-        'usdt': 'tether',
-        'xrp': 'ripple',
-    }
-    QUOTE_SUFFIXES = ('usdt', 'usdc', 'usd', 'eur', 'rub')
 
-    def __init__(self, *, base_url=None, timeout=None, opener=None):
+    def __init__(self, *, base_url=None, history_base_url=None, timeout=None, opener=None):
         self.base_url = base_url or getattr(
             settings,
             'INVESTMENT_PRICE_PROVIDER_BASE_URL',
             'https://api.coingecko.com/api/v3/simple/price',
+        )
+        self.history_base_url = history_base_url or getattr(
+            settings,
+            'INVESTMENT_PRICE_PROVIDER_HISTORY_BASE_URL',
+            'https://api.coingecko.com/api/v3/coins',
         )
         self.timeout = timeout if timeout is not None else getattr(settings, 'INVESTMENT_PRICE_PROVIDER_TIMEOUT', 10)
         self.opener = opener or urlrequest.urlopen
@@ -123,23 +118,64 @@ class CoinGeckoPriceProvider(BasePriceProvider):
             source=self.source,
         )
 
+    def get_historical_price(self, instrument, on_date):
+        provider_symbol = self._coingecko_id(instrument)
+        quote_currency = (instrument.quote_currency or 'USD').strip().lower()
+        rate_date = _normalize_price_date(on_date)
+        if not provider_symbol:
+            raise PriceProviderError('У инструмента не указан provider_symbol или ticker.')
+        if rate_date is None:
+            raise PriceProviderError('Не указана дата исторической цены.')
+
+        query = urlparse.urlencode({
+            'date': rate_date.strftime('%d-%m-%Y'),
+            'localization': 'false',
+        })
+        url = f'{self.history_base_url.rstrip("/")}/{urlparse.quote(provider_symbol)}/history?{query}'
+        request = urlrequest.Request(
+            url,
+            headers={'User-Agent': 'MoneyInvestmentPriceProvider/1.0'},
+        )
+
+        try:
+            with self.opener(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise PriceProviderError(f'Не удалось получить историческую цену {provider_symbol}/{quote_currency}.') from exc
+
+        raw_price = payload.get('market_data', {}).get('current_price', {}).get(quote_currency)
+        if raw_price is None:
+            raise PriceProviderError(f'Provider не вернул историческую цену {provider_symbol}/{quote_currency} за {rate_date.isoformat()}.')
+
+        try:
+            price = Decimal(str(raw_price))
+        except (InvalidOperation, TypeError) as exc:
+            raise PriceProviderError(f'Provider вернул некорректную историческую цену {provider_symbol}/{quote_currency}.') from exc
+
+        if price <= 0:
+            raise PriceProviderError(f'Provider вернул неположительную историческую цену {provider_symbol}/{quote_currency}.')
+
+        return PriceQuote(
+            instrument_id=str(instrument.id) if getattr(instrument, 'id', None) else None,
+            symbol=provider_symbol,
+            price=price,
+            price_currency=quote_currency.upper(),
+            source=self.source,
+        )
+
     def _coingecko_id(self, instrument):
         symbol = (instrument.provider_symbol or instrument.ticker or '').strip().lower()
-        if not symbol:
-            return ''
+        return COMMON_CRYPTO_PROVIDER_SYMBOLS.get(symbol.upper(), symbol)
 
-        normalized = ''.join(character for character in symbol if character.isalnum())
-        for candidate in (symbol, normalized):
-            if candidate in self.COMMON_CRYPTO_IDS:
-                return self.COMMON_CRYPTO_IDS[candidate]
 
-        for quote_suffix in self.QUOTE_SUFFIXES:
-            if normalized.endswith(quote_suffix) and len(normalized) > len(quote_suffix):
-                base_symbol = normalized[: -len(quote_suffix)]
-                if base_symbol in self.COMMON_CRYPTO_IDS:
-                    return self.COMMON_CRYPTO_IDS[base_symbol]
-
-        return symbol
+def _normalize_price_date(value):
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if hasattr(value, 'date'):
+        return value.date()
+    return None
 
 
 def get_price_provider(name=None):

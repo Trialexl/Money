@@ -13,7 +13,7 @@ from .models import (
 
 @admin.register(Instrument)
 class InstrumentAdmin(admin.ModelAdmin):
-    list_display = ('ticker', 'name', 'type', 'quote_currency', 'is_active')
+    list_display = ('ticker', 'name', 'type', 'provider_symbol', 'quote_currency', 'is_active')
     list_filter = ('type', 'quote_currency', 'is_active')
     search_fields = ('ticker', 'name', 'provider_symbol')
 

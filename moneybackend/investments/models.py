@@ -13,6 +13,21 @@ from money.utils import generate_document_number
 ZERO_AMOUNT = Decimal('0')
 SUPPORTED_CURRENCIES = ('USD', 'EUR', 'RUB')
 CURRENCY_CHOICES = [(currency, currency) for currency in SUPPORTED_CURRENCIES]
+COMMON_CRYPTO_PROVIDER_SYMBOLS = {
+    'ADA': 'cardano',
+    'BNB': 'binancecoin',
+    'BTC': 'bitcoin',
+    'DOGE': 'dogecoin',
+    'DOT': 'polkadot',
+    'ETH': 'ethereum',
+    'MATIC': 'matic-network',
+    'POL': 'polygon-ecosystem-token',
+    'SOL': 'solana',
+    'TON': 'the-open-network',
+    'USDC': 'usd-coin',
+    'USDT': 'tether',
+    'XRP': 'ripple',
+}
 
 
 class Instrument(models.Model):
@@ -44,9 +59,16 @@ class Instrument(models.Model):
 
     def save(self, *args, **kwargs):
         self.ticker = (self.ticker or '').strip().upper()
-        self.provider_symbol = (self.provider_symbol or self.ticker).strip()
+        self.provider_symbol = self.normalize_provider_symbol(self.type, self.provider_symbol, self.ticker)
         self.quote_currency = (self.quote_currency or 'USD').strip().upper()
         super().save(*args, **kwargs)
+
+    @classmethod
+    def normalize_provider_symbol(cls, instrument_type, provider_symbol, ticker):
+        symbol = (provider_symbol or ticker or '').strip()
+        if instrument_type == cls.TYPE_CRYPTO:
+            return COMMON_CRYPTO_PROVIDER_SYMBOLS.get(symbol.upper(), symbol)
+        return symbol
 
     def __str__(self):
         return f'{self.ticker} ({self.get_type_display()})'

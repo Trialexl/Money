@@ -131,7 +131,10 @@ Env-настройки:
 - `instruments/` - CRUD инструментов, фильтры `type`, `is_active`, `search`.
 - `prices/` - CRUD снимков цен, фильтры `instrument`, `date_from`, `date_to`, `source`.
 - `prices/refresh/` - обновление цен активных инструментов через configured price/fx providers, с частичными ошибками в `results`.
+- `prices/backfill/` - заполнение ежедневных цен активных инструментов за период; по умолчанию с 1 января текущего года по сегодня.
 - `fx-rates/` - CRUD снимков валютных курсов, фильтры `base_currency`, `quote_currency`, `date_from`, `date_to`, `source`.
+- `fx-rates/refresh/` - обновление кросс-курсов `USD/EUR/RUB` через configured FX provider, по умолчанию CBR.
+- `fx-rates/backfill/` - заполнение ежедневных кросс-курсов `USD/EUR/RUB` за период; по умолчанию с 1 января текущего года по сегодня.
 - `portfolios/` - CRUD портфелей текущего пользователя.
 - `portfolios/{id}/overview/` - сводка конкретного портфеля.
 - `portfolios/{id}/positions/` - позиции конкретного портфеля, параметр `include_zero`.

@@ -2544,6 +2544,56 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/investment/fx-rates/backfill/:
+    post:
+      operationId: v1_investment_fx_rates_backfill_create
+      description: Заполнить ежедневные кросс-курсы USD/EUR/RUB за период через configured
+        FX provider.
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+        description: Дата начала backfill. По умолчанию 1 января текущего года.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+        description: Дата окончания backfill. По умолчанию сегодня.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/investment/fx-rates/refresh/:
+    post:
+      operationId: v1_investment_fx_rates_refresh_create
+      description: Обновить валютные курсы USD/EUR/RUB через configured FX provider.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/investment/instruments/:
     get:
       operationId: v1_investment_instruments_list
@@ -3437,6 +3487,38 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/investment/prices/backfill/:
+    post:
+      operationId: v1_investment_prices_backfill_create
+      description: Заполнить ежедневные цены активных инструментов за период через
+        configured price provider.
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+        description: Дата начала backfill. По умолчанию 1 января текущего года.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+        description: Дата окончания backfill. По умолчанию сегодня.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/investment/prices/refresh/:
     post:
       operationId: v1_investment_prices_refresh_create

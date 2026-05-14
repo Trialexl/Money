@@ -1,6 +1,6 @@
 from datetime import date
 
-from rest_framework import permissions, viewsets
+from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils.dateparse import parse_date
@@ -30,7 +30,15 @@ from .serializers import (
     get_default_portfolio,
     serialize_portfolio_overview,
 )
-from .services import calculate_portfolio_performance, calculate_positions, calculate_rebalance_status, refresh_price_snapshots
+from .services import (
+    calculate_portfolio_performance,
+    calculate_positions,
+    calculate_rebalance_status,
+    backfill_fx_rate_snapshots,
+    backfill_price_snapshots,
+    refresh_fx_rate_snapshots,
+    refresh_price_snapshots,
+)
 
 
 instrument_list_parameters = [
@@ -166,6 +174,31 @@ class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
     def refresh(self, request):
         return Response(refresh_price_snapshots())
 
+    @extend_schema(
+        request=None,
+        parameters=[
+            OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата начала backfill. По умолчанию 1 января текущего года.'),
+            OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата окончания backfill. По умолчанию сегодня.'),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+        description='Заполнить ежедневные цены активных инструментов за период через configured price provider.',
+    )
+    @action(detail=False, methods=['post'])
+    def backfill(self, request):
+        today = date.today()
+        payload = request.data if isinstance(request.data, dict) else {}
+        date_from_value = request.query_params.get('date_from') or payload.get('date_from')
+        date_to_value = request.query_params.get('date_to') or payload.get('date_to')
+        date_from = parse_date(date_from_value) if date_from_value else date(today.year, 1, 1)
+        date_to = parse_date(date_to_value) if date_to_value else today
+        if date_from is None:
+            return Response({'date_from': 'Некорректная дата. Используйте YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+        if date_to is None:
+            return Response({'date_to': 'Некорректная дата. Используйте YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+        if date_from > date_to:
+            return Response({'date_to': 'Дата окончания должна быть не раньше даты начала.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(backfill_price_snapshots(date_from=date_from, date_to=date_to))
+
 
 @extend_schema_view(
     list=extend_schema(
@@ -200,6 +233,40 @@ class FxRateSnapshotViewSet(viewsets.ModelViewSet):
         if source:
             queryset = queryset.filter(source=source)
         return queryset
+
+    @extend_schema(
+        request=None,
+        responses={200: OpenApiTypes.OBJECT},
+        description='Обновить валютные курсы USD/EUR/RUB через configured FX provider.',
+    )
+    @action(detail=False, methods=['post'])
+    def refresh(self, request):
+        return Response(refresh_fx_rate_snapshots())
+
+    @extend_schema(
+        request=None,
+        parameters=[
+            OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата начала backfill. По умолчанию 1 января текущего года.'),
+            OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата окончания backfill. По умолчанию сегодня.'),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+        description='Заполнить ежедневные кросс-курсы USD/EUR/RUB за период через configured FX provider.',
+    )
+    @action(detail=False, methods=['post'])
+    def backfill(self, request):
+        today = date.today()
+        payload = request.data if isinstance(request.data, dict) else {}
+        date_from_value = request.query_params.get('date_from') or payload.get('date_from')
+        date_to_value = request.query_params.get('date_to') or payload.get('date_to')
+        date_from = parse_date(date_from_value) if date_from_value else date(today.year, 1, 1)
+        date_to = parse_date(date_to_value) if date_to_value else today
+        if date_from is None:
+            return Response({'date_from': 'Некорректная дата. Используйте YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+        if date_to is None:
+            return Response({'date_to': 'Некорректная дата. Используйте YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+        if date_from > date_to:
+            return Response({'date_to': 'Дата окончания должна быть не раньше даты начала.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(backfill_fx_rate_snapshots(date_from=date_from, date_to=date_to))
 
 
 @extend_schema_view(

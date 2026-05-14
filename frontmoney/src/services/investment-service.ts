@@ -463,6 +463,16 @@ export const InvestmentService = {
     return Array.isArray(data) ? data.map(mapFxRateSnapshot) : []
   },
 
+  async refreshFxRates() {
+    const response = await api.post("/investment/fx-rates/refresh/")
+    return response.data
+  },
+
+  async backfillFxRates(params?: { date_from?: string; date_to?: string }) {
+    const response = await api.post("/investment/fx-rates/backfill/", null, { params })
+    return response.data
+  },
+
   async createPortfolio(payload: InvestmentPortfolioPayload) {
     const response = await api.post("/investment/portfolios/", payload)
     return mapPortfolio(response.data)
@@ -494,6 +504,16 @@ export const InvestmentService = {
   async createPrice(payload: Partial<InstrumentPriceSnapshotPayload>) {
     const response = await api.post("/investment/prices/", toPricePayload(payload))
     return mapPriceSnapshot(response.data)
+  },
+
+  async refreshPrices() {
+    const response = await api.post("/investment/prices/refresh/")
+    return response.data
+  },
+
+  async backfillPrices(params?: { date_from?: string; date_to?: string }) {
+    const response = await api.post("/investment/prices/backfill/", null, { params })
+    return response.data
   },
 
   async createAccount(payload: InvestmentAccountPayload) {

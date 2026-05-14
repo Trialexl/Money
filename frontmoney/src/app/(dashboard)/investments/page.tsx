@@ -4,7 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog"
 import { ResponsiveLine } from "@nivo/line"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BarChart3, Coins, Landmark, LineChart, PencilLine, Plus, RefreshCw, Target, Trash2, TrendingUp, X } from "lucide-react"
-import { useMemo, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
 
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
@@ -93,6 +93,10 @@ function formatInputNumber(value?: number | null) {
     return ""
   }
   return String(value)
+}
+
+function formatCalculatedAmount(value: number) {
+  return Number(value.toFixed(8)).toString()
 }
 
 function formatPercent(value?: number | null) {
@@ -336,6 +340,22 @@ export default function InvestmentsPage() {
     onSuccess: handleSaved,
     onError: (error) => setDialogError(getApiErrorMessage(error)),
   })
+  const refreshFxRatesMutation = useMutation({
+    mutationFn: InvestmentService.refreshFxRates,
+    onSuccess: () => void invalidateInvestmentQueries(),
+  })
+  const backfillFxRatesMutation = useMutation({
+    mutationFn: () => InvestmentService.backfillFxRates({ date_from: yearDateRange().dateFrom, date_to: todayInputDate() }),
+    onSuccess: () => void invalidateInvestmentQueries(),
+  })
+  const refreshPricesMutation = useMutation({
+    mutationFn: InvestmentService.refreshPrices,
+    onSuccess: () => void invalidateInvestmentQueries(),
+  })
+  const backfillPricesMutation = useMutation({
+    mutationFn: () => InvestmentService.backfillPrices({ date_from: yearDateRange().dateFrom, date_to: todayInputDate() }),
+    onSuccess: () => void invalidateInvestmentQueries(),
+  })
 
   const isLoading =
     overviewQuery.isLoading ||
@@ -391,7 +411,7 @@ export default function InvestmentsPage() {
       (position.current_value_usd !== null && position.current_value_usd !== undefined && position.current_value_usd > 0),
   ) ?? []
   const performance = performanceQuery.data
-  const performancePoints = performance ? [performance.opening, ...performance.points] : []
+  const performancePoints = performance?.points ?? []
   const valueLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
     y: convertUsdAmount(point.current_value_usd, displayCurrency, fxRates) ?? 0,
@@ -527,6 +547,46 @@ export default function InvestmentsPage() {
         ) : (
           <span className="text-sm text-muted-foreground">Базовая учетная валюта: USD.</span>
         )}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={refreshFxRatesMutation.isPending}
+          onClick={() => refreshFxRatesMutation.mutate()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {refreshFxRatesMutation.isPending ? "Обновляем..." : "Курсы CBR"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={backfillFxRatesMutation.isPending}
+          onClick={() => backfillFxRatesMutation.mutate()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {backfillFxRatesMutation.isPending ? "Заполняем..." : "Курсы с начала года"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={refreshPricesMutation.isPending || activeInstruments.length === 0}
+          onClick={() => refreshPricesMutation.mutate()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {refreshPricesMutation.isPending ? "Обновляем..." : "Цены инструментов"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={backfillPricesMutation.isPending || activeInstruments.length === 0}
+          onClick={() => backfillPricesMutation.mutate()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {backfillPricesMutation.isPending ? "Заполняем..." : "Цены с начала года"}
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1284,7 +1344,7 @@ function InstrumentForm({
         <Input value={name} onChange={(event) => setName(event.target.value)} required placeholder="Bitcoin" />
       </FormField>
       <FormField label="Символ у провайдера">
-        <Input value={providerSymbol} onChange={(event) => setProviderSymbol(event.target.value)} placeholder="BTCUSDT" />
+        <Input value={providerSymbol} onChange={(event) => setProviderSymbol(event.target.value)} placeholder={type === "crypto" ? "bitcoin" : "AAPL"} />
       </FormField>
       <FormField label="Валюта котировки">
         <CurrencySelect value={quoteCurrency} onChange={setQuoteCurrency} />
@@ -1559,10 +1619,28 @@ function OperationForm({
   const [quantity, setQuantity] = useState(formatInputNumber(operation?.quantity))
   const [priceUsd, setPriceUsd] = useState(formatInputNumber(operation?.price_usd))
   const [amountUsd, setAmountUsd] = useState(formatInputNumber(operation?.amount_usd))
+  const [amountEditedManually, setAmountEditedManually] = useState(Boolean(operation))
   const [feeUsd, setFeeUsd] = useState(formatInputNumber(operation?.fee_usd ?? 0))
   const [posted, setPosted] = useState(operation?.posted ?? true)
   const [deleted, setDeleted] = useState(operation?.deleted ?? false)
   const [comment, setComment] = useState(operation?.comment ?? "")
+  const needsAmount = operationType === "buy" || operationType === "sell"
+
+  useEffect(() => {
+    if (!needsAmount || amountEditedManually) {
+      return
+    }
+    if (!quantity.trim() || !priceUsd.trim()) {
+      setAmountUsd("")
+      return
+    }
+    const calculatedAmount = parseFormNumber(quantity) * parseFormNumber(priceUsd)
+    if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) {
+      setAmountUsd("")
+      return
+    }
+    setAmountUsd(formatCalculatedAmount(calculatedAmount))
+  }, [amountEditedManually, needsAmount, priceUsd, quantity])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1582,8 +1660,6 @@ function OperationForm({
       deleted,
     })
   }
-
-  const needsAmount = operationType === "buy" || operationType === "sell"
 
   return (
     <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
@@ -1655,7 +1731,16 @@ function OperationForm({
         <Input value={priceUsd} onChange={(event) => setPriceUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Цена за единицу в USD" />
       </FormField>
       <FormField label="Сумма USD">
-        <Input value={amountUsd} onChange={(event) => setAmountUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Итог в USD" />
+        <Input
+          value={amountUsd}
+          onChange={(event) => {
+            setAmountUsd(event.target.value)
+            setAmountEditedManually(true)
+          }}
+          required={needsAmount}
+          inputMode="decimal"
+          placeholder="Авто: количество × цена"
+        />
       </FormField>
       <FormField label="Комиссия USD">
         <Input value={feeUsd} onChange={(event) => setFeeUsd(event.target.value)} inputMode="decimal" />

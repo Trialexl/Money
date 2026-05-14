@@ -4,10 +4,11 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 import calendar
 
+from django.db.models import Max, Min
 from django.utils import timezone
 
 from .fx_providers import FxRateProviderError, get_fx_rate_provider
-from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentOperation, InvestmentTargetAllocation
+from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentOperation, InvestmentTargetAllocation, SUPPORTED_CURRENCIES
 from .price_providers import PriceProviderError, get_price_provider
 
 ZERO_AMOUNT = Decimal('0')
@@ -319,22 +320,32 @@ def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='
         'period_end': date_from.isoformat(),
     })
 
+    first_data_date, latest_data_date = _portfolio_data_date_bounds(portfolio)
+    effective_date_to = min(date_to, timezone.localdate())
+    if latest_data_date is not None:
+        effective_date_to = min(effective_date_to, latest_data_date)
+
     points = []
-    cursor = date_from
-    while cursor <= date_to:
+    if first_data_date is not None:
+        cursor = max(date_from, first_data_date)
+    else:
+        cursor = date_from
+    while cursor <= effective_date_to:
         if group_by == 'day':
             period_start = cursor
-            period_end = min(cursor, date_to)
+            period_end = min(cursor, effective_date_to)
             cursor = _next_day(cursor)
             label = period_end.isoformat()
         else:
             period_start = cursor
-            period_end = min(_month_end(cursor), date_to)
+            period_end = min(_month_end(cursor), effective_date_to)
             cursor = _next_month(date(period_end.year, period_end.month, 1))
             label = period_end.strftime('%Y-%m')
 
         cutoff = _aware_datetime(period_end, end_of_day=True)
         point = _performance_totals_for_cutoff(portfolio, cutoff, label=label)
+        if not point['valuation_complete'] or not _performance_point_has_state(point):
+            continue
         point.update({
             'date': period_end.isoformat(),
             'period_start': period_start.isoformat(),
@@ -350,6 +361,51 @@ def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='
         'opening': opening,
         'points': points,
     }
+
+
+def _portfolio_data_date_bounds(portfolio):
+    operations = InvestmentOperation.objects.filter(portfolio=portfolio, deleted=False, posted=True)
+    operation_bounds = operations.aggregate(first=Min('date'), latest=Max('date'))
+    instrument_ids = operations.values_list('instrument_id', flat=True).distinct()
+    price_bounds = InstrumentPriceSnapshot.objects.filter(instrument_id__in=instrument_ids).aggregate(
+        first=Min('captured_at'),
+        latest=Max('captured_at'),
+    )
+    first_candidates = [
+        _date_part(operation_bounds['first']),
+        _date_part(price_bounds['first']),
+    ]
+    latest_candidates = [
+        _date_part(operation_bounds['latest']),
+        _date_part(price_bounds['latest']),
+    ]
+    first_dates = [candidate for candidate in first_candidates if candidate is not None]
+    latest_dates = [candidate for candidate in latest_candidates if candidate is not None]
+    return (
+        min(first_dates) if first_dates else None,
+        max(latest_dates) if latest_dates else None,
+    )
+
+
+def _date_part(value):
+    if value is None:
+        return None
+    return value.date() if hasattr(value, 'date') else value
+
+
+def _performance_point_has_state(point):
+    return any(
+        point.get(field) != ZERO_AMOUNT
+        for field in (
+            'cost_basis_usd',
+            'current_value_usd',
+            'realized_pl_usd',
+            'unrealized_pl_usd',
+            'total_pl_usd',
+            'bought_usd',
+            'sold_usd',
+        )
+    )
 
 
 def calculate_rebalance_status(portfolio):
@@ -412,19 +468,17 @@ def refresh_price_snapshots(*, price_provider=None, fx_provider=None, instrument
                     fx_cache[price_currency] = (fx_quote.rate, str(fx_snapshot.id))
                 fx_rate, fx_snapshot_id = fx_cache[price_currency]
 
-            snapshot = InstrumentPriceSnapshot.objects.create(
+            snapshot, status = _upsert_price_snapshot(
                 instrument=instrument,
+                price_quote=price_quote,
                 captured_at=captured_at,
-                price=price_quote.price,
                 price_currency=price_currency,
                 fx_rate_to_usd=fx_rate,
-                price_usd=_money(price_quote.price * fx_rate),
-                source=price_quote.source,
             )
             results.append({
                 'instrument_id': str(instrument.id),
                 'ticker': instrument.ticker,
-                'status': 'created',
+                'status': status,
                 'price_snapshot_id': str(snapshot.id),
                 'fx_rate_snapshot_id': fx_snapshot_id,
                 'price': str(price_quote.price),
@@ -443,6 +497,219 @@ def refresh_price_snapshots(*, price_provider=None, fx_provider=None, instrument
 
     return {
         'created': sum(1 for row in results if row['status'] == 'created'),
+        'updated': sum(1 for row in results if row['status'] == 'updated'),
         'failed': sum(1 for row in results if row['status'] == 'error'),
         'results': results,
     }
+
+
+def backfill_price_snapshots(*, date_from, date_to, price_provider=None, fx_provider=None, instruments=None):
+    if date_from > date_to:
+        raise ValueError('date_from must be before or equal to date_to.')
+
+    price_provider = price_provider or get_price_provider()
+    fx_provider = fx_provider or get_fx_rate_provider()
+    instrument_queryset = (
+        instruments
+        if instruments is not None
+        else Instrument.objects.filter(is_active=True).order_by('type', 'ticker')
+    )
+    effective_date_to = min(date_to, timezone.localdate())
+    cursor = date_from
+    results = []
+
+    while cursor <= effective_date_to:
+        captured_at = _aware_datetime(cursor, end_of_day=True)
+        fx_cache = {}
+        for instrument in instrument_queryset:
+            try:
+                price_quote = price_provider.get_historical_price(instrument, cursor)
+                price_currency = price_quote.price_currency.strip().upper()
+                fx_rate = Decimal('1')
+                fx_snapshot_id = None
+                if price_currency != 'USD':
+                    if price_currency not in fx_cache:
+                        fx_quote = fx_provider.get_rate(price_currency, 'USD', on_date=cursor)
+                        fx_snapshot, fx_status = _upsert_fx_rate_snapshot(fx_quote, captured_at)
+                        fx_cache[price_currency] = (fx_quote.rate, str(fx_snapshot.id), fx_status)
+                    fx_rate, fx_snapshot_id, _ = fx_cache[price_currency]
+
+                snapshot, status = _upsert_price_snapshot(
+                    instrument=instrument,
+                    price_quote=price_quote,
+                    captured_at=captured_at,
+                    price_currency=price_currency,
+                    fx_rate_to_usd=fx_rate,
+                )
+                results.append({
+                    'instrument_id': str(instrument.id),
+                    'ticker': instrument.ticker,
+                    'date': cursor.isoformat(),
+                    'status': status,
+                    'price_snapshot_id': str(snapshot.id),
+                    'fx_rate_snapshot_id': fx_snapshot_id,
+                    'price': str(price_quote.price),
+                    'price_currency': price_currency,
+                    'fx_rate_to_usd': str(fx_rate),
+                    'price_usd': f'{snapshot.price_usd:.2f}',
+                    'source': price_quote.source,
+                })
+            except (PriceProviderError, FxRateProviderError) as exc:
+                results.append({
+                    'instrument_id': str(instrument.id),
+                    'ticker': instrument.ticker,
+                    'date': cursor.isoformat(),
+                    'status': 'error',
+                    'error': str(exc),
+                })
+        cursor = _next_day(cursor)
+
+    return {
+        'created': sum(1 for row in results if row['status'] == 'created'),
+        'updated': sum(1 for row in results if row['status'] == 'updated'),
+        'failed': sum(1 for row in results if row['status'] == 'error'),
+        'results': results,
+    }
+
+
+def _upsert_price_snapshot(*, instrument, price_quote, captured_at, price_currency, fx_rate_to_usd):
+    captured_date = _date_part(captured_at)
+    existing = (
+        InstrumentPriceSnapshot.objects
+        .filter(
+            instrument=instrument,
+            captured_at__date=captured_date,
+            source=price_quote.source,
+        )
+        .order_by('-created_at')
+        .first()
+    )
+    price_usd = _money(price_quote.price * fx_rate_to_usd)
+    if existing is not None:
+        existing.captured_at = captured_at
+        existing.price = price_quote.price
+        existing.price_currency = price_currency
+        existing.fx_rate_to_usd = fx_rate_to_usd
+        existing.price_usd = price_usd
+        existing.save(update_fields=['captured_at', 'price', 'price_currency', 'fx_rate_to_usd', 'price_usd'])
+        return existing, 'updated'
+    return InstrumentPriceSnapshot.objects.create(
+        instrument=instrument,
+        captured_at=captured_at,
+        price=price_quote.price,
+        price_currency=price_currency,
+        fx_rate_to_usd=fx_rate_to_usd,
+        price_usd=price_usd,
+        source=price_quote.source,
+    ), 'created'
+
+
+def refresh_fx_rate_snapshots(*, fx_provider=None, pairs=None, captured_at=None):
+    fx_provider = fx_provider or get_fx_rate_provider()
+    captured_at = captured_at or timezone.now()
+    return _refresh_fx_rate_snapshots_for_date(
+        fx_provider=fx_provider,
+        pairs=pairs,
+        captured_at=captured_at,
+        rate_date=_date_part(captured_at),
+    )
+
+
+def backfill_fx_rate_snapshots(*, date_from, date_to, fx_provider=None, pairs=None):
+    if date_from > date_to:
+        raise ValueError('date_from must be before or equal to date_to.')
+
+    fx_provider = fx_provider or get_fx_rate_provider()
+    currency_pairs = _fx_currency_pairs(pairs)
+    effective_date_to = min(date_to, timezone.localdate())
+    cursor = date_from
+    results = []
+
+    while cursor <= effective_date_to:
+        captured_at = _aware_datetime(cursor, end_of_day=True)
+        day_result = _refresh_fx_rate_snapshots_for_date(
+            fx_provider=fx_provider,
+            pairs=currency_pairs,
+            captured_at=captured_at,
+            rate_date=cursor,
+        )
+        results.extend(day_result['results'])
+        cursor = _next_day(cursor)
+
+    return {
+        'created': sum(1 for row in results if row['status'] == 'created'),
+        'updated': sum(1 for row in results if row['status'] == 'updated'),
+        'failed': sum(1 for row in results if row['status'] == 'error'),
+        'results': results,
+    }
+
+
+def _refresh_fx_rate_snapshots_for_date(*, fx_provider, pairs=None, captured_at, rate_date):
+    currency_pairs = _fx_currency_pairs(pairs)
+    results = []
+
+    for base_currency, quote_currency in currency_pairs:
+        base = str(base_currency or '').strip().upper()
+        quote = str(quote_currency or '').strip().upper()
+        try:
+            fx_quote = fx_provider.get_rate(base, quote, on_date=rate_date)
+            snapshot, status = _upsert_fx_rate_snapshot(fx_quote, captured_at)
+            results.append({
+                'fx_rate_snapshot_id': str(snapshot.id),
+                'base_currency': fx_quote.base_currency,
+                'quote_currency': fx_quote.quote_currency,
+                'date': _date_part(captured_at).isoformat(),
+                'status': status,
+                'rate': str(fx_quote.rate),
+                'source': fx_quote.source,
+            })
+        except FxRateProviderError as exc:
+            results.append({
+                'base_currency': base,
+                'quote_currency': quote,
+                'status': 'error',
+                'error': str(exc),
+            })
+
+    return {
+        'created': sum(1 for row in results if row['status'] == 'created'),
+        'updated': sum(1 for row in results if row['status'] == 'updated'),
+        'failed': sum(1 for row in results if row['status'] == 'error'),
+        'results': results,
+    }
+
+
+def _fx_currency_pairs(pairs=None):
+    return pairs or [
+        (base_currency, quote_currency)
+        for base_currency in SUPPORTED_CURRENCIES
+        for quote_currency in SUPPORTED_CURRENCIES
+        if base_currency != quote_currency
+    ]
+
+
+def _upsert_fx_rate_snapshot(fx_quote, captured_at):
+    captured_date = _date_part(captured_at)
+    existing = (
+        FxRateSnapshot.objects
+        .filter(
+            base_currency=fx_quote.base_currency,
+            quote_currency=fx_quote.quote_currency,
+            captured_at__date=captured_date,
+            source=fx_quote.source,
+        )
+        .order_by('-created_at')
+        .first()
+    )
+    if existing is not None:
+        existing.captured_at = captured_at
+        existing.rate = fx_quote.rate
+        existing.save(update_fields=['captured_at', 'rate'])
+        return existing, 'updated'
+    return FxRateSnapshot.objects.create(
+        captured_at=captured_at,
+        base_currency=fx_quote.base_currency,
+        quote_currency=fx_quote.quote_currency,
+        rate=fx_quote.rate,
+        source=fx_quote.source,
+    ), 'created'
