@@ -56,10 +56,21 @@ class StaticPriceProvider(BasePriceProvider):
 class CoinGeckoPriceProvider(BasePriceProvider):
     source = 'coingecko'
     COMMON_CRYPTO_IDS = {
+        'ada': 'cardano',
+        'bnb': 'binancecoin',
         'btc': 'bitcoin',
+        'doge': 'dogecoin',
+        'dot': 'polkadot',
         'eth': 'ethereum',
+        'matic': 'matic-network',
+        'pol': 'polygon-ecosystem-token',
+        'sol': 'solana',
+        'ton': 'the-open-network',
+        'usdc': 'usd-coin',
         'usdt': 'tether',
+        'xrp': 'ripple',
     }
+    QUOTE_SUFFIXES = ('usdt', 'usdc', 'usd', 'eur', 'rub')
 
     def __init__(self, *, base_url=None, timeout=None, opener=None):
         self.base_url = base_url or getattr(
@@ -114,7 +125,21 @@ class CoinGeckoPriceProvider(BasePriceProvider):
 
     def _coingecko_id(self, instrument):
         symbol = (instrument.provider_symbol or instrument.ticker or '').strip().lower()
-        return self.COMMON_CRYPTO_IDS.get(symbol, symbol)
+        if not symbol:
+            return ''
+
+        normalized = ''.join(character for character in symbol if character.isalnum())
+        for candidate in (symbol, normalized):
+            if candidate in self.COMMON_CRYPTO_IDS:
+                return self.COMMON_CRYPTO_IDS[candidate]
+
+        for quote_suffix in self.QUOTE_SUFFIXES:
+            if normalized.endswith(quote_suffix) and len(normalized) > len(quote_suffix):
+                base_symbol = normalized[: -len(quote_suffix)]
+                if base_symbol in self.COMMON_CRYPTO_IDS:
+                    return self.COMMON_CRYPTO_IDS[base_symbol]
+
+        return symbol
 
 
 def get_price_provider(name=None):

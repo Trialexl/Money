@@ -659,6 +659,28 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         self.assertEqual(quote.price_currency, 'USD')
         self.assertEqual(quote.source, 'coingecko')
 
+    def test_coingecko_provider_maps_exchange_pairs_to_coin_ids(self):
+        opener = _FakeOpener('{"bitcoin": {"usd": 62000.5}}')
+        instrument = SimpleNamespace(id='btc-id', provider_symbol='BTCUSDT', ticker='BTC', quote_currency='USD')
+        provider = CoinGeckoPriceProvider(base_url='https://prices.example/simple', opener=opener)
+
+        quote = provider.get_price(instrument)
+
+        self.assertIn('ids=bitcoin', opener.request_url)
+        self.assertEqual(quote.symbol, 'bitcoin')
+        self.assertEqual(quote.price, Decimal('62000.5'))
+
+    def test_coingecko_provider_maps_sol_ticker(self):
+        opener = _FakeOpener('{"solana": {"usd": 150.25}}')
+        instrument = SimpleNamespace(id='sol-id', provider_symbol='SOLUSDT', ticker='SOL', quote_currency='USD')
+        provider = CoinGeckoPriceProvider(base_url='https://prices.example/simple', opener=opener)
+
+        quote = provider.get_price(instrument)
+
+        self.assertIn('ids=solana', opener.request_url)
+        self.assertEqual(quote.symbol, 'solana')
+        self.assertEqual(quote.price, Decimal('150.25'))
+
     def test_coingecko_provider_raises_controlled_error_for_missing_price(self):
         opener = _FakeOpener('{"bitcoin": {}}')
         instrument = SimpleNamespace(id='btc-id', provider_symbol='BTC', ticker='BTC', quote_currency='USD')
