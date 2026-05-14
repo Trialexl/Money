@@ -1557,7 +1557,7 @@ function OperationForm({
   const [accountTo, setAccountTo] = useState(operation?.account_to ?? "")
   const [instrument, setInstrument] = useState(operation?.instrument ?? activeInstruments[0]?.id ?? "")
   const [quantity, setQuantity] = useState(formatInputNumber(operation?.quantity))
-  const [price, setPrice] = useState(formatInputNumber(operation?.price))
+  const [priceUsd, setPriceUsd] = useState(formatInputNumber(operation?.price_usd))
   const [amountUsd, setAmountUsd] = useState(formatInputNumber(operation?.amount_usd))
   const [feeUsd, setFeeUsd] = useState(formatInputNumber(operation?.fee_usd ?? 0))
   const [posted, setPosted] = useState(operation?.posted ?? true)
@@ -1574,14 +1574,8 @@ function OperationForm({
       instrument,
       operation_type: operationType,
       quantity: parseFormNumber(quantity),
-      price: price.trim() ? parseFormNumber(price) : undefined,
-      price_currency: "USD",
-      amount: parseFormNumber(amountUsd),
-      amount_currency: "USD",
+      price_usd: priceUsd.trim() ? parseFormNumber(priceUsd) : undefined,
       amount_usd: parseFormNumber(amountUsd),
-      fx_rate_to_usd: 1,
-      fee_amount: parseFormNumber(feeUsd),
-      fee_currency: "USD",
       fee_usd: parseFormNumber(feeUsd),
       comment: comment.trim(),
       posted,
@@ -1658,7 +1652,7 @@ function OperationForm({
         <Input value={quantity} onChange={(event) => setQuantity(event.target.value)} required inputMode="decimal" placeholder="0.01" />
       </FormField>
       <FormField label="Цена USD">
-        <Input value={price} onChange={(event) => setPrice(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Цена за единицу в USD" />
+        <Input value={priceUsd} onChange={(event) => setPriceUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Цена за единицу в USD" />
       </FormField>
       <FormField label="Сумма USD">
         <Input value={amountUsd} onChange={(event) => setAmountUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Итог в USD" />
@@ -1691,7 +1685,7 @@ function OperationForm({
             !instrument ||
             !quantity.trim() ||
             (operationType === "transfer_instrument" && !accountTo) ||
-            (needsAmount && (!price.trim() || !amountUsd.trim()))
+            (needsAmount && (!priceUsd.trim() || !amountUsd.trim()))
           }
         >
           {isSaving ? "Сохраняем..." : "Сохранить операцию"}

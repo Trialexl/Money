@@ -5355,16 +5355,6 @@ components:
         edited_message:
           type: object
           additionalProperties: {}
-    AmountCurrencyEnum:
-      enum:
-      - USD
-      - EUR
-      - RUB
-      type: string
-      description: |-
-        * `USD` - USD
-        * `EUR` - EUR
-        * `RUB` - RUB
     AutoPayment:
       type: object
       properties:
@@ -6529,16 +6519,6 @@ components:
           nullable: true
       required:
       - amount
-    FeeCurrencyEnum:
-      enum:
-      - USD
-      - EUR
-      - RUB
-      type: string
-      description: |-
-        * `USD` - USD
-        * `EUR` - EUR
-        * `RUB` - RUB
     FlowOfFunds:
       type: object
       description: Сериализатор для регистра движения средств
@@ -6927,34 +6907,15 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,14}(?:\.\d{0,10})?$
-        price:
+        price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
-        price_currency:
-          $ref: '#/components/schemas/PriceCurrencyEnum'
-        amount:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
-          nullable: true
-        amount_currency:
-          $ref: '#/components/schemas/AmountCurrencyEnum'
         amount_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        fx_rate_to_usd:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
-        fee_amount:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
-        fee_currency:
-          $ref: '#/components/schemas/FeeCurrencyEnum'
         fee_usd:
           type: string
           format: decimal
@@ -7013,34 +6974,15 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,14}(?:\.\d{0,10})?$
-        price:
+        price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
-        price_currency:
-          $ref: '#/components/schemas/PriceCurrencyEnum'
-        amount:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
-          nullable: true
-        amount_currency:
-          $ref: '#/components/schemas/AmountCurrencyEnum'
         amount_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        fx_rate_to_usd:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
-        fee_amount:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
-        fee_currency:
-          $ref: '#/components/schemas/FeeCurrencyEnum'
         fee_usd:
           type: string
           format: decimal
@@ -7965,34 +7907,15 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,14}(?:\.\d{0,10})?$
-        price:
+        price_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
           nullable: true
-        price_currency:
-          $ref: '#/components/schemas/PriceCurrencyEnum'
-        amount:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
-          nullable: true
-        amount_currency:
-          $ref: '#/components/schemas/AmountCurrencyEnum'
         amount_usd:
           type: string
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
-        fx_rate_to_usd:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,10}(?:\.\d{0,8})?$
-        fee_amount:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,16}(?:\.\d{0,8})?$
-        fee_currency:
-          $ref: '#/components/schemas/FeeCurrencyEnum'
         fee_usd:
           type: string
           format: decimal

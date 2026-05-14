@@ -32,9 +32,9 @@
 
 - `P0-OPS-002` - ограничить память контейнеров, чтобы приложение не укладывало сервер по OOM.
 - `P0-OPS-003` - настроить gunicorn workers: меньше постоянных процессов, threads, timeout, graceful timeout, recycling через max requests.
-- `P0-BE-301` - перевести investment-модуль на учет в USD: `amount_usd`, `fee_usd`, `price_usd`, `fx_rate_to_usd`, base currency портфеля `USD`.
+- `P0-BE-301` - перевести investment-модуль на учет в USD: `amount_usd`, `fee_usd`, `price_usd`, base currency портфеля `USD`.
 - `P0-BE-302` - регистр валют хранит пары `USD/EUR/RUB`; CBR provider должен уметь cross-rate через RUB для USD/EUR/RUB.
-- `P0-BE-303` - инвестиционная операция должна фактически сохраняться в USD; legacy-поля валюты/курса нормализовать в USD/1 для совместимости API.
+- `P0-BE-303` - инвестиционная операция должна фактически сохраняться в USD; legacy-поля валюты/курса удалить из модели и API.
 - `P0-FE-301` - на фронте убрать RUB как учетную валюту investment-модуля, оставить USD как базу и переключение отображения `USD/EUR/RUB`.
 - `P0-FE-302` - валюты на формах выбирать списком `USD/EUR/RUB`, а не свободным текстом.
 - `P0-FE-303` - в форме инвестиционной операции убрать технические поля суммы/валюты/курса, оставить цену, сумму и комиссию в USD.
@@ -75,7 +75,7 @@
 - `P0-OPS-003` - backend запускается через `gunicorn.conf.py` с env-настройками workers/threads/timeouts/max_requests.
 - `P0-BE-301` - investment-модели, serializers, services и API переведены с RUB accounting на USD accounting.
 - `P0-BE-302` - FX provider теперь поддерживает cross-rate для `USD/EUR/RUB`, включая `USD/RUB`, `USD/EUR`, `EUR/USD`, `RUB/USD`.
-- `P0-BE-303` - investment operations принудительно нормализуются к USD: валюты USD, курс 1, amount/fee синхронизируются с USD-полями.
+- `P0-BE-303` - investment operations очищены от legacy-полей валюты/курса: API принимает только `price_usd`, `amount_usd`, `fee_usd`.
 - `P0-FE-301` - экран `Портфель` показывает USD как базовую учетную валюту и пересчитывает отображение в EUR/RUB через FX snapshots.
 - `P0-FE-302` - валюты в формах investment-модуля выбираются из списка `USD/EUR/RUB`.
 - `P0-FE-303` - форма операции показывает только USD-поля сделки: цену, сумму и комиссию.
@@ -177,7 +177,7 @@ Acceptance criteria:
 Задачи:
 
 - добавить модель `InvestmentOperation`;
-- поля: `number`, `date`, `portfolio`, `account`, `instrument`, `operation_type`, `quantity`, `price`, `price_currency`, `amount`, `amount_currency`, `amount_usd`, `fx_rate_to_usd`, `fee_amount`, `fee_currency`, `comment`, `deleted`, `posted`;
+- поля: `number`, `date`, `portfolio`, `account`, `instrument`, `operation_type`, `quantity`, `price_usd`, `amount_usd`, `fee_usd`, `comment`, `deleted`, `posted`;
 - типы MVP: `buy`, `sell`, `transfer_instrument`, `correction`;
 - добавить автонумерацию;
 - добавить валидацию обязательных полей по типу операции.
