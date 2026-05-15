@@ -550,6 +550,58 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(result['failed'], 0)
         self.assertEqual(InstrumentPriceSnapshot.objects.filter(instrument=eth).count(), 2)
 
+    def test_backfill_price_snapshots_uses_range_provider_when_supported(self):
+        eth = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='ETH', name='Ethereum')
+
+        class PriceProvider:
+            supports_historical_range = True
+
+            def __init__(self):
+                self.calls = 0
+
+            def get_historical_prices(self, instrument, date_from, date_to):
+                self.calls += 1
+                self.requested_period = (date_from, date_to)
+                return {
+                    date(2026, 1, 1): PriceQuote(
+                        instrument_id=str(instrument.id),
+                        symbol=instrument.ticker,
+                        price=Decimal('100.00'),
+                        price_currency='USD',
+                        source='test-price',
+                    ),
+                    date(2026, 1, 2): PriceQuote(
+                        instrument_id=str(instrument.id),
+                        symbol=instrument.ticker,
+                        price=Decimal('101.00'),
+                        price_currency='USD',
+                        source='test-price',
+                    ),
+                }
+
+        provider = PriceProvider()
+
+        result = backfill_price_snapshots(
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 1, 2),
+            price_provider=provider,
+            instruments=Instrument.objects.filter(id=eth.id),
+        )
+
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(provider.requested_period, (date(2026, 1, 1), date(2026, 1, 2)))
+        self.assertEqual(result['created'], 2)
+        self.assertEqual(result['failed'], 0)
+        self.assertEqual(
+            list(
+                InstrumentPriceSnapshot.objects
+                .filter(instrument=eth)
+                .order_by('captured_at')
+                .values_list('price', flat=True)
+            ),
+            [Decimal('100.00000000'), Decimal('101.00000000')],
+        )
+
     def test_refresh_fx_rate_snapshots_creates_supported_cross_rates(self):
         result = refresh_fx_rate_snapshots(
             fx_provider=StaticFxRateProvider({
@@ -737,6 +789,21 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         self.assertIn('localization=false', opener.request_url)
         self.assertEqual(quote.symbol, 'bitcoin')
         self.assertEqual(quote.price, Decimal('62000.5'))
+
+    def test_coingecko_provider_reads_historical_prices_range(self):
+        opener = _FakeOpener('{"prices": [[1767225600000, 62000.5], [1767312000000, 63010.25]]}')
+        instrument = SimpleNamespace(id='btc-id', provider_symbol='BTC', ticker='BTC', quote_currency='USD')
+        provider = CoinGeckoPriceProvider(history_base_url='https://prices.example/coins', opener=opener)
+
+        quotes = provider.get_historical_prices(instrument, date(2026, 1, 1), date(2026, 1, 2))
+
+        self.assertIn('/bitcoin/market_chart/range?', opener.request_url)
+        self.assertIn('vs_currency=usd', opener.request_url)
+        self.assertIn('from=1767225600', opener.request_url)
+        self.assertIn('to=1767398399', opener.request_url)
+        self.assertEqual(quotes[date(2026, 1, 1)].symbol, 'bitcoin')
+        self.assertEqual(quotes[date(2026, 1, 1)].price, Decimal('62000.5'))
+        self.assertEqual(quotes[date(2026, 1, 2)].price, Decimal('63010.25'))
 
     def test_coingecko_provider_does_not_map_exchange_pairs(self):
         opener = _FakeOpener('{"bitcoin": {"usd": 62000.5}}')

@@ -100,9 +100,12 @@ Env-настройки:
 
 - `INVESTMENT_PRICE_PROVIDER`, по умолчанию `coingecko`;
 - `INVESTMENT_PRICE_PROVIDER_BASE_URL`, по умолчанию `https://api.coingecko.com/api/v3/simple/price`;
+- `INVESTMENT_PRICE_PROVIDER_HISTORY_BASE_URL`, по умолчанию `https://api.coingecko.com/api/v3/coins`;
 - `INVESTMENT_PRICE_PROVIDER_TIMEOUT`, по умолчанию `10.0`.
 
 Для CoinGecko `provider_symbol` должен быть CoinGecko id, например `bitcoin`, `ethereum`, `tether`. Для удобства базовые тикеры `BTC`, `ETH`, `USDT` мапятся автоматически.
+
+Исторический backfill для CoinGecko должен использовать диапазонный endpoint `market_chart/range`: один запрос на инструмент за период. День-за-днем через `history` остается только fallback-режимом для provider-ов без пакетной загрузки, иначе заполнение с начала года быстро упирается в rate limit внешнего API.
 
 Любая ошибка provider-а превращается в `PriceProviderError`. Это контролируемая ошибка инвестиционного модуля: она не должна ломать обычный учет денег, dashboard, отчеты или 1С sync.
 
@@ -131,7 +134,7 @@ Env-настройки:
 - `instruments/` - CRUD инструментов, фильтры `type`, `is_active`, `search`.
 - `prices/` - CRUD снимков цен, фильтры `instrument`, `date_from`, `date_to`, `source`.
 - `prices/refresh/` - обновление цен активных инструментов через configured price/fx providers, с частичными ошибками в `results`.
-- `prices/backfill/` - заполнение ежедневных цен активных инструментов за период; по умолчанию с 1 января текущего года по сегодня.
+- `prices/backfill/` - заполнение ежедневных цен активных инструментов за период; по умолчанию с 1 января текущего года по сегодня. Для CoinGecko выполняется пакетная загрузка по диапазону, чтобы не делать запрос на каждый день.
 - `fx-rates/` - CRUD снимков валютных курсов, фильтры `base_currency`, `quote_currency`, `date_from`, `date_to`, `source`.
 - `fx-rates/refresh/` - обновление кросс-курсов `USD/EUR/RUB` через configured FX provider, по умолчанию CBR.
 - `fx-rates/backfill/` - заполнение ежедневных кросс-курсов `USD/EUR/RUB` за период; по умолчанию с 1 января текущего года по сегодня.

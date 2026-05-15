@@ -510,50 +510,92 @@ def backfill_price_snapshots(*, date_from, date_to, price_provider=None, fx_prov
     price_provider = price_provider or get_price_provider()
     fx_provider = fx_provider or get_fx_rate_provider()
     instrument_queryset = (
-        instruments
+        list(instruments)
         if instruments is not None
-        else Instrument.objects.filter(is_active=True).order_by('type', 'ticker')
+        else list(Instrument.objects.filter(is_active=True).order_by('type', 'ticker'))
     )
     effective_date_to = min(date_to, timezone.localdate())
-    cursor = date_from
     results = []
+    fx_cache = {}
 
-    while cursor <= effective_date_to:
-        captured_at = _aware_datetime(cursor, end_of_day=True)
-        fx_cache = {}
+    def store_snapshot(*, instrument, price_quote, quote_date):
+        captured_at = _aware_datetime(quote_date, end_of_day=True)
+        price_currency = price_quote.price_currency.strip().upper()
+        fx_rate = Decimal('1')
+        fx_snapshot_id = None
+        if price_currency != 'USD':
+            fx_cache_key = (price_currency, quote_date)
+            if fx_cache_key not in fx_cache:
+                fx_quote = fx_provider.get_rate(price_currency, 'USD', on_date=quote_date)
+                fx_snapshot, fx_status = _upsert_fx_rate_snapshot(fx_quote, captured_at)
+                fx_cache[fx_cache_key] = (fx_quote.rate, str(fx_snapshot.id), fx_status)
+            fx_rate, fx_snapshot_id, _ = fx_cache[fx_cache_key]
+
+        snapshot, status = _upsert_price_snapshot(
+            instrument=instrument,
+            price_quote=price_quote,
+            captured_at=captured_at,
+            price_currency=price_currency,
+            fx_rate_to_usd=fx_rate,
+        )
+        results.append({
+            'instrument_id': str(instrument.id),
+            'ticker': instrument.ticker,
+            'date': quote_date.isoformat(),
+            'status': status,
+            'price_snapshot_id': str(snapshot.id),
+            'fx_rate_snapshot_id': fx_snapshot_id,
+            'price': str(price_quote.price),
+            'price_currency': price_currency,
+            'fx_rate_to_usd': str(fx_rate),
+            'price_usd': f'{snapshot.price_usd:.2f}',
+            'source': price_quote.source,
+        })
+
+    if date_from > effective_date_to:
+        return {
+            'created': 0,
+            'updated': 0,
+            'failed': 0,
+            'results': results,
+        }
+
+    if getattr(price_provider, 'supports_historical_range', False):
         for instrument in instrument_queryset:
             try:
-                price_quote = price_provider.get_historical_price(instrument, cursor)
-                price_currency = price_quote.price_currency.strip().upper()
-                fx_rate = Decimal('1')
-                fx_snapshot_id = None
-                if price_currency != 'USD':
-                    if price_currency not in fx_cache:
-                        fx_quote = fx_provider.get_rate(price_currency, 'USD', on_date=cursor)
-                        fx_snapshot, fx_status = _upsert_fx_rate_snapshot(fx_quote, captured_at)
-                        fx_cache[price_currency] = (fx_quote.rate, str(fx_snapshot.id), fx_status)
-                    fx_rate, fx_snapshot_id, _ = fx_cache[price_currency]
-
-                snapshot, status = _upsert_price_snapshot(
-                    instrument=instrument,
-                    price_quote=price_quote,
-                    captured_at=captured_at,
-                    price_currency=price_currency,
-                    fx_rate_to_usd=fx_rate,
-                )
+                quotes_by_date = price_provider.get_historical_prices(instrument, date_from, effective_date_to)
+                for quote_date in sorted(quotes_by_date):
+                    store_snapshot(
+                        instrument=instrument,
+                        price_quote=quotes_by_date[quote_date],
+                        quote_date=quote_date,
+                    )
+            except (PriceProviderError, FxRateProviderError) as exc:
                 results.append({
                     'instrument_id': str(instrument.id),
                     'ticker': instrument.ticker,
-                    'date': cursor.isoformat(),
-                    'status': status,
-                    'price_snapshot_id': str(snapshot.id),
-                    'fx_rate_snapshot_id': fx_snapshot_id,
-                    'price': str(price_quote.price),
-                    'price_currency': price_currency,
-                    'fx_rate_to_usd': str(fx_rate),
-                    'price_usd': f'{snapshot.price_usd:.2f}',
-                    'source': price_quote.source,
+                    'date_from': date_from.isoformat(),
+                    'date_to': effective_date_to.isoformat(),
+                    'status': 'error',
+                    'error': str(exc),
                 })
+        return {
+            'created': sum(1 for row in results if row['status'] == 'created'),
+            'updated': sum(1 for row in results if row['status'] == 'updated'),
+            'failed': sum(1 for row in results if row['status'] == 'error'),
+            'results': results,
+        }
+
+    cursor = date_from
+    while cursor <= effective_date_to:
+        for instrument in instrument_queryset:
+            try:
+                price_quote = price_provider.get_historical_price(instrument, cursor)
+                store_snapshot(
+                    instrument=instrument,
+                    price_quote=price_quote,
+                    quote_date=cursor,
+                )
             except (PriceProviderError, FxRateProviderError) as exc:
                 results.append({
                     'instrument_id': str(instrument.id),
