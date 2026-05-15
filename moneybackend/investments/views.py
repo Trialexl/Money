@@ -14,6 +14,7 @@ from .models import (
     InvestmentOperation,
     InvestmentPortfolio,
     InvestmentTargetAllocation,
+    SUPPORTED_CURRENCIES,
 )
 from .serializers import (
     FxRateSnapshotSerializer,
@@ -90,6 +91,7 @@ performance_parameters = [
     OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата начала периода YYYY-MM-DD. По умолчанию 1 января текущего года.'),
     OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата окончания периода YYYY-MM-DD. По умолчанию 31 декабря текущего года.'),
     OpenApiParameter('group_by', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Группировка: day или month. По умолчанию month.'),
+    OpenApiParameter('display_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Валюта отображения USD/EUR/RUB. По умолчанию USD.'),
 ]
 
 
@@ -100,15 +102,18 @@ def _parse_performance_period(request):
     date_from = parse_date(date_from_value) if date_from_value else date(today.year, 1, 1)
     date_to = parse_date(date_to_value) if date_to_value else date(today.year, 12, 31)
     group_by = request.query_params.get('group_by') or 'month'
+    display_currency = (request.query_params.get('display_currency') or 'USD').strip().upper()
     if date_from is None:
-        return None, None, group_by, {'date_from': 'Некорректная дата. Используйте YYYY-MM-DD.'}
+        return None, None, group_by, display_currency, {'date_from': 'Некорректная дата. Используйте YYYY-MM-DD.'}
     if date_to is None:
-        return None, None, group_by, {'date_to': 'Некорректная дата. Используйте YYYY-MM-DD.'}
+        return None, None, group_by, display_currency, {'date_to': 'Некорректная дата. Используйте YYYY-MM-DD.'}
     if date_from > date_to:
-        return None, None, group_by, {'date_to': 'Дата окончания должна быть не раньше даты начала.'}
+        return None, None, group_by, display_currency, {'date_to': 'Дата окончания должна быть не раньше даты начала.'}
     if group_by not in {'day', 'month'}:
-        return None, None, group_by, {'group_by': 'Поддерживаются значения day или month.'}
-    return date_from, date_to, group_by, None
+        return None, None, group_by, display_currency, {'group_by': 'Поддерживаются значения day или month.'}
+    if display_currency not in SUPPORTED_CURRENCIES:
+        return None, None, group_by, display_currency, {'display_currency': 'Поддерживаются значения USD, EUR или RUB.'}
+    return date_from, date_to, group_by, display_currency, None
 
 
 @extend_schema_view(
@@ -164,6 +169,61 @@ class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
         if source:
             queryset = queryset.filter(source=source)
         return queryset
+
+    @extend_schema(
+        request=None,
+        parameters=[
+            OpenApiParameter('instrument', OpenApiTypes.UUID, OpenApiParameter.QUERY, required=True, description='UUID инструмента.'),
+            OpenApiParameter('date', OpenApiTypes.DATE, OpenApiParameter.QUERY, required=True, description='Дата сделки YYYY-MM-DD.'),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+        description='Подобрать цену инструмента на дату сделки: снимок за дату или ближайший предыдущий.',
+    )
+    @action(detail=False, methods=['get'])
+    def lookup(self, request):
+        instrument_id = request.query_params.get('instrument')
+        lookup_date_value = request.query_params.get('date')
+        lookup_date = parse_date(lookup_date_value) if lookup_date_value else None
+        if not instrument_id:
+            return Response({'instrument': 'Обязательный параметр.'}, status=status.HTTP_400_BAD_REQUEST)
+        if lookup_date is None:
+            return Response({'date': 'Некорректная дата. Используйте YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        instrument = Instrument.objects.filter(id=instrument_id).first()
+        if instrument is None:
+            return Response({'instrument': 'Инструмент не найден.'}, status=status.HTTP_404_NOT_FOUND)
+
+        snapshot = (
+            InstrumentPriceSnapshot.objects
+            .filter(instrument=instrument, captured_at__date__lte=lookup_date)
+            .order_by('-captured_at', '-created_at')
+            .first()
+        )
+        if snapshot is None:
+            return Response({
+                'found': False,
+                'instrument': str(instrument.id),
+                'instrument_ticker': instrument.ticker,
+                'date': lookup_date.isoformat(),
+                'detail': 'Цена на эту дату или раньше не найдена.',
+            })
+
+        snapshot_date = snapshot.captured_at.date()
+        return Response({
+            'found': True,
+            'instrument': str(instrument.id),
+            'instrument_ticker': instrument.ticker,
+            'date': lookup_date.isoformat(),
+            'snapshot_id': str(snapshot.id),
+            'snapshot_date': snapshot_date.isoformat(),
+            'is_exact_date': snapshot_date == lookup_date,
+            'stale_days': (lookup_date - snapshot_date).days,
+            'price': f'{snapshot.price:.8f}',
+            'price_currency': snapshot.price_currency,
+            'fx_rate_to_usd': f'{snapshot.fx_rate_to_usd:.8f}',
+            'price_usd': f'{snapshot.price_usd:.2f}',
+            'source': snapshot.source,
+        })
 
     @extend_schema(
         request=None,
@@ -327,7 +387,7 @@ class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['get'])
     def performance(self, request, pk=None):
-        date_from, date_to, group_by, error = _parse_performance_period(request)
+        date_from, date_to, group_by, display_currency, error = _parse_performance_period(request)
         if error:
             return Response(error, status=400)
         return Response(calculate_portfolio_performance(
@@ -335,6 +395,7 @@ class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
             date_from=date_from,
             date_to=date_to,
             group_by=group_by,
+            display_currency=display_currency,
         ))
 
 

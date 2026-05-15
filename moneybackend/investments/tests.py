@@ -387,6 +387,101 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(performance['points'][0]['period_start'], '2026-01-01')
         self.assertEqual(performance['points'][0]['period_end'], '2026-01-31')
 
+    def test_portfolio_performance_skips_month_without_exact_price(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price_usd=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 5),
+        )
+        for captured_at, price in (
+            (self._dt(2026, 1, 31), Decimal('100.00')),
+            (self._dt(2026, 3, 31), Decimal('130.00')),
+        ):
+            InstrumentPriceSnapshot.objects.create(
+                instrument=self.instrument,
+                price=price,
+                price_currency='USD',
+                fx_rate_to_usd=Decimal('1'),
+                price_usd=price,
+                captured_at=captured_at,
+            )
+
+        performance = calculate_portfolio_performance(
+            self.portfolio,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 3, 31),
+            group_by='month',
+        )
+
+        self.assertEqual([point['period_end'] for point in performance['points']], ['2026-01-31', '2026-03-31'])
+        self.assertEqual([point['current_value_usd'] for point in performance['points']], [Decimal('100.00'), Decimal('130.00')])
+
+    def test_investment_operations_do_not_mutate_price_snapshots(self):
+        snapshot = InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('120.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('120.00'),
+            captured_at=self._dt(2026, 1, 31),
+        )
+        operation = InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price_usd=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 5),
+        )
+
+        operation.quantity = Decimal('2.0')
+        operation.amount_usd = Decimal('200.00')
+        operation.save()
+        operation.deleted = True
+        operation.save()
+
+        snapshot.refresh_from_db()
+        self.assertEqual(InstrumentPriceSnapshot.objects.count(), 1)
+        self.assertEqual(snapshot.price_usd, Decimal('120.00'))
+        self.assertEqual(snapshot.captured_at, self._dt(2026, 1, 31))
+
+    def test_price_lookup_endpoint_returns_latest_snapshot_before_date(self):
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('110.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('110.00'),
+            captured_at=self._dt(2026, 1, 10),
+        )
+        snapshot = InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('120.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('120.00'),
+            captured_at=self._dt(2026, 1, 20),
+        )
+
+        response = self.client.get('/api/v1/investment/prices/lookup/', {
+            'instrument': str(self.instrument.id),
+            'date': '2026-01-25',
+        })
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data['found'])
+        self.assertEqual(response.data['snapshot_id'], str(snapshot.id))
+        self.assertEqual(response.data['snapshot_date'], '2026-01-20')
+        self.assertEqual(response.data['stale_days'], 5)
+        self.assertEqual(response.data['price_usd'], '120.00')
+
     def test_portfolio_performance_endpoint_returns_period_series(self):
         InvestmentOperation.objects.create(
             portfolio=self.portfolio,

@@ -1,4 +1,5 @@
 import { createElement } from "react"
+import type { ReactNode } from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -28,7 +29,7 @@ const {
 }))
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: unknown; href: string }) => createElement("a", { href }, children),
+  default: ({ children, href }: { children: ReactNode; href: string }) => createElement("a", { href }, children),
 }))
 
 vi.mock("next/navigation", () => ({

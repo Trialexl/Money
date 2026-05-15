@@ -99,6 +99,17 @@ function formatCalculatedAmount(value: number) {
   return Number(value.toFixed(8)).toString()
 }
 
+function isOperationAmountEditedManually(operation?: InvestmentOperation) {
+  if (!operation || (operation.operation_type !== "buy" && operation.operation_type !== "sell")) {
+    return false
+  }
+  if (operation.price_usd === undefined || operation.price_usd === null) {
+    return Boolean(operation.amount_usd)
+  }
+  const calculatedAmount = operation.quantity * operation.price_usd
+  return Math.abs(operation.amount_usd - calculatedAmount) > 0.00000001
+}
+
 function formatPercent(value?: number | null) {
   if (value === undefined || value === null) {
     return "нет оценки"
@@ -158,6 +169,38 @@ function formatCurrencyValue(amount: number, currency: DisplayCurrency) {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(amount)} ${currency}`
+}
+
+function formatCompactChartValue(amount: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(amount)
+}
+
+function getChartTickValues(data: Array<{ x: string; y: number }>) {
+  if (data.length <= 8) {
+    return data.map((point) => point.x)
+  }
+  const step = Math.ceil(data.length / 7)
+  return data
+    .filter((_, index) => index === 0 || index === data.length - 1 || index % step === 0)
+    .map((point) => point.x)
+}
+
+function getChartYDomain(data: Array<{ x: string; y: number }>, includeZero = false) {
+  const values = data.map((point) => point.y).filter((value) => Number.isFinite(value))
+  if (values.length === 0) {
+    return { min: 0, max: 1 }
+  }
+  const minValue = Math.min(...values, includeZero ? 0 : values[0])
+  const maxValue = Math.max(...values, includeZero ? 0 : values[0])
+  const span = maxValue - minValue
+  const padding = span === 0 ? Math.max(Math.abs(maxValue) * 0.1, 1) : span * 0.12
+  return {
+    min: minValue - padding,
+    max: maxValue + padding,
+  }
 }
 
 function formatMoneyInCurrency(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
@@ -238,12 +281,13 @@ export default function InvestmentsPage() {
   })
   const performancePortfolioId = overviewQuery.data?.portfolio?.id
   const performanceQuery = useQuery({
-    queryKey: ["investment-performance", performancePortfolioId, performanceGroupBy, performancePeriod.dateFrom, performancePeriod.dateTo],
+    queryKey: ["investment-performance", performancePortfolioId, performanceGroupBy, performancePeriod.dateFrom, performancePeriod.dateTo, displayCurrency],
     queryFn: () =>
       InvestmentService.getPortfolioPerformance(performancePortfolioId!, {
         date_from: performancePeriod.dateFrom,
         date_to: performancePeriod.dateTo,
         group_by: performanceGroupBy,
+        display_currency: displayCurrency,
       }),
     enabled: Boolean(performancePortfolioId),
   })
@@ -397,7 +441,6 @@ export default function InvestmentsPage() {
   const canCreateOperation = Boolean(currentPortfolio && activeInstruments.length > 0 && currentPortfolioAccounts.length > 0)
   const fxRates = fxRatesQuery.data ?? []
   const money = (amount: number | null | undefined) => formatMoneyInCurrency(amount, displayCurrency, fxRates)
-  const hasDisplayRate = displayCurrency === "USD" || Boolean(getDisplayRate(displayCurrency, fxRates))
   const targetAllocations = targetAllocationsQuery.data ?? []
   const rebalanceStatus = rebalanceQuery.data
   const targetAllocationByInstrument = new Map(targetAllocations.map((allocation) => [allocation.instrument, allocation]))
@@ -414,12 +457,17 @@ export default function InvestmentsPage() {
   const performancePoints = performance?.points ?? []
   const valueLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
-    y: convertUsdAmount(point.current_value_usd, displayCurrency, fxRates) ?? 0,
+    y: point.current_value_display ?? point.current_value_usd,
   }))
   const plLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
-    y: convertUsdAmount(point.total_pl_usd, displayCurrency, fxRates) ?? 0,
+    y: point.total_pl_display ?? point.total_pl_usd,
   }))
+  const valueChartTicks = getChartTickValues(valueLineData)
+  const plChartTicks = getChartTickValues(plLineData)
+  const valueChartDomain = getChartYDomain(valueLineData)
+  const plChartDomain = getChartYDomain(plLineData, true)
+  const performancePointSize = performancePoints.length > 60 ? 0 : 7
   const operationTotals = operations.reduce(
     (totals, operation) => {
       if (operation.operation_type === "buy") {
@@ -636,12 +684,6 @@ export default function InvestmentsPage() {
                 description="Не удалось получить performance API. Остальные данные портфеля доступны."
                 action={<Button variant="outline" onClick={() => void performanceQuery.refetch()}>Повторить</Button>}
               />
-            ) : !hasDisplayRate ? (
-              <EmptyState
-                icon={LineChart}
-                title="Нет курса для выбранной валюты"
-                description="Графики остаются в USD, пока не появится свежий FX snapshot для выбранной валюты."
-              />
             ) : performance.points.length === 0 ? (
               <EmptyState
                 icon={LineChart}
@@ -655,13 +697,18 @@ export default function InvestmentsPage() {
                   <div className="h-[320px]">
                     <ResponsiveLine
                       data={[{ id: "Стоимость", data: valueLineData }]}
-                      margin={{ top: 18, right: 16, bottom: 64, left: 54 }}
+                      margin={{ top: 22, right: 18, bottom: 50, left: 64 }}
                       xScale={{ type: "point" }}
-                      yScale={{ type: "linear", stacked: false }}
-                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -35 }}
-                      axisLeft={{ tickSize: 0, tickPadding: 8 }}
+                      yScale={{ type: "linear", stacked: false, min: valueChartDomain.min, max: valueChartDomain.max }}
+                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -25, tickValues: valueChartTicks }}
+                      axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatCompactChartValue(Number(value)) }}
+                      enableGridX={false}
                       curve="monotoneX"
-                      pointSize={7}
+                      pointSize={performancePointSize}
+                      pointBorderWidth={2}
+                      pointBorderColor={{ from: "serieColor" }}
+                      enableArea={performancePoints.length <= 60}
+                      areaOpacity={0.08}
                       colors={["hsl(var(--primary))"]}
                       useMesh
                       tooltip={({ point }) => (
@@ -677,13 +724,16 @@ export default function InvestmentsPage() {
                   <div className="h-[320px]">
                     <ResponsiveLine
                       data={[{ id: "Total P/L", data: plLineData }]}
-                      margin={{ top: 18, right: 16, bottom: 64, left: 54 }}
+                      margin={{ top: 22, right: 18, bottom: 50, left: 64 }}
                       xScale={{ type: "point" }}
-                      yScale={{ type: "linear", stacked: false }}
-                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -35 }}
-                      axisLeft={{ tickSize: 0, tickPadding: 8 }}
+                      yScale={{ type: "linear", stacked: false, min: plChartDomain.min, max: plChartDomain.max }}
+                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -25, tickValues: plChartTicks }}
+                      axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatCompactChartValue(Number(value)) }}
+                      enableGridX={false}
                       curve="monotoneX"
-                      pointSize={7}
+                      pointSize={performancePointSize}
+                      pointBorderWidth={2}
+                      pointBorderColor={{ from: "serieColor" }}
                       colors={[overview.total_pl_usd < 0 ? "#ef4444" : "#10b981"]}
                       useMesh
                       tooltip={({ point }) => (
@@ -1618,13 +1668,47 @@ function OperationForm({
   const [instrument, setInstrument] = useState(operation?.instrument ?? activeInstruments[0]?.id ?? "")
   const [quantity, setQuantity] = useState(formatInputNumber(operation?.quantity))
   const [priceUsd, setPriceUsd] = useState(formatInputNumber(operation?.price_usd))
+  const [priceEditedManually, setPriceEditedManually] = useState(Boolean(operation?.price_usd))
   const [amountUsd, setAmountUsd] = useState(formatInputNumber(operation?.amount_usd))
-  const [amountEditedManually, setAmountEditedManually] = useState(Boolean(operation))
+  const [amountEditedManually, setAmountEditedManually] = useState(isOperationAmountEditedManually(operation))
   const [feeUsd, setFeeUsd] = useState(formatInputNumber(operation?.fee_usd ?? 0))
   const [posted, setPosted] = useState(operation?.posted ?? true)
   const [deleted, setDeleted] = useState(operation?.deleted ?? false)
   const [comment, setComment] = useState(operation?.comment ?? "")
+  const [priceLookupMessage, setPriceLookupMessage] = useState("")
   const needsAmount = operationType === "buy" || operationType === "sell"
+
+  useEffect(() => {
+    if (!needsAmount || priceEditedManually || !instrument || !date) {
+      return
+    }
+    let isCurrent = true
+    setPriceLookupMessage("Ищем цену на дату сделки...")
+    InvestmentService.lookupPrice({ instrument, date })
+      .then((lookup) => {
+        if (!isCurrent) {
+          return
+        }
+        if (lookup.found && lookup.price_usd !== undefined) {
+          setPriceUsd(formatInputNumber(lookup.price_usd))
+          setPriceLookupMessage(
+            lookup.is_exact_date
+              ? `Цена на ${formatDate(lookup.snapshot_date ?? date)}`
+              : `Цена от ${formatDate(lookup.snapshot_date ?? date)}, ${lookup.stale_days ?? 0} дн. до сделки`,
+          )
+          return
+        }
+        setPriceLookupMessage(lookup.detail ?? "Цена на эту дату не найдена.")
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setPriceLookupMessage("Не удалось получить цену на дату.")
+        }
+      })
+    return () => {
+      isCurrent = false
+    }
+  }, [date, instrument, needsAmount, priceEditedManually])
 
   useEffect(() => {
     if (!needsAmount || amountEditedManually) {
@@ -1728,7 +1812,18 @@ function OperationForm({
         <Input value={quantity} onChange={(event) => setQuantity(event.target.value)} required inputMode="decimal" placeholder="0.01" />
       </FormField>
       <FormField label="Цена USD">
-        <Input value={priceUsd} onChange={(event) => setPriceUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Цена за единицу в USD" />
+        <Input
+          value={priceUsd}
+          onChange={(event) => {
+            setPriceUsd(event.target.value)
+            setPriceEditedManually(true)
+            setPriceLookupMessage("Цена изменена вручную.")
+          }}
+          required={needsAmount}
+          inputMode="decimal"
+          placeholder="Цена за единицу в USD"
+        />
+        {priceLookupMessage ? <p className="text-xs text-muted-foreground">{priceLookupMessage}</p> : null}
       </FormField>
       <FormField label="Сумма USD">
         <Input

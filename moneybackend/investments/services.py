@@ -12,6 +12,15 @@ from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, Investm
 from .price_providers import PriceProviderError, get_price_provider
 
 ZERO_AMOUNT = Decimal('0')
+PERFORMANCE_MONEY_FIELDS = (
+    'cost_basis',
+    'current_value',
+    'realized_pl',
+    'unrealized_pl',
+    'total_pl',
+    'bought',
+    'sold',
+)
 
 
 @dataclass
@@ -83,7 +92,15 @@ def _latest_price_snapshots(instrument_ids, *, as_of=None):
     return latest
 
 
-def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_of=None, include_targets=False):
+def calculate_positions(
+    portfolio,
+    *,
+    include_zero=False,
+    as_of=None,
+    price_as_of=None,
+    include_targets=False,
+    price_max_age_days=None,
+):
     positions = {}
 
     operations = (
@@ -135,7 +152,8 @@ def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_o
             # Перевод между инвестиционными счетами не меняет агрегированную позицию портфеля.
             continue
 
-    latest_prices = _latest_price_snapshots(positions.keys(), as_of=price_as_of or as_of)
+    price_cutoff = price_as_of or as_of
+    latest_prices = _latest_price_snapshots(positions.keys(), as_of=price_cutoff)
     target_allocations = {
         str(allocation.instrument_id): allocation
         for allocation in InvestmentTargetAllocation.objects.filter(portfolio=portfolio).select_related('instrument')
@@ -146,6 +164,11 @@ def calculate_positions(portfolio, *, include_zero=False, as_of=None, price_as_o
         if not include_zero and state.quantity == ZERO_AMOUNT:
             continue
         snapshot = latest_prices.get(instrument_id)
+        if snapshot is not None and price_max_age_days is not None and price_cutoff is not None:
+            snapshot_date = _date_part(snapshot.captured_at)
+            cutoff_date = _date_part(price_cutoff)
+            if snapshot_date is None or cutoff_date is None or snapshot_date < cutoff_date - timedelta(days=price_max_age_days):
+                snapshot = None
         latest_price_usd = _money(snapshot.price_usd) if snapshot is not None else None
         current_value_usd = _money(latest_price_usd * state.quantity) if latest_price_usd is not None and state.quantity != ZERO_AMOUNT else None
         unrealized_pl_usd = _money(current_value_usd - state.cost_basis_usd) if current_value_usd is not None else None
@@ -259,8 +282,14 @@ def calculate_instrument_quantity(portfolio, instrument, *, exclude_operation=No
     return quantity
 
 
-def calculate_portfolio_totals(portfolio, *, as_of=None):
-    positions = calculate_positions(portfolio, include_zero=True, as_of=as_of, price_as_of=as_of)
+def calculate_portfolio_totals(portfolio, *, as_of=None, price_max_age_days=None):
+    positions = calculate_positions(
+        portfolio,
+        include_zero=True,
+        as_of=as_of,
+        price_as_of=as_of,
+        price_max_age_days=price_max_age_days,
+    )
     totals = defaultdict(lambda: ZERO_AMOUNT)
     valuation_complete = True
 
@@ -305,15 +334,21 @@ def calculate_portfolio_totals(portfolio, *, as_of=None):
     }
 
 
-def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='month'):
+def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='month', display_currency='USD'):
     if date_from > date_to:
         raise ValueError('date_from must be before or equal to date_to.')
     if group_by not in {'day', 'month'}:
         raise ValueError('group_by must be day or month.')
+    display_currency = (display_currency or 'USD').strip().upper()
 
     start_dt = _aware_datetime(date_from)
     opening_cutoff = start_dt - timedelta(microseconds=1)
-    opening = _performance_totals_for_cutoff(portfolio, opening_cutoff, label='Старт')
+    opening = _performance_totals_for_cutoff(
+        portfolio,
+        opening_cutoff,
+        label='Старт',
+        display_currency=display_currency,
+    )
     opening.update({
         'date': date_from.isoformat(),
         'period_start': None,
@@ -343,7 +378,14 @@ def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='
             label = period_end.strftime('%Y-%m')
 
         cutoff = _aware_datetime(period_end, end_of_day=True)
-        point = _performance_totals_for_cutoff(portfolio, cutoff, label=label)
+        point = _performance_totals_for_cutoff(
+            portfolio,
+            cutoff,
+            label=label,
+            price_max_age_days=0,
+            display_currency=display_currency,
+            fx_max_age_days=0,
+        )
         if not point['valuation_complete'] or not _performance_point_has_state(point):
             continue
         point.update({
@@ -358,6 +400,7 @@ def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='
         'date_from': date_from.isoformat(),
         'date_to': date_to.isoformat(),
         'group_by': group_by,
+        'display_currency': display_currency,
         'opening': opening,
         'points': points,
     }
@@ -421,9 +464,17 @@ def calculate_rebalance_status(portfolio):
     }
 
 
-def _performance_totals_for_cutoff(portfolio, cutoff, *, label):
-    totals = calculate_portfolio_totals(portfolio, as_of=cutoff)
-    return {
+def _performance_totals_for_cutoff(
+    portfolio,
+    cutoff,
+    *,
+    label,
+    price_max_age_days=None,
+    display_currency='USD',
+    fx_max_age_days=None,
+):
+    totals = calculate_portfolio_totals(portfolio, as_of=cutoff, price_max_age_days=price_max_age_days)
+    point = {
         'label': label,
         'cost_basis_usd': totals['cost_basis_usd'],
         'current_value_usd': totals['current_value_usd'],
@@ -434,6 +485,48 @@ def _performance_totals_for_cutoff(portfolio, cutoff, *, label):
         'sold_usd': totals['sold_usd'],
         'valuation_complete': totals['valuation_complete'],
     }
+    _apply_display_currency(point, cutoff, display_currency, fx_max_age_days=fx_max_age_days)
+    return point
+
+
+def _latest_fx_rate_snapshot(base_currency, quote_currency, *, as_of=None, max_age_days=None):
+    base = str(base_currency or '').strip().upper()
+    quote = str(quote_currency or '').strip().upper()
+    if base == quote:
+        return None, Decimal('1')
+    queryset = (
+        FxRateSnapshot.objects
+        .filter(base_currency=base, quote_currency=quote)
+        .order_by('-captured_at', '-created_at')
+    )
+    if as_of is not None:
+        queryset = queryset.filter(captured_at__lte=as_of)
+    snapshot = queryset.first()
+    if snapshot is None:
+        return None, None
+    if max_age_days is not None and as_of is not None:
+        snapshot_date = _date_part(snapshot.captured_at)
+        cutoff_date = _date_part(as_of)
+        if snapshot_date is None or cutoff_date is None or snapshot_date < cutoff_date - timedelta(days=max_age_days):
+            return None, None
+    return snapshot, snapshot.rate
+
+
+def _apply_display_currency(point, cutoff, display_currency, *, fx_max_age_days=None):
+    currency = (display_currency or 'USD').strip().upper()
+    fx_snapshot, fx_rate = _latest_fx_rate_snapshot('USD', currency, as_of=cutoff, max_age_days=fx_max_age_days)
+    point['display_currency'] = currency
+    point['fx_rate_to_display'] = fx_rate
+    point['fx_rate_at'] = fx_snapshot.captured_at if fx_snapshot is not None else None
+    point['display_valuation_complete'] = fx_rate is not None
+    if fx_rate is None:
+        point['valuation_complete'] = False
+        for field in PERFORMANCE_MONEY_FIELDS:
+            point[f'{field}_display'] = None
+        return
+
+    for field in PERFORMANCE_MONEY_FIELDS:
+        point[f'{field}_display'] = _money(point[f'{field}_usd'] * fx_rate)
 
 
 def refresh_price_snapshots(*, price_provider=None, fx_provider=None, instruments=None, captured_at=None):

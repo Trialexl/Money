@@ -69,6 +69,23 @@ export interface InstrumentPriceSnapshot {
   source: string
 }
 
+export interface InstrumentPriceLookup {
+  found: boolean
+  instrument: string
+  instrument_ticker?: string
+  date: string
+  snapshot_id?: string
+  snapshot_date?: string
+  is_exact_date?: boolean
+  stale_days?: number
+  price?: number
+  price_currency?: string
+  fx_rate_to_usd?: number
+  price_usd?: number
+  source?: string
+  detail?: string
+}
+
 export interface FxRateSnapshot {
   id: string
   captured_at: string
@@ -134,6 +151,17 @@ export interface InvestmentPerformancePoint {
   bought_usd: number
   sold_usd: number
   valuation_complete: boolean
+  display_currency: string
+  fx_rate_to_display?: number | null
+  fx_rate_at?: string | null
+  display_valuation_complete: boolean
+  cost_basis_display?: number | null
+  current_value_display?: number | null
+  realized_pl_display?: number | null
+  unrealized_pl_display?: number | null
+  total_pl_display?: number | null
+  bought_display?: number | null
+  sold_display?: number | null
 }
 
 export interface InvestmentPerformance {
@@ -141,6 +169,7 @@ export interface InvestmentPerformance {
   date_from: string
   date_to: string
   group_by: "day" | "month"
+  display_currency: string
   opening: InvestmentPerformancePoint
   points: InvestmentPerformancePoint[]
 }
@@ -261,6 +290,25 @@ function mapPriceSnapshot(raw: any): InstrumentPriceSnapshot {
   }
 }
 
+function mapPriceLookup(raw: any): InstrumentPriceLookup {
+  return {
+    found: !!raw.found,
+    instrument: raw.instrument ?? "",
+    instrument_ticker: raw.instrument_ticker ?? undefined,
+    date: raw.date ?? "",
+    snapshot_id: raw.snapshot_id ?? undefined,
+    snapshot_date: raw.snapshot_date ?? undefined,
+    is_exact_date: raw.is_exact_date ?? undefined,
+    stale_days: raw.stale_days === undefined || raw.stale_days === null ? undefined : Number(raw.stale_days),
+    price: fromApiNullableAmount(raw.price) ?? undefined,
+    price_currency: raw.price_currency ?? undefined,
+    fx_rate_to_usd: fromApiNullableAmount(raw.fx_rate_to_usd) ?? undefined,
+    price_usd: fromApiNullableAmount(raw.price_usd) ?? undefined,
+    source: raw.source ?? undefined,
+    detail: raw.detail ?? undefined,
+  }
+}
+
 function mapFxRateSnapshot(raw: any): FxRateSnapshot {
   return {
     id: raw.id,
@@ -346,6 +394,17 @@ function mapPerformancePoint(raw: any): InvestmentPerformancePoint {
     bought_usd: fromApiAmount(raw.bought_usd),
     sold_usd: fromApiAmount(raw.sold_usd),
     valuation_complete: raw.valuation_complete !== false,
+    display_currency: raw.display_currency ?? "USD",
+    fx_rate_to_display: fromApiNullableAmount(raw.fx_rate_to_display),
+    fx_rate_at: fromApiDateTime(raw.fx_rate_at) ?? null,
+    display_valuation_complete: raw.display_valuation_complete !== false,
+    cost_basis_display: fromApiNullableAmount(raw.cost_basis_display),
+    current_value_display: fromApiNullableAmount(raw.current_value_display),
+    realized_pl_display: fromApiNullableAmount(raw.realized_pl_display),
+    unrealized_pl_display: fromApiNullableAmount(raw.unrealized_pl_display),
+    total_pl_display: fromApiNullableAmount(raw.total_pl_display),
+    bought_display: fromApiNullableAmount(raw.bought_display),
+    sold_display: fromApiNullableAmount(raw.sold_display),
   }
 }
 
@@ -355,6 +414,7 @@ function mapPerformance(raw: any): InvestmentPerformance {
     date_from: raw.date_from ?? "",
     date_to: raw.date_to ?? "",
     group_by: raw.group_by === "day" ? "day" : "month",
+    display_currency: raw.display_currency ?? "USD",
     opening: mapPerformancePoint(raw.opening ?? {}),
     points: Array.isArray(raw.points) ? raw.points.map(mapPerformancePoint) : [],
   }
@@ -405,7 +465,7 @@ export const InvestmentService = {
     return mapOverview(response.data)
   },
 
-  async getPortfolioPerformance(portfolioId: string, params?: { date_from?: string; date_to?: string; group_by?: "day" | "month" }) {
+  async getPortfolioPerformance(portfolioId: string, params?: { date_from?: string; date_to?: string; group_by?: "day" | "month"; display_currency?: string }) {
     const response = await api.get(`/investment/portfolios/${portfolioId}/performance/`, { params })
     return mapPerformance(response.data)
   },
@@ -455,6 +515,11 @@ export const InvestmentService = {
     const response = await api.get("/investment/prices/", { params })
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data
     return Array.isArray(data) ? data.map(mapPriceSnapshot) : []
+  },
+
+  async lookupPrice(params: { instrument: string; date: string }) {
+    const response = await api.get("/investment/prices/lookup/", { params })
+    return mapPriceLookup(response.data)
   },
 
   async getFxRates(params?: { base_currency?: string; quote_currency?: string }) {

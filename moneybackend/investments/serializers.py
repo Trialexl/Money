@@ -405,6 +405,17 @@ class InvestmentPerformancePointSerializer(serializers.Serializer):
     bought_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     valuation_complete = serializers.BooleanField()
+    display_currency = serializers.CharField()
+    fx_rate_to_display = serializers.DecimalField(max_digits=18, decimal_places=8, allow_null=True)
+    fx_rate_at = serializers.DateTimeField(allow_null=True)
+    display_valuation_complete = serializers.BooleanField()
+    cost_basis_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    current_value_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    realized_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    unrealized_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    total_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    bought_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    sold_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
 
 
 class InvestmentPerformanceSerializer(serializers.Serializer):
@@ -412,6 +423,7 @@ class InvestmentPerformanceSerializer(serializers.Serializer):
     date_from = serializers.DateField()
     date_to = serializers.DateField()
     group_by = serializers.CharField()
+    display_currency = serializers.CharField()
     opening = InvestmentPerformancePointSerializer()
     points = InvestmentPerformancePointSerializer(many=True)
 
