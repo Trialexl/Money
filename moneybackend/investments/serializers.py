@@ -405,6 +405,7 @@ class InvestmentPerformancePointSerializer(serializers.Serializer):
     bought_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     valuation_complete = serializers.BooleanField()
+    missing_reason = serializers.CharField(allow_null=True, required=False)
     display_currency = serializers.CharField()
     fx_rate_to_display = serializers.DecimalField(max_digits=18, decimal_places=8, allow_null=True)
     fx_rate_at = serializers.DateTimeField(allow_null=True)
@@ -418,14 +419,24 @@ class InvestmentPerformancePointSerializer(serializers.Serializer):
     sold_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
 
 
+class InvestmentInstrumentPerformanceSeriesSerializer(serializers.Serializer):
+    instrument_id = serializers.UUIDField()
+    instrument_ticker = serializers.CharField()
+    instrument_name = serializers.CharField()
+    points = InvestmentPerformancePointSerializer(many=True)
+    missing_points = InvestmentPerformancePointSerializer(many=True)
+
+
 class InvestmentPerformanceSerializer(serializers.Serializer):
     portfolio_id = serializers.UUIDField()
     date_from = serializers.DateField()
     date_to = serializers.DateField()
     group_by = serializers.CharField()
     display_currency = serializers.CharField()
+    scope = serializers.CharField()
     opening = InvestmentPerformancePointSerializer()
     points = InvestmentPerformancePointSerializer(many=True)
+    instrument_series = InvestmentInstrumentPerformanceSeriesSerializer(many=True)
 
 
 class InvestmentRebalanceStatusSerializer(serializers.Serializer):

@@ -61,6 +61,7 @@ type DisplayCurrency = "RUB" | "USD" | "EUR"
 
 const displayCurrencies: DisplayCurrency[] = ["USD", "EUR", "RUB"]
 const currencyOptions = displayCurrencies
+const instrumentChartColors = ["#0f8b8d", "#f97316", "#8b5cf6", "#10b981", "#ef4444", "#3b82f6", "#f59e0b", "#ec4899"]
 
 type InvestmentDialogState =
   | { type: "portfolio"; mode: "create" | "edit"; item?: InvestmentPortfolio }
@@ -268,6 +269,7 @@ export default function InvestmentsPage() {
   const [dialog, setDialog] = useState<InvestmentDialogState>(null)
   const [dialogError, setDialogError] = useState("")
   const [performanceGroupBy, setPerformanceGroupBy] = useState<"day" | "month">("month")
+  const [hiddenPlInstruments, setHiddenPlInstruments] = useState<string[]>([])
   const [operationDateFrom, setOperationDateFrom] = useState("")
   const [operationDateTo, setOperationDateTo] = useState("")
   const [operationInstrument, setOperationInstrument] = useState("all")
@@ -288,6 +290,7 @@ export default function InvestmentsPage() {
         date_to: performancePeriod.dateTo,
         group_by: performanceGroupBy,
         display_currency: displayCurrency,
+        scope: "all",
       }),
     enabled: Boolean(performancePortfolioId),
   })
@@ -468,6 +471,27 @@ export default function InvestmentsPage() {
   const valueChartDomain = getChartYDomain(valueLineData)
   const plChartDomain = getChartYDomain(plLineData, true)
   const performancePointSize = performancePoints.length > 60 ? 0 : 7
+  const instrumentPlSeries = performance?.instrument_series.filter((series) => series.points.length > 0) ?? []
+  const instrumentPlColorByTicker = new Map(
+    instrumentPlSeries.map((series, index) => [
+      series.instrument_ticker,
+      instrumentChartColors[index % instrumentChartColors.length],
+    ]),
+  )
+  const activeInstrumentPlSeries = instrumentPlSeries.filter((series) => !hiddenPlInstruments.includes(series.instrument_id))
+  const instrumentPlLineData = activeInstrumentPlSeries.map((series) => ({
+    id: series.instrument_ticker,
+    data: series.points.map((point) => ({
+      x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
+      y: point.total_pl_display ?? point.total_pl_usd,
+      realized: point.realized_pl_display ?? point.realized_pl_usd,
+      unrealized: point.unrealized_pl_display ?? point.unrealized_pl_usd,
+      total: point.total_pl_display ?? point.total_pl_usd,
+    })),
+  }))
+  const instrumentPlTicks = getChartTickValues(instrumentPlLineData[0]?.data ?? [])
+  const instrumentPlDomain = getChartYDomain(instrumentPlLineData.flatMap((series) => series.data), true)
+  const instrumentPlPointSize = performancePoints.length > 60 ? 0 : 6
   const operationTotals = operations.reduce(
     (totals, operation) => {
       if (operation.operation_type === "buy") {
@@ -507,6 +531,14 @@ export default function InvestmentsPage() {
   const openDialog = (nextDialog: InvestmentDialogState) => {
     setDialogError("")
     setDialog(nextDialog)
+  }
+
+  const togglePlInstrument = (instrumentId: string) => {
+    setHiddenPlInstruments((current) =>
+      current.includes(instrumentId)
+        ? current.filter((id) => id !== instrumentId)
+        : [...current, instrumentId],
+    )
   }
 
   const handleDelete = async (kind: "portfolio" | "instrument" | "account" | "operation" | "target-allocation", id: string, label: string) => {
@@ -742,6 +774,118 @@ export default function InvestmentsPage() {
                         </div>
                       )}
                     />
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {currentPortfolio ? (
+        <Card>
+          <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle>P/L по инструментам</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Сравнение Total P/L по активам. Клик по легенде скрывает или возвращает инструмент на график.
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {performanceQuery.isLoading ? (
+              <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">Загружаем P/L по инструментам...</div>
+            ) : performanceQuery.isError || !performance ? (
+              <EmptyState
+                icon={LineChart}
+                title="P/L по инструментам недоступен"
+                description="Не удалось получить данные performance API."
+                action={<Button variant="outline" onClick={() => void performanceQuery.refetch()}>Повторить</Button>}
+              />
+            ) : instrumentPlSeries.length === 0 ? (
+              <EmptyState
+                icon={LineChart}
+                title="Нет данных P/L по инструментам"
+                description="Для выбранного периода нет точек с ценами инструментов."
+              />
+            ) : instrumentPlLineData.length === 0 ? (
+              <EmptyState
+                icon={LineChart}
+                title="Все инструменты скрыты"
+                description="Верни серии на график через кнопку ниже."
+                action={<Button variant="outline" onClick={() => setHiddenPlInstruments([])}>Показать все</Button>}
+              />
+            ) : (
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="min-w-0 rounded-[22px] border border-border/70 bg-background/70 p-4">
+                  <div className="h-[340px]">
+                    <ResponsiveLine
+                      data={instrumentPlLineData}
+                      margin={{ top: 22, right: 18, bottom: 50, left: 64 }}
+                      xScale={{ type: "point" }}
+                      yScale={{ type: "linear", stacked: false, min: instrumentPlDomain.min, max: instrumentPlDomain.max }}
+                      axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -25, tickValues: instrumentPlTicks }}
+                      axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatCompactChartValue(Number(value)) }}
+                      enableGridX={false}
+                      curve="monotoneX"
+                      pointSize={instrumentPlPointSize}
+                      pointBorderWidth={2}
+                      pointBorderColor={{ from: "serieColor" }}
+                      colors={(series) => instrumentPlColorByTicker.get(String(series.id)) ?? instrumentChartColors[0]}
+                      useMesh
+                      tooltip={({ point }) => {
+                        const data = point.data as typeof point.data & {
+                          realized?: number | null
+                          unrealized?: number | null
+                          total?: number | null
+                        }
+                        return (
+                          <div className="rounded border bg-background px-2 py-1 text-xs shadow-sm">
+                            <div className="font-semibold">{String(point.seriesId)} · {String(point.data.x)}</div>
+                            <div>Total: {formatCurrencyValue(Number(data.total ?? point.data.y), displayCurrency)}</div>
+                            <div>Realized: {formatCurrencyValue(Number(data.realized ?? 0), displayCurrency)}</div>
+                            <div>Unrealized: {formatCurrencyValue(Number(data.unrealized ?? 0), displayCurrency)}</div>
+                          </div>
+                        )
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-foreground">Легенда</div>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setHiddenPlInstruments([])}>
+                      Все
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {instrumentPlSeries.map((series, index) => {
+                      const isHidden = hiddenPlInstruments.includes(series.instrument_id)
+                      const lastPoint = series.points[series.points.length - 1]
+                      return (
+                        <button
+                          key={series.instrument_id}
+                          type="button"
+                          className={
+                            isHidden
+                              ? "flex w-full items-center justify-between gap-3 rounded-2xl border border-border/70 bg-muted/30 px-3 py-2 text-left opacity-45"
+                              : "flex w-full items-center justify-between gap-3 rounded-2xl border border-border/70 bg-muted/30 px-3 py-2 text-left hover:border-primary/60"
+                          }
+                          onClick={() => togglePlInstrument(series.instrument_id)}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span
+                              className="h-3 w-3 shrink-0 rounded-full"
+                              style={{ backgroundColor: instrumentChartColors[index % instrumentChartColors.length] }}
+                            />
+                            <span className="truncate font-medium">{series.instrument_ticker}</span>
+                          </span>
+                          <span className={lastPoint.total_pl_usd < 0 ? "shrink-0 text-destructive tabular-nums" : "shrink-0 text-emerald-600 tabular-nums"}>
+                            {formatCurrencyValue(lastPoint.total_pl_display ?? lastPoint.total_pl_usd, displayCurrency)}
+                          </span>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
               </div>

@@ -151,6 +151,7 @@ export interface InvestmentPerformancePoint {
   bought_usd: number
   sold_usd: number
   valuation_complete: boolean
+  missing_reason?: string | null
   display_currency: string
   fx_rate_to_display?: number | null
   fx_rate_at?: string | null
@@ -170,8 +171,18 @@ export interface InvestmentPerformance {
   date_to: string
   group_by: "day" | "month"
   display_currency: string
+  scope: "portfolio" | "instrument" | "all"
   opening: InvestmentPerformancePoint
   points: InvestmentPerformancePoint[]
+  instrument_series: InvestmentInstrumentPerformanceSeries[]
+}
+
+export interface InvestmentInstrumentPerformanceSeries {
+  instrument_id: string
+  instrument_ticker: string
+  instrument_name: string
+  points: InvestmentPerformancePoint[]
+  missing_points: InvestmentPerformancePoint[]
 }
 
 export interface InvestmentTargetAllocation {
@@ -394,6 +405,7 @@ function mapPerformancePoint(raw: any): InvestmentPerformancePoint {
     bought_usd: fromApiAmount(raw.bought_usd),
     sold_usd: fromApiAmount(raw.sold_usd),
     valuation_complete: raw.valuation_complete !== false,
+    missing_reason: raw.missing_reason ?? null,
     display_currency: raw.display_currency ?? "USD",
     fx_rate_to_display: fromApiNullableAmount(raw.fx_rate_to_display),
     fx_rate_at: fromApiDateTime(raw.fx_rate_at) ?? null,
@@ -415,8 +427,20 @@ function mapPerformance(raw: any): InvestmentPerformance {
     date_to: raw.date_to ?? "",
     group_by: raw.group_by === "day" ? "day" : "month",
     display_currency: raw.display_currency ?? "USD",
+    scope: raw.scope === "instrument" || raw.scope === "all" ? raw.scope : "portfolio",
     opening: mapPerformancePoint(raw.opening ?? {}),
     points: Array.isArray(raw.points) ? raw.points.map(mapPerformancePoint) : [],
+    instrument_series: Array.isArray(raw.instrument_series) ? raw.instrument_series.map(mapInstrumentPerformanceSeries) : [],
+  }
+}
+
+function mapInstrumentPerformanceSeries(raw: any): InvestmentInstrumentPerformanceSeries {
+  return {
+    instrument_id: raw.instrument_id ?? "",
+    instrument_ticker: raw.instrument_ticker ?? "",
+    instrument_name: raw.instrument_name ?? "",
+    points: Array.isArray(raw.points) ? raw.points.map(mapPerformancePoint) : [],
+    missing_points: Array.isArray(raw.missing_points) ? raw.missing_points.map(mapPerformancePoint) : [],
   }
 }
 
@@ -465,7 +489,14 @@ export const InvestmentService = {
     return mapOverview(response.data)
   },
 
-  async getPortfolioPerformance(portfolioId: string, params?: { date_from?: string; date_to?: string; group_by?: "day" | "month"; display_currency?: string }) {
+  async getPortfolioPerformance(portfolioId: string, params?: {
+    date_from?: string
+    date_to?: string
+    group_by?: "day" | "month"
+    display_currency?: string
+    scope?: "portfolio" | "instrument" | "all"
+    instrument?: string
+  }) {
     const response = await api.get(`/investment/portfolios/${portfolioId}/performance/`, { params })
     return mapPerformance(response.data)
   },

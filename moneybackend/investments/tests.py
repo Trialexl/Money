@@ -421,6 +421,55 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual([point['period_end'] for point in performance['points']], ['2026-01-31', '2026-03-31'])
         self.assertEqual([point['current_value_usd'] for point in performance['points']], [Decimal('100.00'), Decimal('130.00')])
 
+    def test_portfolio_performance_returns_instrument_pl_series(self):
+        eth = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='ETH', name='Ethereum')
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price_usd=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 5),
+        )
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=eth,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price_usd=Decimal('50.00'),
+            amount_usd=Decimal('50.00'),
+            date=self._dt(2026, 1, 6),
+        )
+        for instrument, price in ((self.instrument, Decimal('150.00')), (eth, Decimal('50.00'))):
+            InstrumentPriceSnapshot.objects.create(
+                instrument=instrument,
+                price=price,
+                price_currency='USD',
+                fx_rate_to_usd=Decimal('1'),
+                price_usd=price,
+                captured_at=self._dt(2026, 1, 31),
+            )
+
+        performance = calculate_portfolio_performance(
+            self.portfolio,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 1, 31),
+            group_by='month',
+            scope='all',
+        )
+
+        self.assertEqual(performance['points'][0]['total_pl_usd'], Decimal('50.00'))
+        series_by_ticker = {series['instrument_ticker']: series for series in performance['instrument_series']}
+        self.assertEqual(series_by_ticker['BTC']['points'][0]['total_pl_usd'], Decimal('50.00'))
+        self.assertEqual(series_by_ticker['ETH']['points'][0]['total_pl_usd'], Decimal('0.00'))
+        self.assertEqual(
+            sum(series['points'][0]['total_pl_usd'] for series in performance['instrument_series']),
+            performance['points'][0]['total_pl_usd'],
+        )
+
     def test_investment_operations_do_not_mutate_price_snapshots(self):
         snapshot = InstrumentPriceSnapshot.objects.create(
             instrument=self.instrument,

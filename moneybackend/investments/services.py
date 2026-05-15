@@ -334,11 +334,22 @@ def calculate_portfolio_totals(portfolio, *, as_of=None, price_max_age_days=None
     }
 
 
-def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='month', display_currency='USD'):
+def calculate_portfolio_performance(
+    portfolio,
+    *,
+    date_from,
+    date_to,
+    group_by='month',
+    display_currency='USD',
+    scope='portfolio',
+    instrument_id=None,
+):
     if date_from > date_to:
         raise ValueError('date_from must be before or equal to date_to.')
     if group_by not in {'day', 'month'}:
         raise ValueError('group_by must be day or month.')
+    if scope not in {'portfolio', 'instrument', 'all'}:
+        raise ValueError('scope must be portfolio, instrument or all.')
     display_currency = (display_currency or 'USD').strip().upper()
 
     start_dt = _aware_datetime(date_from)
@@ -361,6 +372,13 @@ def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='
         effective_date_to = min(effective_date_to, latest_data_date)
 
     points = []
+    instrument_series = defaultdict(lambda: {
+        'instrument_id': '',
+        'instrument_ticker': '',
+        'instrument_name': '',
+        'points': [],
+        'missing_points': [],
+    })
     if first_data_date is not None:
         cursor = max(date_from, first_data_date)
     else:
@@ -386,13 +404,35 @@ def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='
             display_currency=display_currency,
             fx_max_age_days=0,
         )
-        if not point['valuation_complete'] or not _performance_point_has_state(point):
-            continue
         point.update({
             'date': period_end.isoformat(),
             'period_start': period_start.isoformat(),
             'period_end': period_end.isoformat(),
         })
+
+        if scope in {'instrument', 'all'}:
+            for instrument_row in _performance_instrument_points_for_cutoff(
+                portfolio,
+                cutoff,
+                label=label,
+                period_start=period_start,
+                period_end=period_end,
+                display_currency=display_currency,
+                instrument_id=instrument_id if scope == 'instrument' else None,
+                price_max_age_days=0,
+                fx_max_age_days=0,
+            ):
+                series = instrument_series[instrument_row['instrument_id']]
+                series['instrument_id'] = instrument_row['instrument_id']
+                series['instrument_ticker'] = instrument_row['instrument_ticker']
+                series['instrument_name'] = instrument_row['instrument_name']
+                if instrument_row['point']['valuation_complete']:
+                    series['points'].append(instrument_row['point'])
+                else:
+                    series['missing_points'].append(instrument_row['point'])
+
+        if not point['valuation_complete'] or not _performance_point_has_state(point):
+            continue
         points.append(point)
 
     return {
@@ -401,9 +441,71 @@ def calculate_portfolio_performance(portfolio, *, date_from, date_to, group_by='
         'date_to': date_to.isoformat(),
         'group_by': group_by,
         'display_currency': display_currency,
+        'scope': scope,
         'opening': opening,
         'points': points,
+        'instrument_series': sorted(
+            instrument_series.values(),
+            key=lambda series: series['instrument_ticker'],
+        ),
     }
+
+
+def _performance_instrument_points_for_cutoff(
+    portfolio,
+    cutoff,
+    *,
+    label,
+    period_start,
+    period_end,
+    display_currency,
+    instrument_id=None,
+    price_max_age_days=None,
+    fx_max_age_days=None,
+):
+    rows = []
+    positions = calculate_positions(
+        portfolio,
+        include_zero=False,
+        as_of=cutoff,
+        price_as_of=cutoff,
+        price_max_age_days=price_max_age_days,
+    )
+    for position in positions:
+        if instrument_id is not None and str(position['instrument_id']) != str(instrument_id):
+            continue
+        valuation_complete = not (position['current_value_usd'] is None and position['quantity'] != ZERO_AMOUNT)
+        if not valuation_complete:
+            current_value_usd = ZERO_AMOUNT
+            unrealized_pl_usd = ZERO_AMOUNT
+            total_pl_usd = position['realized_pl_usd']
+        else:
+            current_value_usd = position['current_value_usd'] or ZERO_AMOUNT
+            unrealized_pl_usd = position['unrealized_pl_usd'] or ZERO_AMOUNT
+            total_pl_usd = position['total_pl_usd']
+        point = {
+            'label': label,
+            'date': period_end.isoformat(),
+            'period_start': period_start.isoformat(),
+            'period_end': period_end.isoformat(),
+            'cost_basis_usd': position['cost_basis_usd'],
+            'current_value_usd': current_value_usd,
+            'realized_pl_usd': position['realized_pl_usd'],
+            'unrealized_pl_usd': unrealized_pl_usd,
+            'total_pl_usd': total_pl_usd,
+            'bought_usd': position['bought_usd'],
+            'sold_usd': position['sold_usd'],
+            'valuation_complete': valuation_complete,
+            'missing_reason': None if valuation_complete else 'price_missing',
+        }
+        _apply_display_currency(point, cutoff, display_currency, fx_max_age_days=fx_max_age_days)
+        rows.append({
+            'instrument_id': position['instrument_id'],
+            'instrument_ticker': position['instrument_ticker'],
+            'instrument_name': position['instrument_name'],
+            'point': point,
+        })
+    return rows
 
 
 def _portfolio_data_date_bounds(portfolio):

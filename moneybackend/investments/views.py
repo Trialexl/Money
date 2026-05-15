@@ -92,6 +92,8 @@ performance_parameters = [
     OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата окончания периода YYYY-MM-DD. По умолчанию 31 декабря текущего года.'),
     OpenApiParameter('group_by', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Группировка: day или month. По умолчанию month.'),
     OpenApiParameter('display_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Валюта отображения USD/EUR/RUB. По умолчанию USD.'),
+    OpenApiParameter('scope', OpenApiTypes.STR, OpenApiParameter.QUERY, description='portfolio, instrument или all. По умолчанию portfolio.'),
+    OpenApiParameter('instrument', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID инструмента для scope=instrument.'),
 ]
 
 
@@ -103,17 +105,23 @@ def _parse_performance_period(request):
     date_to = parse_date(date_to_value) if date_to_value else date(today.year, 12, 31)
     group_by = request.query_params.get('group_by') or 'month'
     display_currency = (request.query_params.get('display_currency') or 'USD').strip().upper()
+    scope = (request.query_params.get('scope') or 'portfolio').strip().lower()
+    instrument_id = request.query_params.get('instrument') or None
     if date_from is None:
-        return None, None, group_by, display_currency, {'date_from': 'Некорректная дата. Используйте YYYY-MM-DD.'}
+        return None, None, group_by, display_currency, scope, instrument_id, {'date_from': 'Некорректная дата. Используйте YYYY-MM-DD.'}
     if date_to is None:
-        return None, None, group_by, display_currency, {'date_to': 'Некорректная дата. Используйте YYYY-MM-DD.'}
+        return None, None, group_by, display_currency, scope, instrument_id, {'date_to': 'Некорректная дата. Используйте YYYY-MM-DD.'}
     if date_from > date_to:
-        return None, None, group_by, display_currency, {'date_to': 'Дата окончания должна быть не раньше даты начала.'}
+        return None, None, group_by, display_currency, scope, instrument_id, {'date_to': 'Дата окончания должна быть не раньше даты начала.'}
     if group_by not in {'day', 'month'}:
-        return None, None, group_by, display_currency, {'group_by': 'Поддерживаются значения day или month.'}
+        return None, None, group_by, display_currency, scope, instrument_id, {'group_by': 'Поддерживаются значения day или month.'}
     if display_currency not in SUPPORTED_CURRENCIES:
-        return None, None, group_by, display_currency, {'display_currency': 'Поддерживаются значения USD, EUR или RUB.'}
-    return date_from, date_to, group_by, display_currency, None
+        return None, None, group_by, display_currency, scope, instrument_id, {'display_currency': 'Поддерживаются значения USD, EUR или RUB.'}
+    if scope not in {'portfolio', 'instrument', 'all'}:
+        return None, None, group_by, display_currency, scope, instrument_id, {'scope': 'Поддерживаются значения portfolio, instrument или all.'}
+    if scope == 'instrument' and not instrument_id:
+        return None, None, group_by, display_currency, scope, instrument_id, {'instrument': 'Для scope=instrument нужен UUID инструмента.'}
+    return date_from, date_to, group_by, display_currency, scope, instrument_id, None
 
 
 @extend_schema_view(
@@ -387,7 +395,7 @@ class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['get'])
     def performance(self, request, pk=None):
-        date_from, date_to, group_by, display_currency, error = _parse_performance_period(request)
+        date_from, date_to, group_by, display_currency, scope, instrument_id, error = _parse_performance_period(request)
         if error:
             return Response(error, status=400)
         return Response(calculate_portfolio_performance(
@@ -396,6 +404,8 @@ class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
             date_to=date_to,
             group_by=group_by,
             display_currency=display_currency,
+            scope=scope,
+            instrument_id=instrument_id,
         ))
 
 
