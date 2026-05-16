@@ -33,6 +33,7 @@ type ChartPoint = {
   x: string
   y: number
   date?: string
+  actualValue?: number | null
   realized?: number | null
   unrealized?: number | null
   total?: number | null
@@ -402,10 +403,18 @@ export default function InvestmentReportsPage() {
       const points = Array.from(priceSnapshotsByInstrument.get(instrument.id)?.entries() ?? [])
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([, point]) => point)
+      const basePrice = points.find((point) => point.y > 0)?.y
+      const normalizedPoints = basePrice
+        ? points.map((point) => ({
+            ...point,
+            actualValue: point.y,
+            y: (point.y / basePrice) * 100,
+          }))
+        : []
       return {
         id: instrument.ticker,
         instrumentId: instrument.id,
-        data: points,
+        data: normalizedPoints,
       }
     })
     .filter((series) => series.data.length > 0)
@@ -855,7 +864,7 @@ export default function InvestmentReportsPage() {
                 />
               ) : (
                 <LineChartPanel
-                  title="Курсы инструментов"
+                  title="Курсы инструментов · индекс 100"
                   data={priceLineData}
                   ticks={priceChartTicks}
                   domain={priceChartDomain}
@@ -866,6 +875,17 @@ export default function InvestmentReportsPage() {
                   }}
                   displayCurrency={displayCurrency}
                   operationLayer={renderOperationMarkers(priceOperationMarkers)}
+                  formatYAxisValue={(value) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)}
+                  formatTooltipValue={(point) => {
+                    const indexValue = Number(point.y)
+                    const delta = indexValue - 100
+                    const price = point.actualValue
+                    return [
+                      `Индекс: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(indexValue)}`,
+                      `изменение: ${delta >= 0 ? "+" : ""}${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(delta)}%`,
+                      price === null || price === undefined ? null : `цена: ${formatCurrencyValue(price, displayCurrency)}`,
+                    ].filter(Boolean).join(" · ")
+                  }}
                 />
               )}
             </div>
@@ -947,6 +967,8 @@ function LineChartPanel({
   colorById,
   displayCurrency,
   operationLayer,
+  formatYAxisValue,
+  formatTooltipValue,
 }: {
   title: string
   data: Array<{ id: string; data: ChartPoint[] }>
@@ -957,6 +979,8 @@ function LineChartPanel({
   colorById?: (id: string) => string
   displayCurrency: DisplayCurrency
   operationLayer: any
+  formatYAxisValue?: (value: number) => string
+  formatTooltipValue?: (point: ChartPoint) => string
 }) {
   return (
     <div className="min-w-0 rounded-[22px] border border-border/70 bg-background/70 p-4">
@@ -968,7 +992,7 @@ function LineChartPanel({
           xScale={{ type: "point" }}
           yScale={{ type: "linear", stacked: false, min: domain.min, max: domain.max }}
           axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -25, tickValues: ticks }}
-          axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatCompactChartValue(Number(value)) }}
+          axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatYAxisValue ? formatYAxisValue(Number(value)) : formatCompactChartValue(Number(value)) }}
           enableGridX={false}
           curve="monotoneX"
           pointSize={pointSize}
@@ -988,7 +1012,11 @@ function LineChartPanel({
                 <div className="font-semibold">
                   {String(point.seriesId)} · {String(point.data.x)}
                 </div>
-                <div>{formatCurrencyValue(Number(dataPoint.total ?? point.data.y), displayCurrency)}</div>
+                <div>
+                  {formatTooltipValue
+                    ? formatTooltipValue(dataPoint)
+                    : formatCurrencyValue(Number(dataPoint.total ?? point.data.y), displayCurrency)}
+                </div>
                 {dataPoint.realized !== undefined ? <div>Realized: {formatCurrencyValue(Number(dataPoint.realized ?? 0), displayCurrency)}</div> : null}
                 {dataPoint.unrealized !== undefined ? <div>Unrealized: {formatCurrencyValue(Number(dataPoint.unrealized ?? 0), displayCurrency)}</div> : null}
               </div>
