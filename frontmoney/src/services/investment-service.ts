@@ -554,7 +554,7 @@ export const InvestmentService = {
     return mapPriceLookup(response.data)
   },
 
-  async getFxRates(params?: { base_currency?: string; quote_currency?: string }) {
+  async getFxRates(params?: { base_currency?: string; quote_currency?: string; date_from?: string; date_to?: string; source?: string }) {
     const response = await api.get("/investment/fx-rates/", { params })
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data
     return Array.isArray(data) ? data.map(mapFxRateSnapshot) : []

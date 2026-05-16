@@ -65,8 +65,16 @@ type InstrumentLegendItem = {
   totalPl?: number | null
 }
 
+type FxLegendItem = {
+  id: string
+  name: string
+  color: string
+  rate?: number | null
+}
+
 const displayCurrencies: DisplayCurrency[] = ["USD", "EUR", "RUB"]
 const instrumentChartColors = ["#0f8b8d", "#f97316", "#8b5cf6", "#10b981", "#ef4444", "#3b82f6", "#f59e0b", "#ec4899"]
+const fxChartColors = ["#0f8b8d", "#8b5cf6", "#f97316", "#10b981", "#ef4444", "#3b82f6"]
 const SHORT_MONTH_LABELS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 const MONTH_LABELS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
 
@@ -271,6 +279,8 @@ export default function InvestmentReportsPage() {
   const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>("USD")
   const [selectedInstrumentId, setSelectedInstrumentId] = useState<string | null>(null)
   const [hiddenInstrumentIds, setHiddenInstrumentIds] = useState<string[]>([])
+  const [selectedFxPairId, setSelectedFxPairId] = useState<string | null>(null)
+  const [hiddenFxPairIds, setHiddenFxPairIds] = useState<string[]>([])
 
   const periodFromMonth = getMonthInputValue(draftDateFrom)
   const periodToMonth = getMonthInputValue(draftDateTo)
@@ -326,6 +336,10 @@ export default function InvestmentReportsPage() {
     queryKey: ["investment-prices", dateFrom, dateTo],
     queryFn: () => InvestmentService.getPrices({ date_from: dateFrom, date_to: dateTo }),
   })
+  const periodFxRatesQuery = useQuery({
+    queryKey: ["investment-fx-rates-period", dateFrom, dateTo],
+    queryFn: () => InvestmentService.getFxRates({ base_currency: "USD", date_from: dateFrom, date_to: dateTo }),
+  })
 
   const isLoading = overviewQuery.isLoading || portfoliosQuery.isLoading || instrumentsQuery.isLoading
   const isError = overviewQuery.isError || portfoliosQuery.isError || instrumentsQuery.isError
@@ -369,6 +383,36 @@ export default function InvestmentReportsPage() {
   const instrumentPlTicks = getChartTickValues(instrumentPlLineData[0]?.data ?? [])
   const instrumentPlDomain = getChartYDomain(instrumentPlLineData.flatMap((series) => series.data), true)
   const instrumentPlOperationMarkers = instrumentPlLineData.flatMap((series) =>
+    buildOperationMarkers(series.data, operations, groupBy, { instrumentId: series.instrumentId }),
+  )
+  const portfolioValueByLabel = new Map(
+    performancePoints.map((point) => [
+      point.label === "Старт" ? "Старт" : formatShortPeriodLabel(point.date, groupBy),
+      point.current_value_usd,
+    ]),
+  )
+  const allocationLineData: InstrumentLineSeries[] = visibleInstrumentPlSeries
+    .map((series) => ({
+      id: series.instrument_ticker,
+      instrumentId: series.instrument_id,
+      data: series.points
+        .map((point) => {
+          const label = point.label === "Старт" ? "Старт" : formatShortPeriodLabel(point.date, groupBy)
+          const portfolioValue = portfolioValueByLabel.get(label) ?? 0
+          const share = portfolioValue > 0 ? (point.current_value_usd / portfolioValue) * 100 : 0
+          return {
+            x: label,
+            y: share,
+            date: point.date,
+            actualValue: point.current_value_display ?? point.current_value_usd,
+          }
+        })
+        .filter((point) => Number.isFinite(point.y)),
+    }))
+    .filter((series) => series.data.length > 0)
+  const allocationTicks = getChartTickValues(allocationLineData[0]?.data ?? [])
+  const allocationDomain = getChartYDomain(allocationLineData.flatMap((series) => series.data), true)
+  const allocationOperationMarkers = allocationLineData.flatMap((series) =>
     buildOperationMarkers(series.data, operations, groupBy, { instrumentId: series.instrumentId }),
   )
 
@@ -423,6 +467,60 @@ export default function InvestmentReportsPage() {
   const priceOperationMarkers = priceLineData.flatMap((series) =>
     buildOperationMarkers(series.data, operations, groupBy, { instrumentId: series.instrumentId }),
   )
+
+  const fxRatesByPair = new Map<string, Map<string, ChartPoint>>()
+  const latestFxRateByPair = new Map<string, number>()
+  ;(periodFxRatesQuery.data ?? [])
+    .filter((rate) => rate.base_currency !== rate.quote_currency)
+    .sort((left, right) => left.captured_at.localeCompare(right.captured_at))
+    .forEach((rate) => {
+      const pairId = `${rate.base_currency}/${rate.quote_currency}`
+      const periodKey = getPeriodKey(rate.captured_at, groupBy)
+      const x = formatShortPeriodLabel(periodKey, groupBy)
+      latestFxRateByPair.set(pairId, rate.rate)
+      const map = fxRatesByPair.get(pairId) ?? new Map<string, ChartPoint>()
+      map.set(periodKey, {
+        x,
+        y: rate.rate,
+        date: rate.captured_at,
+      })
+      fxRatesByPair.set(pairId, map)
+    })
+  const fxPairIds = Array.from(fxRatesByPair.keys()).sort()
+  const fxColorByPair = new Map(fxPairIds.map((pairId, index) => [pairId, fxChartColors[index % fxChartColors.length]]))
+  const visibleFxPairIds = new Set(
+    fxPairIds
+      .filter((pairId) => !hiddenFxPairIds.includes(pairId))
+      .filter((pairId) => !selectedFxPairId || pairId === selectedFxPairId),
+  )
+  const fxRateLineData = fxPairIds
+    .filter((pairId) => visibleFxPairIds.has(pairId))
+    .map((pairId) => {
+      const points = Array.from(fxRatesByPair.get(pairId)?.entries() ?? [])
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, point]) => point)
+      const baseRate = points.find((point) => point.y > 0)?.y
+      const normalizedPoints = baseRate
+        ? points.map((point) => ({
+            ...point,
+            actualValue: point.y,
+            y: (point.y / baseRate) * 100,
+          }))
+        : []
+      return {
+        id: pairId,
+        data: normalizedPoints,
+      }
+    })
+    .filter((series) => series.data.length > 0)
+  const fxRateTicks = getChartTickValues(fxRateLineData[0]?.data ?? [])
+  const fxRateDomain = getChartYDomain(fxRateLineData.flatMap((series) => series.data))
+  const fxLegendItems: FxLegendItem[] = fxPairIds.map((pairId) => ({
+    id: pairId,
+    name: pairId,
+    color: fxColorByPair.get(pairId) ?? fxChartColors[0],
+    rate: latestFxRateByPair.get(pairId) ?? null,
+  }))
 
   const lastPlByInstrument = new Map(
     instrumentPlSeries.map((series) => {
@@ -524,6 +622,22 @@ export default function InvestmentReportsPage() {
     setSelectedInstrumentId(null)
     setHiddenInstrumentIds([])
   }
+
+  const toggleHiddenFxPair = (pairId: string) => {
+    setHiddenFxPairIds((current) =>
+      current.includes(pairId)
+        ? current.filter((id) => id !== pairId)
+        : [...current, pairId],
+    )
+    setSelectedFxPairId((current) => (current === pairId ? null : current))
+  }
+
+  const resetFxPairFilters = () => {
+    setSelectedFxPairId(null)
+    setHiddenFxPairIds([])
+  }
+
+  const renderEmptyLayer = () => null
 
   const renderOperationMarkers = (markers: OperationChartMarker[]) => ({ xScale, yScale, innerHeight }: any) => (
     <g pointerEvents="none">
@@ -816,6 +930,64 @@ export default function InvestmentReportsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Курсы валют</CardTitle>
+          <CardDescription>
+            Динамика валютных пар за тот же период. Линии нормализованы: первая точка каждой пары равна 100.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+            {periodFxRatesQuery.isLoading ? (
+              <div className="flex h-[320px] items-center justify-center rounded-[22px] border border-border/70 text-sm text-muted-foreground">
+                Загружаем валютные курсы...
+              </div>
+            ) : fxRateLineData.length === 0 ? (
+              <EmptyState
+                icon={LineChart}
+                title="Нет данных по валютным курсам"
+                description="За выбранный период нет снимков валютных курсов USD."
+                action={hiddenFxPairIds.length > 0 || selectedFxPairId ? <Button variant="outline" onClick={resetFxPairFilters}>Показать все</Button> : undefined}
+              />
+            ) : (
+              <LineChartPanel
+                title="Курсы валют · индекс 100"
+                data={fxRateLineData}
+                ticks={fxRateTicks}
+                domain={fxRateDomain}
+                pointSize={fxRateLineData.flatMap((series) => series.data).length > 80 ? 0 : 5}
+                colorById={(id) => fxColorByPair.get(String(id)) ?? fxChartColors[0]}
+                displayCurrency={displayCurrency}
+                operationLayer={renderEmptyLayer}
+                formatYAxisValue={(value) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)}
+                formatTooltipValue={(point) => {
+                  const indexValue = Number(point.y)
+                  const delta = indexValue - 100
+                  const rate = point.actualValue
+                  return [
+                    `Индекс: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(indexValue)}`,
+                    `изменение: ${delta >= 0 ? "+" : ""}${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(delta)}%`,
+                    rate === null || rate === undefined
+                      ? null
+                      : `курс: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 6 }).format(rate)}`,
+                  ].filter(Boolean).join(" · ")
+                }}
+              />
+            )}
+
+            <FxLegend
+              items={fxLegendItems}
+              selectedPairId={selectedFxPairId}
+              hiddenPairIds={hiddenFxPairIds}
+              onSelect={(pairId) => setSelectedFxPairId((current) => (current === pairId ? null : pairId))}
+              onToggleHidden={toggleHiddenFxPair}
+              onReset={resetFxPairFilters}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Инструменты: P/L и курсы</CardTitle>
           <CardDescription>
             Клик по инструменту в легенде оставляет только его. Глаз исключает инструмент из графиков и таблицы.
@@ -848,6 +1020,43 @@ export default function InvestmentReportsPage() {
                   }}
                   displayCurrency={displayCurrency}
                   operationLayer={renderOperationMarkers(instrumentPlOperationMarkers)}
+                />
+              )}
+
+              {performanceQuery.isLoading ? (
+                <div className="flex h-[320px] items-center justify-center rounded-[22px] border border-border/70 text-sm text-muted-foreground">
+                  Загружаем доли...
+                </div>
+              ) : allocationLineData.length === 0 ? (
+                <EmptyState
+                  icon={LineChart}
+                  title="Нет данных по долям"
+                  description="Для выбранного периода и текущих фильтров нет точек структуры портфеля."
+                  action={hiddenInstrumentIds.length > 0 || selectedInstrumentId ? <Button variant="outline" onClick={resetInstrumentFilters}>Показать все</Button> : undefined}
+                />
+              ) : (
+                <LineChartPanel
+                  title="Доли портфеля"
+                  data={allocationLineData}
+                  ticks={allocationTicks}
+                  domain={allocationDomain}
+                  pointSize={performancePoints.length > 60 ? 0 : 6}
+                  colorById={(id) => {
+                    const series = allocationLineData.find((item) => item.id === id)
+                    return (series && instrumentColorById.get(series.instrumentId)) || instrumentChartColors[0]
+                  }}
+                  displayCurrency={displayCurrency}
+                  operationLayer={renderOperationMarkers(allocationOperationMarkers)}
+                  formatYAxisValue={(value) => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)}%`}
+                  formatTooltipValue={(point) => {
+                    const share = Number(point.y)
+                    return [
+                      `Доля: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(share)}%`,
+                      point.actualValue === null || point.actualValue === undefined
+                        ? null
+                        : `стоимость: ${formatCurrencyValue(point.actualValue, displayCurrency)}`,
+                    ].filter(Boolean).join(" · ")
+                  }}
                 />
               )}
 
@@ -1100,6 +1309,91 @@ function InstrumentLegend({
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition hover:border-primary/60 hover:text-primary"
                   aria-label={isHidden ? "Вернуть инструмент в отчет" : "Исключить инструмент из отчета"}
                   title={isHidden ? "Вернуть инструмент" : "Исключить инструмент"}
+                  onClick={() => onToggleHidden(item.id)}
+                >
+                  {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FxLegend({
+  items,
+  selectedPairId,
+  hiddenPairIds,
+  onSelect,
+  onToggleHidden,
+  onReset,
+}: {
+  items: FxLegendItem[]
+  selectedPairId: string | null
+  hiddenPairIds: string[]
+  onSelect: (pairId: string) => void
+  onToggleHidden: (pairId: string) => void
+  onReset: () => void
+}) {
+  const hiddenSet = new Set(hiddenPairIds)
+  const hasFilters = Boolean(selectedPairId) || hiddenPairIds.length > 0
+
+  return (
+    <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold tracking-[-0.02em]">Легенда валют</div>
+          <div className="mt-1 text-xs text-muted-foreground">Пара — оставить только ее. Глаз — исключить.</div>
+        </div>
+        {hasFilters ? (
+          <Button type="button" size="sm" variant="ghost" onClick={onReset}>
+            Сброс
+          </Button>
+        ) : null}
+      </div>
+      <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+        {items.length === 0 ? (
+          <div className="rounded-2xl border border-border/60 bg-card/50 px-3 py-3 text-sm text-muted-foreground">
+            Валютных курсов нет.
+          </div>
+        ) : (
+          items.map((item) => {
+            const isSelected = selectedPairId === item.id
+            const isHidden = hiddenSet.has(item.id)
+            return (
+              <div
+                key={item.id}
+                className={`flex items-stretch gap-2 rounded-2xl border px-3 py-2 transition ${
+                  isSelected
+                    ? "border-primary bg-primary/10"
+                    : isHidden
+                      ? "border-border/40 bg-muted/30 opacity-60"
+                      : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
+                }`}
+              >
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onSelect(item.id)}>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                    <span className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? "line-through" : ""}`}>
+                      {item.name}
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {item.rate === null || item.rate === undefined
+                        ? "нет курса"
+                        : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 }).format(item.rate)}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                    {isHidden ? "Исключена" : "Последний курс в периоде"}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition hover:border-primary/60 hover:text-primary"
+                  aria-label={isHidden ? "Вернуть валютную пару в отчет" : "Исключить валютную пару из отчета"}
+                  title={isHidden ? "Вернуть валютную пару" : "Исключить валютную пару"}
                   onClick={() => onToggleHidden(item.id)}
                 >
                   {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
