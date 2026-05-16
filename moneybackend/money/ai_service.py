@@ -1,4 +1,5 @@
 import base64
+from difflib import SequenceMatcher
 import html
 import json
 import mimetypes
@@ -153,6 +154,10 @@ def _score_hint_against_pattern(hint, pattern):
                 best_score = max(best_score, 700 + len(pattern_variant))
             elif hint_variant in pattern_variant:
                 best_score = max(best_score, 500 + len(hint_variant))
+            elif len(hint_variant) >= 4 and len(pattern_variant) >= 4:
+                similarity = SequenceMatcher(None, hint_variant, pattern_variant).ratio()
+                if similarity >= 0.78:
+                    best_score = max(best_score, 620 + int(similarity * 100) + min(len(pattern_variant), 30))
     return best_score
 
 
@@ -209,6 +214,28 @@ def _extract_amount_from_text(text):
         return None
 
     return max(candidates, key=lambda value: abs(value))
+
+
+def _looks_like_money_document_command(text):
+    normalized = _normalize_text(text)
+    if not normalized or _extract_amount_from_text(normalized) is None:
+        return False
+
+    return bool(re.search(
+        r'\b(?:'
+        r'перевод|перевести|переведи|перевел\w*|перевожу|переводим|первод|'
+        r'приход|доход|поступлен\w*|расход|трата|списан\w*|оплат\w*'
+        r')\b',
+        normalized,
+    ))
+
+
+def _is_transfer_command(text):
+    normalized = _normalize_text(text)
+    return bool(re.search(
+        r'\b(?:перевод|перевести|переведи|перевел\w*|перевожу|переводим|первод)\b',
+        normalized,
+    ))
 
 
 def _collect_fallback_text(*parts):
@@ -352,12 +379,14 @@ def _detect_investment_readonly_intent(text):
     normalized = _normalize_text(text)
     if not normalized:
         return None
+    if _looks_like_money_document_command(normalized):
+        return None
 
     instrument = _match_investment_instrument_by_hint(normalized)
     has_portfolio_word = bool(re.search(r'\b(?:портфель|инвестиц\w*|крипт\w*|активы)\b', normalized))
     has_position_word = bool(re.search(r'\b(?:сколько|позици\w*|держу|остаток|баланс|есть)\b', normalized))
     has_rebalance_word = bool(re.search(r'\b(?:ребаланс\w*|дол[яи]|цел\w*)\b', normalized))
-    has_operation_word = bool(re.search(r'\b(?:купил\w*|купить|покупк\w*|продал\w*|продаж\w*|создай|добавь|занеси)\b', normalized))
+    has_operation_word = bool(re.search(r'\b(?:купил\w*|купить|покупк\w*|продал\w*|продаж\w*|создай|добавь|занеси|перевод|первод)\b', normalized))
 
     if has_rebalance_word and (has_portfolio_word or 'ребаланс' in normalized):
         return {
@@ -673,6 +702,32 @@ def _cash_flow_item_context():
     ]
 
 
+_WALLET_MATCH_STOPWORDS = {
+    'банк',
+    'банка',
+    'карта',
+    'карточка',
+    'кошелек',
+    'счет',
+    'кот',
+    'кота',
+}
+
+
+def _wallet_lookup_patterns(name=None, code=None, aliases=None):
+    patterns = []
+    for source in [name, code, *(aliases or [])]:
+        if not source:
+            continue
+        for variant in _match_text_variants(source):
+            if variant and variant not in patterns:
+                patterns.append(variant)
+            for token in re.findall(r'[0-9a-zа-я]{3,}', variant):
+                if token not in _WALLET_MATCH_STOPWORDS and token not in patterns:
+                    patterns.append(token)
+    return patterns
+
+
 def _wallet_candidates_by_hint(hint, limit=5):
     if not hint:
         return []
@@ -680,8 +735,11 @@ def _wallet_candidates_by_hint(hint, limit=5):
     candidates = list(Wallet.objects.filter(deleted=False).prefetch_related('aliases'))
     scored_candidates = []
     for wallet in candidates:
-        patterns = [wallet.name, wallet.code]
-        patterns.extend(alias.alias for alias in wallet.aliases.all())
+        patterns = _wallet_lookup_patterns(
+            wallet.name,
+            wallet.code,
+            [alias.alias for alias in wallet.aliases.all()],
+        )
         score = max((_score_hint_against_pattern(hint, pattern) for pattern in patterns if pattern), default=0)
         if score > 0:
             scored_candidates.append((score, wallet.name, wallet))
@@ -696,8 +754,24 @@ def _match_wallet_by_hint(hint):
         return None
     if len(candidates) == 1:
         return candidates[0]
-    top_score = max((_score_hint_against_pattern(hint, pattern) for pattern in [candidates[0].name, candidates[0].code, *[alias.alias for alias in candidates[0].aliases.all()]] if pattern), default=0)
-    second_score = max((_score_hint_against_pattern(hint, pattern) for pattern in [candidates[1].name, candidates[1].code, *[alias.alias for alias in candidates[1].aliases.all()]] if pattern), default=0)
+    top_score = max((
+        _score_hint_against_pattern(hint, pattern)
+        for pattern in _wallet_lookup_patterns(
+            candidates[0].name,
+            candidates[0].code,
+            [alias.alias for alias in candidates[0].aliases.all()],
+        )
+        if pattern
+    ), default=0)
+    second_score = max((
+        _score_hint_against_pattern(hint, pattern)
+        for pattern in _wallet_lookup_patterns(
+            candidates[1].name,
+            candidates[1].code,
+            [alias.alias for alias in candidates[1].aliases.all()],
+        )
+        if pattern
+    ), default=0)
     if top_score > second_score:
         return candidates[0]
     return None
@@ -754,9 +828,17 @@ def _cash_flow_item_confirmation_candidates(hint, limit=6):
 def _wallet_mentions(text, wallets):
     normalized_text = _normalize_text(text)
     matches = []
+    matched_wallet_names = set()
+    text_tokens = [
+        (match.start(), match.group(0))
+        for match in re.finditer(r'[0-9a-zа-я]{3,}', normalized_text)
+    ]
     for wallet in wallets:
-        patterns = [wallet.get('name'), wallet.get('code')]
-        patterns.extend(wallet.get('aliases', []))
+        patterns = _wallet_lookup_patterns(
+            wallet.get('name'),
+            wallet.get('code'),
+            wallet.get('aliases', []),
+        )
         for pattern in patterns:
             normalized_pattern = _normalize_text(pattern)
             if not normalized_pattern:
@@ -764,7 +846,18 @@ def _wallet_mentions(text, wallets):
             position = normalized_text.find(normalized_pattern)
             if position >= 0:
                 matches.append((position, wallet['name']))
+                matched_wallet_names.add(wallet['name'])
                 break
+        if wallet['name'] in matched_wallet_names:
+            continue
+        best_match = None
+        for position, token in text_tokens:
+            score = max((_score_hint_against_pattern(token, pattern) for pattern in patterns if pattern), default=0)
+            if score >= 700 and (best_match is None or score > best_match[0]):
+                best_match = (score, position)
+        if best_match is not None:
+            matches.append((best_match[1], wallet['name']))
+            matched_wallet_names.add(wallet['name'])
     matches.sort(key=lambda item: item[0])
     return [name for _, name in matches]
 
@@ -970,6 +1063,8 @@ class OpenRouterIntentProvider:
             'или просит отклонение от бюджета, верни intent=get_month_expenses_by_item. '
             'Для такого отчета можешь вернуть period_month="YYYY-MM" или диапазон '
             'period_month_from="YYYY-MM", period_month_to="YYYY-MM". '
+            'Если пользователь пишет перевод/перевести/перевел/первод и сумму, верни create_transfer; '
+            'слово "крипта" в таком тексте может быть названием кошелька, а не запросом портфеля. '
             'Если пользователь спрашивает портфель, инвестиции, крипту или стоимость активов, '
             'верни intent=get_portfolio_overview. '
             'Если пользователь спрашивает сколько BTC/ETH/другого инструмента есть или просит позицию по инструменту, '
@@ -1199,7 +1294,7 @@ class RuleBasedIntentProvider:
                 'comment': text,
             }
 
-        if normalized_text.startswith('перевод'):
+        if _is_transfer_command(normalized_text):
             return {
                 'intent': INTENT_CREATE_TRANSFER,
                 'confidence': 0.92,
@@ -2459,6 +2554,8 @@ class AiOperationService:
             parsed = self.detect_meta_intent(text)
         if parsed is None and not image_bytes:
             parsed = _detect_month_expenses_by_item_intent(text)
+        if parsed is None and not image_bytes and _is_transfer_command(text) and _extract_amount_from_text(text) is not None:
+            parsed = RuleBasedIntentProvider().parse(text=text, context=context)
         if parsed is None and not image_bytes:
             parsed = _detect_investment_readonly_intent(text)
         if parsed is None:

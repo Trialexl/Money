@@ -2766,6 +2766,7 @@ class AiAssistantApiTests(TestCase):
         )
         cls.wallet_sber = Wallet.objects.create(name='Сбербанк')
         cls.wallet_alpha = Wallet.objects.create(name='Альфа')
+        cls.wallet_crypto = Wallet.objects.create(name='крипта')
         WalletAlias.objects.create(wallet=cls.wallet_sber, alias='сбер')
         WalletAlias.objects.create(wallet=cls.wallet_alpha, alias='альфа-банк')
         cls.income_item = CashFlowItem.objects.create(name='Зарплата', include_in_budget=True)
@@ -2800,6 +2801,23 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(transfer.wallet_out, self.wallet_sber)
         self.assertEqual(transfer.wallet_in, self.wallet_alpha)
         self.assertEqual(transfer.amount, Decimal('20000.00'))
+
+    def test_ai_execute_creates_transfer_to_crypto_wallet_with_typo(self):
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'первод альва в крипта 2000',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        self.assertEqual(response.data['intent'], 'create_transfer')
+        transfer = Transfer.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(transfer.wallet_out, self.wallet_alpha)
+        self.assertEqual(transfer.wallet_in, self.wallet_crypto)
+        self.assertEqual(transfer.amount, Decimal('2000.00'))
 
     def test_ai_execute_is_available_for_authenticated_non_admin_user(self):
         client = APIClient()
