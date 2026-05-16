@@ -531,6 +531,7 @@ export const InvestmentService = {
   },
 
   async getOperations(params?: {
+    portfolio?: string
     date_from?: string
     date_to?: string
     instrument?: string
@@ -542,7 +543,7 @@ export const InvestmentService = {
     return Array.isArray(data) ? data.map(mapOperation) : []
   },
 
-  async getPrices(params?: { instrument?: string }) {
+  async getPrices(params?: { instrument?: string; date_from?: string; date_to?: string; source?: string }) {
     const response = await api.get("/investment/prices/", { params })
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data
     return Array.isArray(data) ? data.map(mapPriceSnapshot) : []

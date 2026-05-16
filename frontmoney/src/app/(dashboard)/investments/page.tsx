@@ -4,6 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog"
 import { ResponsiveLine } from "@nivo/line"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BarChart3, Coins, Landmark, LineChart, PencilLine, Plus, RefreshCw, Target, Trash2, TrendingUp, X } from "lucide-react"
+import Link from "next/link"
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 
 import { EmptyState } from "@/components/shared/empty-state"
@@ -79,9 +80,11 @@ const INVESTMENT_QUERY_KEYS = [
   ["investment-instruments"],
   ["investment-accounts"],
   ["investment-operations"],
+  ["investment-performance-operations"],
   ["investment-target-allocations"],
   ["investment-rebalance"],
 ]
+const showInlinePerformanceReports = false
 
 function parseFormNumber(value: string, fallback = 0) {
   const normalized = value.replace(/\s/g, "").replace(",", ".")
@@ -204,6 +207,64 @@ function getChartYDomain(data: Array<{ x: string; y: number }>, includeZero = fa
   }
 }
 
+type OperationChartMarker = {
+  key: string
+  x: string
+  y: number
+  type: "buy" | "sell"
+  count: number
+  amountUsd: number
+  quantity: number
+  tickers: string[]
+}
+
+function getOperationMarkerLabel(operation: InvestmentOperation, groupBy: "day" | "month") {
+  return formatShortPerformanceLabel(operation.date, groupBy)
+}
+
+function buildOperationMarkers(
+  points: Array<{ x: string; y: number }>,
+  operations: InvestmentOperation[],
+  groupBy: "day" | "month",
+  options?: { instrumentId?: string },
+) {
+  const pointByLabel = new Map(points.map((point) => [point.x, point]))
+  const grouped = new Map<string, OperationChartMarker>()
+
+  operations
+    .filter((operation) => operation.posted && !operation.deleted)
+    .filter((operation) => operation.operation_type === "buy" || operation.operation_type === "sell")
+    .filter((operation) => !options?.instrumentId || operation.instrument === options.instrumentId)
+    .forEach((operation) => {
+      const x = getOperationMarkerLabel(operation, groupBy)
+      const point = pointByLabel.get(x)
+      if (!point) {
+        return
+      }
+      const type = operation.operation_type as "buy" | "sell"
+      const key = `${x}:${type}:${options?.instrumentId ?? "portfolio"}`
+      const marker = grouped.get(key) ?? {
+        key,
+        x,
+        y: point.y,
+        type,
+        count: 0,
+        amountUsd: 0,
+        quantity: 0,
+        tickers: [],
+      }
+      marker.count += 1
+      marker.amountUsd += operation.amount_usd
+      marker.quantity += operation.quantity
+      if (operation.instrument_ticker && !marker.tickers.includes(operation.instrument_ticker)) {
+        marker.tickers.push(operation.instrument_ticker)
+      }
+      grouped.set(key, marker)
+    })
+
+  return Array.from(grouped.values())
+}
+
 function formatMoneyInCurrency(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
   const converted = convertUsdAmount(amount, currency, fxRates)
   if (converted === null) {
@@ -292,7 +353,7 @@ export default function InvestmentsPage() {
         display_currency: displayCurrency,
         scope: "all",
       }),
-    enabled: Boolean(performancePortfolioId),
+    enabled: Boolean(performancePortfolioId && showInlinePerformanceReports),
   })
   const portfoliosQuery = useQuery({
     queryKey: ["investment-portfolios"],
@@ -315,6 +376,16 @@ export default function InvestmentsPage() {
     overviewQuery.data?.portfolio?.id ??
     portfoliosQuery.data?.find((portfolio) => portfolio.is_default)?.id ??
     portfoliosQuery.data?.[0]?.id
+  const performanceOperationsQuery = useQuery({
+    queryKey: ["investment-performance-operations", activePortfolioId, performancePeriod.dateFrom, performancePeriod.dateTo],
+    queryFn: () =>
+      InvestmentService.getOperations({
+        portfolio: activePortfolioId!,
+        date_from: performancePeriod.dateFrom,
+        date_to: performancePeriod.dateTo,
+      }),
+    enabled: Boolean(activePortfolioId && showInlinePerformanceReports),
+  })
   const targetAllocationsQuery = useQuery({
     queryKey: ["investment-target-allocations", activePortfolioId],
     queryFn: () => InvestmentService.getTargetAllocations({ portfolio: activePortfolioId }),
@@ -457,6 +528,7 @@ export default function InvestmentsPage() {
       (position.current_value_usd !== null && position.current_value_usd !== undefined && position.current_value_usd > 0),
   ) ?? []
   const performance = performanceQuery.data
+  const performanceOperations = performanceOperationsQuery.data ?? []
   const performancePoints = performance?.points ?? []
   const valueLineData = performancePoints.map((point) => ({
     x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
@@ -471,6 +543,8 @@ export default function InvestmentsPage() {
   const valueChartDomain = getChartYDomain(valueLineData)
   const plChartDomain = getChartYDomain(plLineData, true)
   const performancePointSize = performancePoints.length > 60 ? 0 : 7
+  const valueOperationMarkers = buildOperationMarkers(valueLineData, performanceOperations, performanceGroupBy)
+  const plOperationMarkers = buildOperationMarkers(plLineData, performanceOperations, performanceGroupBy)
   const instrumentPlSeries = performance?.instrument_series.filter((series) => series.points.length > 0) ?? []
   const instrumentPlColorByTicker = new Map(
     instrumentPlSeries.map((series, index) => [
@@ -492,6 +566,58 @@ export default function InvestmentsPage() {
   const instrumentPlTicks = getChartTickValues(instrumentPlLineData[0]?.data ?? [])
   const instrumentPlDomain = getChartYDomain(instrumentPlLineData.flatMap((series) => series.data), true)
   const instrumentPlPointSize = performancePoints.length > 60 ? 0 : 6
+  const instrumentPlOperationMarkers = activeInstrumentPlSeries.flatMap((series) =>
+    buildOperationMarkers(
+      series.points.map((point) => ({
+        x: point.label === "Старт" ? "Старт" : formatShortPerformanceLabel(point.date, performanceGroupBy),
+        y: point.total_pl_display ?? point.total_pl_usd,
+      })),
+      performanceOperations,
+      performanceGroupBy,
+      { instrumentId: series.instrument_id },
+    ),
+  )
+  const renderOperationMarkers = (markers: OperationChartMarker[]) => ({ xScale, yScale, innerHeight }: any) => (
+    <g pointerEvents="none">
+      {markers.map((marker, index) => {
+        const rawX = xScale(marker.x)
+        const rawY = yScale(marker.y)
+        const x = Number(rawX)
+        const baseY = Number(rawY)
+        if (!Number.isFinite(x) || !Number.isFinite(baseY)) {
+          return null
+        }
+        const isBuy = marker.type === "buy"
+        const color = isBuy ? "#10b981" : "#ef4444"
+        const yOffset = isBuy ? -16 : 16
+        const y = Math.min(Math.max(baseY + yOffset, 10), Math.max(Number(innerHeight) - 10, 10))
+        const markerAmount = convertUsdAmount(marker.amountUsd, displayCurrency, fxRates)
+        const title = [
+          isBuy ? "Покупка" : "Продажа",
+          marker.x,
+          marker.tickers.join(", "),
+          `${marker.count} сделк.`,
+          markerAmount === null ? "нет курса" : formatCurrencyValue(markerAmount, displayCurrency),
+        ].filter(Boolean).join(" · ")
+        return (
+          <g key={`${marker.key}-${index}`} transform={`translate(${x}, ${y})`}>
+            <title>{title}</title>
+            <line y1={isBuy ? 8 : -8} y2={isBuy ? 18 : -18} stroke={color} strokeWidth={1.5} strokeDasharray="3 3" />
+            <circle r={8} fill={color} stroke="hsl(var(--background))" strokeWidth={2} />
+            <text
+              dy="0.36em"
+              textAnchor="middle"
+              fill="#fff"
+              fontSize={11}
+              fontWeight={800}
+            >
+              {isBuy ? "+" : "−"}
+            </text>
+          </g>
+        )
+      })}
+    </g>
+  )
   const operationTotals = operations.reduce(
     (totals, operation) => {
       if (operation.operation_type === "buy") {
@@ -576,6 +702,12 @@ export default function InvestmentsPage() {
         description="Криптовалюты, средняя покупка и зафиксированный финансовый результат. Денежные кошельки здесь не меняются автоматически."
         actions={
           <>
+            <Button variant="outline" asChild>
+              <Link href="/investments/reports">
+                <LineChart className="mr-2 h-4 w-4" />
+                Отчеты
+              </Link>
+            </Button>
             <Button variant="outline" onClick={() => openDialog({ type: "portfolio", mode: "create" })}>
               <Plus className="mr-2 h-4 w-4" />
               Портфель
@@ -676,7 +808,7 @@ export default function InvestmentsPage() {
         <StatCard label="Unrealized P/L" value={money(overview.unrealized_pl_usd)} hint={`Realized: ${money(overview.realized_pl_usd)}`} icon={BarChart3} tone={overview.unrealized_pl_usd < 0 ? "danger" : "positive"} variant="compact" />
       </div>
 
-      {currentPortfolio ? (
+      {showInlinePerformanceReports && currentPortfolio ? (
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -743,6 +875,7 @@ export default function InvestmentsPage() {
                       areaOpacity={0.08}
                       colors={["hsl(var(--primary))"]}
                       useMesh
+                      layers={["grid", "markers", "axes", "areas", "crosshair", "lines", "points", renderOperationMarkers(valueOperationMarkers), "mesh", "legends"]}
                       tooltip={({ point }) => (
                         <div className="rounded border bg-background px-2 py-1 text-xs">
                           {String(point.data.x)}: {formatCurrencyValue(Number(point.data.y), displayCurrency)}
@@ -768,6 +901,7 @@ export default function InvestmentsPage() {
                       pointBorderColor={{ from: "serieColor" }}
                       colors={[overview.total_pl_usd < 0 ? "#ef4444" : "#10b981"]}
                       useMesh
+                      layers={["grid", "markers", "axes", "crosshair", "lines", "points", renderOperationMarkers(plOperationMarkers), "mesh", "legends"]}
                       tooltip={({ point }) => (
                         <div className="rounded border bg-background px-2 py-1 text-xs">
                           {String(point.data.x)}: {formatCurrencyValue(Number(point.data.y), displayCurrency)}
@@ -782,7 +916,7 @@ export default function InvestmentsPage() {
         </Card>
       ) : null}
 
-      {currentPortfolio ? (
+      {showInlinePerformanceReports && currentPortfolio ? (
         <Card>
           <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -833,6 +967,7 @@ export default function InvestmentsPage() {
                       pointBorderColor={{ from: "serieColor" }}
                       colors={(series) => instrumentPlColorByTicker.get(String(series.id)) ?? instrumentChartColors[0]}
                       useMesh
+                      layers={["grid", "markers", "axes", "crosshair", "lines", "points", renderOperationMarkers(instrumentPlOperationMarkers), "mesh", "legends"]}
                       tooltip={({ point }) => {
                         const data = point.data as typeof point.data & {
                           realized?: number | null
