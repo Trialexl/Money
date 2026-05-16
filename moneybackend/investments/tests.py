@@ -750,6 +750,7 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertIn('/api/v1/investment/accounts/', content)
         self.assertIn('/api/v1/investment/operations/', content)
         self.assertIn('/api/v1/investment/portfolio-overview/', content)
+        self.assertIn('/api/v1/investment/market-health/', content)
         self.assertIn('InstrumentPriceSnapshot', content)
         self.assertIn('InvestmentOperationRequest', content)
         self.assertIn('operation_type', content)
@@ -888,6 +889,34 @@ class InvestmentModuleIsolationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['created'], 1)
+
+    def test_market_health_endpoint_reports_stale_prices(self):
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('100.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('100.00'),
+            captured_at=self._dt(2026, 1, 1),
+            source='test-price',
+        )
+
+        with patch('investments.services.timezone.localdate', return_value=date(2026, 1, 5)):
+            response = self.client.get('/api/v1/investment/market-health/', {'max_age_days': '2'})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['prices']['total'], 1)
+        self.assertEqual(response.data['prices']['stale'], 1)
+        self.assertEqual(response.data['prices']['items'][0]['ticker'], 'BTC')
+        self.assertEqual(response.data['prices']['items'][0]['status'], 'stale')
+        self.assertTrue(response.data['prices']['items'][0]['uses_fallback'])
+        self.assertIsNotNone(response.data['latest_successful_price_at'])
+
+    def test_market_health_endpoint_validates_max_age(self):
+        response = self.client.get('/api/v1/investment/market-health/', {'max_age_days': '-1'})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('max_age_days', response.data)
 
     def test_regular_user_does_not_see_foreign_portfolios_accounts_or_operations(self):
         _, other_portfolio, other_account, other_operation = self._create_foreign_investment_data()

@@ -147,6 +147,7 @@ Env-настройки:
 - `accounts/` - CRUD investment accounts, фильтры `portfolio`, `hidden`.
 - `operations/` - CRUD investment operations, фильтры `portfolio`, `account`, `instrument`, `operation_type`, `date_from`, `date_to`, `deleted`.
 - `portfolio-overview/` - overview портфеля по умолчанию или указанного `portfolio`.
+- `market-health/` - healthcheck рыночных данных: свежесть price/fx snapshots, stale/missing-индикация и дата последнего успешного обновления.
 
 Актуальный OpenAPI доступен в приложении по `/api/schema/` и сохранен в snapshots:
 

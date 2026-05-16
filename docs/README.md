@@ -12,6 +12,7 @@
 
 ## Общая эксплуатация
 
+- [Server runbook: установка, обновление, cron, backup](operations/server-runbook.md)
 - [Корневой README](../README.md)
 - [HTTPS и Docker deployment](../moneybackend/docs/docker_https_deploy.md)
 - [1C sync contract](../moneybackend/docs/1c_extension_sync.md)

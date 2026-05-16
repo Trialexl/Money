@@ -27,9 +27,18 @@ docker compose up -d --build
 
 Скрипт сохраняет дампы PostgreSQL в `backups/postgres/`, требует явное подтверждение `RESTORE` перед восстановлением и не удаляет Docker volumes.
 
+## Обновление сервера
+
+```bash
+sudo ./update-server.sh
+```
+
+Скрипт выполняет `git pull --ff-only`, `docker compose pull`, `docker compose up -d --remove-orphans` и безопасный `docker image prune -f` без удаления volumes.
+
 ## Документация
 
 - [Индекс документации](docs/README.md)
+- [Server runbook: установка, обновление, cron, backup](docs/operations/server-runbook.md)
 - [Investment module](docs/investment-module.md)
 - [PRD финансовых инструментов](docs/product/financial-instruments-prd.md)
 - [Backlog финансовых инструментов](docs/product/financial-instruments-tasks.md)

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 import calendar
+import logging
 
 from django.db.models import Max, Min
 from django.utils import timezone
@@ -11,6 +12,8 @@ from .fx_providers import FxRateProviderError, get_fx_rate_provider
 from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentOperation, InvestmentTargetAllocation, SUPPORTED_CURRENCIES
 from .models import InvestmentPortfolio, InvestmentPortfolioSnapshot
 from .price_providers import PriceProviderError, get_price_provider
+
+logger = logging.getLogger(__name__)
 
 ZERO_AMOUNT = Decimal('0')
 PERFORMANCE_MONEY_FIELDS = (
@@ -489,6 +492,105 @@ def rebuild_portfolio_snapshots_for_change(
         for key in summary:
             summary[key] += partial[key]
     return summary
+
+
+def get_market_data_health(*, max_age_days=2, as_of=None):
+    as_of_date = as_of or timezone.localdate()
+    stale_before = as_of_date - timedelta(days=max_age_days)
+
+    price_items = []
+    latest_price_at = None
+    for instrument in Instrument.objects.filter(is_active=True).order_by('type', 'ticker'):
+        snapshot = (
+            InstrumentPriceSnapshot.objects
+            .filter(instrument=instrument)
+            .order_by('-captured_at', '-created_at')
+            .first()
+        )
+        snapshot_date = _date_part(snapshot.captured_at) if snapshot is not None else None
+        if snapshot is None:
+            item_status = 'missing'
+        elif snapshot_date < stale_before:
+            item_status = 'stale'
+        else:
+            item_status = 'ok'
+        if snapshot is not None and (latest_price_at is None or snapshot.captured_at > latest_price_at):
+            latest_price_at = snapshot.captured_at
+        price_items.append({
+            'instrument_id': str(instrument.id),
+            'ticker': instrument.ticker,
+            'name': instrument.name,
+            'status': item_status,
+            'latest_at': snapshot.captured_at if snapshot is not None else None,
+            'age_days': (as_of_date - snapshot_date).days if snapshot_date is not None else None,
+            'price_usd': _money(snapshot.price_usd) if snapshot is not None else None,
+            'source': snapshot.source if snapshot is not None else None,
+            'uses_fallback': item_status == 'stale',
+        })
+
+    fx_items = []
+    latest_fx_at = None
+    for base_currency, quote_currency in _fx_currency_pairs():
+        snapshot = (
+            FxRateSnapshot.objects
+            .filter(base_currency=base_currency, quote_currency=quote_currency)
+            .order_by('-captured_at', '-created_at')
+            .first()
+        )
+        snapshot_date = _date_part(snapshot.captured_at) if snapshot is not None else None
+        if snapshot is None:
+            item_status = 'missing'
+        elif snapshot_date < stale_before:
+            item_status = 'stale'
+        else:
+            item_status = 'ok'
+        if snapshot is not None and (latest_fx_at is None or snapshot.captured_at > latest_fx_at):
+            latest_fx_at = snapshot.captured_at
+        fx_items.append({
+            'base_currency': base_currency,
+            'quote_currency': quote_currency,
+            'status': item_status,
+            'latest_at': snapshot.captured_at if snapshot is not None else None,
+            'age_days': (as_of_date - snapshot_date).days if snapshot_date is not None else None,
+            'rate': snapshot.rate if snapshot is not None else None,
+            'source': snapshot.source if snapshot is not None else None,
+            'uses_fallback': item_status == 'stale',
+        })
+
+    price_counts = _health_counts(price_items)
+    fx_counts = _health_counts(fx_items)
+    return {
+        'status': _overall_market_health_status(price_counts, fx_counts),
+        'as_of': as_of_date.isoformat(),
+        'max_age_days': max_age_days,
+        'latest_successful_price_at': latest_price_at,
+        'latest_successful_fx_at': latest_fx_at,
+        'prices': {
+            **price_counts,
+            'items': price_items,
+        },
+        'fx_rates': {
+            **fx_counts,
+            'items': fx_items,
+        },
+    }
+
+
+def _health_counts(items):
+    return {
+        'total': len(items),
+        'ok': sum(1 for item in items if item['status'] == 'ok'),
+        'stale': sum(1 for item in items if item['status'] == 'stale'),
+        'missing': sum(1 for item in items if item['status'] == 'missing'),
+    }
+
+
+def _overall_market_health_status(price_counts, fx_counts):
+    if price_counts['missing'] or fx_counts['missing']:
+        return 'error'
+    if price_counts['stale'] or fx_counts['stale']:
+        return 'warning'
+    return 'ok'
 
 
 def _resolve_snapshot_portfolios(portfolio):
@@ -1031,6 +1133,11 @@ def refresh_price_snapshots(*, price_provider=None, fx_provider=None, instrument
                 'source': price_quote.source,
             })
         except (PriceProviderError, FxRateProviderError) as exc:
+            logger.warning(
+                'Investment price refresh failed for instrument %s.',
+                instrument.ticker,
+                exc_info=True,
+            )
             results.append({
                 'instrument_id': str(instrument.id),
                 'ticker': instrument.ticker,
@@ -1114,6 +1221,11 @@ def backfill_price_snapshots(*, date_from, date_to, price_provider=None, fx_prov
                         quote_date=quote_date,
                     )
             except (PriceProviderError, FxRateProviderError) as exc:
+                logger.warning(
+                    'Investment historical price range backfill failed for instrument %s.',
+                    instrument.ticker,
+                    exc_info=True,
+                )
                 results.append({
                     'instrument_id': str(instrument.id),
                     'ticker': instrument.ticker,
@@ -1140,6 +1252,12 @@ def backfill_price_snapshots(*, date_from, date_to, price_provider=None, fx_prov
                     quote_date=cursor,
                 )
             except (PriceProviderError, FxRateProviderError) as exc:
+                logger.warning(
+                    'Investment historical price backfill failed for instrument %s on %s.',
+                    instrument.ticker,
+                    cursor.isoformat(),
+                    exc_info=True,
+                )
                 results.append({
                     'instrument_id': str(instrument.id),
                     'ticker': instrument.ticker,
@@ -1249,6 +1367,12 @@ def _refresh_fx_rate_snapshots_for_date(*, fx_provider, pairs=None, captured_at,
                 'source': fx_quote.source,
             })
         except FxRateProviderError as exc:
+            logger.warning(
+                'Investment FX refresh failed for %s/%s.',
+                base,
+                quote,
+                exc_info=True,
+            )
             results.append({
                 'base_currency': base,
                 'quote_currency': quote,

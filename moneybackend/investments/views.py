@@ -38,6 +38,7 @@ from .services import (
     calculate_rebalance_status,
     backfill_fx_rate_snapshots,
     backfill_price_snapshots,
+    get_market_data_health,
     rebuild_portfolio_snapshots_for_change,
     refresh_fx_rate_snapshots,
     refresh_price_snapshots,
@@ -89,6 +90,10 @@ operation_list_parameters = [
 
 overview_parameters = [
     OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID портфеля. Если не передан, берется портфель по умолчанию.'),
+]
+
+market_health_parameters = [
+    OpenApiParameter('max_age_days', OpenApiTypes.INT, OpenApiParameter.QUERY, description='Сколько дней цена/курс считаются свежими. По умолчанию 2.'),
 ]
 
 performance_parameters = [
@@ -642,3 +647,22 @@ class InvestmentOverviewViewSet(viewsets.ViewSet):
                 'positions': [],
             })
         return Response(serialize_portfolio_overview(portfolio))
+
+
+class InvestmentMarketDataHealthViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        parameters=market_health_parameters,
+        responses={200: OpenApiTypes.OBJECT},
+        description='Healthcheck рыночных данных: свежесть цен инструментов и FX snapshots.',
+    )
+    def list(self, request):
+        max_age_value = request.query_params.get('max_age_days') or '2'
+        try:
+            max_age_days = int(max_age_value)
+        except (TypeError, ValueError):
+            return Response({'max_age_days': 'Укажите целое число дней.'}, status=status.HTTP_400_BAD_REQUEST)
+        if max_age_days < 0:
+            return Response({'max_age_days': 'Значение не может быть отрицательным.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(get_market_data_health(max_age_days=max_age_days))
