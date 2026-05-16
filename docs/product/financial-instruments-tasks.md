@@ -91,6 +91,7 @@
 - `P1-FE-104` - графики портфеля используют display-поля backend, а не пересчет всей истории текущим курсом.
 - `P1-BE-104` - performance API возвращает P/L-серии по инструментам для `scope=instrument|all`.
 - `P1-FE-103` - экран портфеля показывает сравнительный график P/L по инструментам с легендой включения/исключения.
+- `P2-BE-302` - добавлены дневные snapshots инвестиционного портфеля, команда пересчета и использование свежих snapshots в performance API.
 - `P2-AI-001` - Telegram/read-only команды `портфель`, `сколько btc`, `ребалансировка портфеля` возвращают инвестиционную сводку без создания операций.
 - `P0-OPS-002` - в root `docker-compose.yml` добавлены memory/pids limits и reservations для db/backend/frontend/caddy.
 - `P0-OPS-003` - backend запускается через `gunicorn.conf.py` с env-настройками workers/threads/timeouts/max_requests.
@@ -914,6 +915,8 @@ Acceptance criteria:
 - импорт не меняет 1С sync.
 
 ### P2-BE-302. Ежедневный snapshot портфеля
+
+Статус: готово.
 
 Цель: быстрые исторические графики.
 

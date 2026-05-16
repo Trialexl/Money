@@ -86,6 +86,7 @@ class InstrumentPriceSnapshot(models.Model):
     price_usd = models.DecimalField(max_digits=18, decimal_places=2)
     source = models.CharField(max_length=50, default=SOURCE_MANUAL)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
 
     class Meta:
         verbose_name = 'Снимок цены инструмента'
@@ -165,6 +166,39 @@ class InvestmentPortfolio(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class InvestmentPortfolioSnapshot(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    portfolio = models.ForeignKey(InvestmentPortfolio, on_delete=models.CASCADE, related_name='snapshots')
+    snapshot_date = models.DateField()
+    cost_basis_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    current_value_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    realized_pl_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    unrealized_pl_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    total_pl_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    return_percent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    valuation_complete = models.BooleanField(default=False)
+    bought_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    sold_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
+    latest_price_at = models.DateTimeField(null=True, blank=True)
+    positions_payload = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Снимок инвестиционного портфеля'
+        verbose_name_plural = 'Снимки инвестиционных портфелей'
+        ordering = ['portfolio', '-snapshot_date']
+        constraints = [
+            models.UniqueConstraint(fields=['portfolio', 'snapshot_date'], name='uniq_portfolio_snapshot_date'),
+        ]
+        indexes = [
+            models.Index(fields=['portfolio', '-snapshot_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.portfolio}: {self.snapshot_date}'
 
 
 class InvestmentTargetAllocation(models.Model):

@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from .fx_providers import FxRateProviderError, get_fx_rate_provider
 from .models import FxRateSnapshot, Instrument, InstrumentPriceSnapshot, InvestmentOperation, InvestmentTargetAllocation, SUPPORTED_CURRENCIES
+from .models import InvestmentPortfolio, InvestmentPortfolioSnapshot
 from .price_providers import PriceProviderError, get_price_provider
 
 ZERO_AMOUNT = Decimal('0')
@@ -49,6 +50,20 @@ def _percent(value):
     if value is None:
         return None
     return value.quantize(Decimal('0.01'))
+
+
+def _snapshot_decimal(value):
+    if value is None or value == '':
+        return ZERO_AMOUNT
+    return Decimal(str(value))
+
+
+def _snapshot_money(value):
+    return str(_money(value))
+
+
+def _snapshot_datetime(value):
+    return value.isoformat() if value is not None else None
 
 
 def _aware_datetime(value, *, end_of_day=False):
@@ -334,6 +349,121 @@ def calculate_portfolio_totals(portfolio, *, as_of=None, price_max_age_days=None
     }
 
 
+def build_portfolio_snapshot_payload(portfolio, snapshot_date, *, price_max_age_days=0):
+    cutoff = _aware_datetime(snapshot_date, end_of_day=True)
+    totals = calculate_portfolio_totals(
+        portfolio,
+        as_of=cutoff,
+        price_max_age_days=price_max_age_days,
+    )
+    positions_payload = [_serialize_snapshot_position(position) for position in totals['positions']]
+    return {
+        'portfolio': portfolio,
+        'snapshot_date': snapshot_date,
+        'cost_basis_usd': totals['cost_basis_usd'],
+        'current_value_usd': totals['current_value_usd'],
+        'realized_pl_usd': totals['realized_pl_usd'],
+        'unrealized_pl_usd': totals['unrealized_pl_usd'],
+        'total_pl_usd': totals['total_pl_usd'],
+        'return_percent': totals['return_percent'],
+        'valuation_complete': totals['valuation_complete'],
+        'bought_usd': totals['bought_usd'],
+        'sold_usd': totals['sold_usd'],
+        'latest_price_at': totals['latest_price_at'],
+        'positions_payload': positions_payload,
+    }
+
+
+def upsert_portfolio_snapshot(portfolio, snapshot_date, *, price_max_age_days=0):
+    payload = build_portfolio_snapshot_payload(
+        portfolio,
+        snapshot_date,
+        price_max_age_days=price_max_age_days,
+    )
+    snapshot, created = InvestmentPortfolioSnapshot.objects.update_or_create(
+        portfolio=portfolio,
+        snapshot_date=snapshot_date,
+        defaults={
+            'cost_basis_usd': payload['cost_basis_usd'],
+            'current_value_usd': payload['current_value_usd'],
+            'realized_pl_usd': payload['realized_pl_usd'],
+            'unrealized_pl_usd': payload['unrealized_pl_usd'],
+            'total_pl_usd': payload['total_pl_usd'],
+            'return_percent': payload['return_percent'],
+            'valuation_complete': payload['valuation_complete'],
+            'bought_usd': payload['bought_usd'],
+            'sold_usd': payload['sold_usd'],
+            'latest_price_at': payload['latest_price_at'],
+            'positions_payload': payload['positions_payload'],
+        },
+    )
+    return snapshot, created
+
+
+def rebuild_portfolio_snapshots(*, portfolio=None, date_from=None, date_to=None, price_max_age_days=0):
+    today = timezone.localdate()
+    if date_to is None or date_to > today:
+        date_to = today
+
+    portfolios = _resolve_snapshot_portfolios(portfolio)
+    summary = {
+        'portfolios': 0,
+        'created': 0,
+        'updated': 0,
+        'skipped': 0,
+        'snapshots': 0,
+    }
+    for portfolio_obj in portfolios:
+        first_data_date, _latest_data_date = _portfolio_data_date_bounds(portfolio_obj)
+        portfolio_date_from = date_from or first_data_date or today
+        if portfolio_date_from > date_to:
+            summary['skipped'] += 1
+            continue
+
+        summary['portfolios'] += 1
+        cursor = portfolio_date_from
+        while cursor <= date_to:
+            _snapshot, created = upsert_portfolio_snapshot(
+                portfolio_obj,
+                cursor,
+                price_max_age_days=price_max_age_days,
+            )
+            summary['snapshots'] += 1
+            if created:
+                summary['created'] += 1
+            else:
+                summary['updated'] += 1
+            cursor = _next_day(cursor)
+    return summary
+
+
+def _resolve_snapshot_portfolios(portfolio):
+    if portfolio is None:
+        return InvestmentPortfolio.objects.all().order_by('user_id', 'name')
+    if isinstance(portfolio, InvestmentPortfolio):
+        return InvestmentPortfolio.objects.filter(pk=portfolio.pk)
+    return InvestmentPortfolio.objects.filter(pk=portfolio)
+
+
+def _serialize_snapshot_position(position):
+    return {
+        'instrument_id': position['instrument_id'],
+        'instrument_ticker': position['instrument_ticker'],
+        'instrument_name': position['instrument_name'],
+        'quantity': str(position['quantity']),
+        'cost_basis_usd': _snapshot_money(position['cost_basis_usd']),
+        'current_value_usd': _snapshot_money(position['current_value_usd']) if position['current_value_usd'] is not None else None,
+        'realized_pl_usd': _snapshot_money(position['realized_pl_usd']),
+        'unrealized_pl_usd': _snapshot_money(position['unrealized_pl_usd']) if position['unrealized_pl_usd'] is not None else None,
+        'total_pl_usd': _snapshot_money(position['total_pl_usd']),
+        'bought_usd': _snapshot_money(position['bought_usd']),
+        'sold_usd': _snapshot_money(position['sold_usd']),
+        'valuation_complete': not (position['current_value_usd'] is None and position['quantity'] != ZERO_AMOUNT),
+        'latest_price_usd': _snapshot_money(position['latest_price_usd']) if position['latest_price_usd'] is not None else None,
+        'latest_price_at': _snapshot_datetime(position['latest_price_at']),
+    }
+
+
 def calculate_portfolio_performance(
     portfolio,
     *,
@@ -396,32 +526,55 @@ def calculate_portfolio_performance(
             label = period_end.strftime('%Y-%m')
 
         cutoff = _aware_datetime(period_end, end_of_day=True)
-        point = _performance_totals_for_cutoff(
-            portfolio,
-            cutoff,
-            label=label,
-            price_max_age_days=0,
-            display_currency=display_currency,
-            fx_max_age_days=0,
-        )
-        point.update({
-            'date': period_end.isoformat(),
-            'period_start': period_start.isoformat(),
-            'period_end': period_end.isoformat(),
-        })
-
-        if scope in {'instrument', 'all'}:
-            for instrument_row in _performance_instrument_points_for_cutoff(
-                portfolio,
-                cutoff,
+        snapshot = _fresh_portfolio_snapshot(portfolio, period_end, cutoff)
+        if snapshot is not None:
+            point = _performance_point_from_snapshot(
+                snapshot,
                 label=label,
                 period_start=period_start,
                 period_end=period_end,
                 display_currency=display_currency,
-                instrument_id=instrument_id if scope == 'instrument' else None,
-                price_max_age_days=0,
                 fx_max_age_days=0,
-            ):
+            )
+        else:
+            point = _performance_totals_for_cutoff(
+                portfolio,
+                cutoff,
+                label=label,
+                price_max_age_days=0,
+                display_currency=display_currency,
+                fx_max_age_days=0,
+            )
+            point.update({
+                'date': period_end.isoformat(),
+                'period_start': period_start.isoformat(),
+                'period_end': period_end.isoformat(),
+            })
+
+        if scope in {'instrument', 'all'}:
+            if snapshot is not None:
+                instrument_rows = _performance_instrument_points_from_snapshot(
+                    snapshot,
+                    label=label,
+                    period_start=period_start,
+                    period_end=period_end,
+                    display_currency=display_currency,
+                    instrument_id=instrument_id if scope == 'instrument' else None,
+                    fx_max_age_days=0,
+                )
+            else:
+                instrument_rows = _performance_instrument_points_for_cutoff(
+                    portfolio,
+                    cutoff,
+                    label=label,
+                    period_start=period_start,
+                    period_end=period_end,
+                    display_currency=display_currency,
+                    instrument_id=instrument_id if scope == 'instrument' else None,
+                    price_max_age_days=0,
+                    fx_max_age_days=0,
+                )
+            for instrument_row in instrument_rows:
                 series = instrument_series[instrument_row['instrument_id']]
                 series['instrument_id'] = instrument_row['instrument_id']
                 series['instrument_ticker'] = instrument_row['instrument_ticker']
@@ -449,6 +602,141 @@ def calculate_portfolio_performance(
             key=lambda series: series['instrument_ticker'],
         ),
     }
+
+
+def _fresh_portfolio_snapshot(portfolio, snapshot_date, cutoff):
+    snapshot = InvestmentPortfolioSnapshot.objects.filter(
+        portfolio=portfolio,
+        snapshot_date=snapshot_date,
+    ).first()
+    if snapshot is None:
+        return None
+    if not _portfolio_snapshot_is_current(portfolio, snapshot, cutoff):
+        return None
+    return snapshot
+
+
+def _portfolio_snapshot_is_current(portfolio, snapshot, cutoff):
+    latest_operation_update = (
+        InvestmentOperation.objects
+        .filter(portfolio=portfolio, date__lte=cutoff)
+        .aggregate(latest=Max('updated_at'))
+    )['latest']
+    if latest_operation_update is not None and latest_operation_update > snapshot.updated_at:
+        return False
+
+    instrument_ids = (
+        InvestmentOperation.objects
+        .filter(portfolio=portfolio, date__lte=cutoff)
+        .values_list('instrument_id', flat=True)
+        .distinct()
+    )
+    latest_price_create = (
+        InstrumentPriceSnapshot.objects
+        .filter(instrument_id__in=instrument_ids, captured_at__lte=cutoff)
+        .aggregate(created=Max('created_at'), updated=Max('updated_at'))
+    )
+    latest_price_change = max(
+        (value for value in latest_price_create.values() if value is not None),
+        default=None,
+    )
+    return not (latest_price_change is not None and latest_price_change > snapshot.updated_at)
+
+
+def _performance_point_from_snapshot(
+    snapshot,
+    *,
+    label,
+    period_start,
+    period_end,
+    display_currency,
+    fx_max_age_days=None,
+):
+    point = {
+        'label': label,
+        'date': period_end.isoformat(),
+        'period_start': period_start.isoformat(),
+        'period_end': period_end.isoformat(),
+        'cost_basis_usd': snapshot.cost_basis_usd,
+        'current_value_usd': snapshot.current_value_usd,
+        'realized_pl_usd': snapshot.realized_pl_usd,
+        'unrealized_pl_usd': snapshot.unrealized_pl_usd,
+        'total_pl_usd': snapshot.total_pl_usd,
+        'bought_usd': snapshot.bought_usd,
+        'sold_usd': snapshot.sold_usd,
+        'valuation_complete': snapshot.valuation_complete,
+        'missing_reason': None if snapshot.valuation_complete else 'snapshot_incomplete',
+    }
+    _apply_display_currency(
+        point,
+        _aware_datetime(period_end, end_of_day=True),
+        display_currency,
+        fx_max_age_days=fx_max_age_days,
+    )
+    return point
+
+
+def _performance_instrument_points_from_snapshot(
+    snapshot,
+    *,
+    label,
+    period_start,
+    period_end,
+    display_currency,
+    instrument_id=None,
+    fx_max_age_days=None,
+):
+    rows = []
+    for position in snapshot.positions_payload or []:
+        if instrument_id is not None and str(position.get('instrument_id')) != str(instrument_id):
+            continue
+        quantity = _snapshot_decimal(position.get('quantity'))
+        if quantity == ZERO_AMOUNT and not _snapshot_position_has_state(position):
+            continue
+        valuation_complete = bool(position.get('valuation_complete'))
+        point = {
+            'label': label,
+            'date': period_end.isoformat(),
+            'period_start': period_start.isoformat(),
+            'period_end': period_end.isoformat(),
+            'cost_basis_usd': _snapshot_decimal(position.get('cost_basis_usd')),
+            'current_value_usd': _snapshot_decimal(position.get('current_value_usd')),
+            'realized_pl_usd': _snapshot_decimal(position.get('realized_pl_usd')),
+            'unrealized_pl_usd': _snapshot_decimal(position.get('unrealized_pl_usd')),
+            'total_pl_usd': _snapshot_decimal(position.get('total_pl_usd')),
+            'bought_usd': _snapshot_decimal(position.get('bought_usd')),
+            'sold_usd': _snapshot_decimal(position.get('sold_usd')),
+            'valuation_complete': valuation_complete,
+            'missing_reason': None if valuation_complete else 'price_missing',
+        }
+        _apply_display_currency(
+            point,
+            _aware_datetime(period_end, end_of_day=True),
+            display_currency,
+            fx_max_age_days=fx_max_age_days,
+        )
+        rows.append({
+            'instrument_id': str(position.get('instrument_id')),
+            'instrument_ticker': position.get('instrument_ticker') or '',
+            'instrument_name': position.get('instrument_name') or '',
+            'point': point,
+        })
+    return rows
+
+
+def _snapshot_position_has_state(position):
+    return any(
+        _snapshot_decimal(position.get(field)) != ZERO_AMOUNT
+        for field in (
+            'cost_basis_usd',
+            'current_value_usd',
+            'realized_pl_usd',
+            'unrealized_pl_usd',
+            'total_pl_usd',
+            'bought_usd',
+            'sold_usd',
+        )
+    )
 
 
 def _performance_instrument_points_for_cutoff(
@@ -516,13 +804,19 @@ def _portfolio_data_date_bounds(portfolio):
         first=Min('captured_at'),
         latest=Max('captured_at'),
     )
+    snapshot_bounds = InvestmentPortfolioSnapshot.objects.filter(portfolio=portfolio).aggregate(
+        first=Min('snapshot_date'),
+        latest=Max('snapshot_date'),
+    )
     first_candidates = [
         _date_part(operation_bounds['first']),
         _date_part(price_bounds['first']),
+        snapshot_bounds['first'],
     ]
     latest_candidates = [
         _date_part(operation_bounds['latest']),
         _date_part(price_bounds['latest']),
+        snapshot_bounds['latest'],
     ]
     first_dates = [candidate for candidate in first_candidates if candidate is not None]
     latest_dates = [candidate for candidate in latest_candidates if candidate is not None]

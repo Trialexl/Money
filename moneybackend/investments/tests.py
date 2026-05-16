@@ -19,6 +19,7 @@ from .models import (
     InvestmentAccount,
     InvestmentOperation,
     InvestmentPortfolio,
+    InvestmentPortfolioSnapshot,
     InvestmentTargetAllocation,
 )
 from .price_providers import CoinGeckoPriceProvider, PriceProviderError, PriceQuote, StaticPriceProvider, get_price_provider
@@ -26,6 +27,8 @@ from .services import (
     calculate_portfolio_performance,
     calculate_positions,
     calculate_portfolio_totals,
+    rebuild_portfolio_snapshots,
+    upsert_portfolio_snapshot,
     refresh_price_snapshots,
     refresh_fx_rate_snapshots,
     backfill_price_snapshots,
@@ -469,6 +472,73 @@ class InvestmentModuleIsolationTests(TestCase):
             sum(series['points'][0]['total_pl_usd'] for series in performance['instrument_series']),
             performance['points'][0]['total_pl_usd'],
         )
+
+    def test_rebuild_portfolio_snapshots_creates_daily_snapshots(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price_usd=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 1),
+        )
+        for day, price in ((1, Decimal('100.00')), (2, Decimal('110.00'))):
+            InstrumentPriceSnapshot.objects.create(
+                instrument=self.instrument,
+                price=price,
+                price_currency='USD',
+                fx_rate_to_usd=Decimal('1'),
+                price_usd=price,
+                captured_at=self._dt(2026, 1, day),
+            )
+
+        summary = rebuild_portfolio_snapshots(
+            portfolio=self.portfolio,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 1, 2),
+        )
+
+        self.assertEqual(summary['created'], 2)
+        snapshots = InvestmentPortfolioSnapshot.objects.filter(portfolio=self.portfolio).order_by('snapshot_date')
+        self.assertEqual([snapshot.snapshot_date for snapshot in snapshots], [date(2026, 1, 1), date(2026, 1, 2)])
+        self.assertEqual([snapshot.current_value_usd for snapshot in snapshots], [Decimal('100.00'), Decimal('110.00')])
+        self.assertEqual(snapshots[1].positions_payload[0]['instrument_ticker'], 'BTC')
+
+    def test_portfolio_performance_can_use_fresh_snapshot_without_price_snapshot(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price_usd=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 5),
+        )
+        price_snapshot = InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('150.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('150.00'),
+            captured_at=self._dt(2026, 1, 31),
+        )
+        snapshot, _created = upsert_portfolio_snapshot(self.portfolio, date(2026, 1, 31))
+        price_snapshot.delete()
+
+        performance = calculate_portfolio_performance(
+            self.portfolio,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 1, 31),
+            group_by='month',
+            scope='all',
+        )
+
+        self.assertEqual(snapshot.current_value_usd, Decimal('150.00'))
+        self.assertEqual(performance['points'][0]['current_value_usd'], Decimal('150.00'))
+        self.assertEqual(performance['instrument_series'][0]['points'][0]['total_pl_usd'], Decimal('50.00'))
 
     def test_investment_operations_do_not_mutate_price_snapshots(self):
         snapshot = InstrumentPriceSnapshot.objects.create(

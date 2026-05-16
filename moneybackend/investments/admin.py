@@ -7,6 +7,7 @@ from .models import (
     InvestmentAccount,
     InvestmentOperation,
     InvestmentPortfolio,
+    InvestmentPortfolioSnapshot,
     InvestmentTargetAllocation,
 )
 
@@ -38,6 +39,15 @@ class InvestmentPortfolioAdmin(admin.ModelAdmin):
     list_display = ('name', 'user', 'base_currency', 'is_default', 'project')
     list_filter = ('is_default', 'base_currency')
     search_fields = ('name', 'user__username', 'user__full_name')
+
+
+@admin.register(InvestmentPortfolioSnapshot)
+class InvestmentPortfolioSnapshotAdmin(admin.ModelAdmin):
+    list_display = ('portfolio', 'snapshot_date', 'current_value_usd', 'total_pl_usd', 'valuation_complete', 'latest_price_at')
+    list_filter = ('valuation_complete', 'snapshot_date')
+    search_fields = ('portfolio__name', 'portfolio__user__username', 'portfolio__user__full_name')
+    autocomplete_fields = ('portfolio',)
+    readonly_fields = ('positions_payload', 'created_at', 'updated_at')
 
 
 @admin.register(InvestmentTargetAllocation)
