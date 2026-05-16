@@ -233,6 +233,162 @@ class CoinGeckoPriceProvider(BasePriceProvider):
         return COMMON_CRYPTO_PROVIDER_SYMBOLS.get(symbol.upper(), symbol)
 
 
+class StooqPriceProvider(BasePriceProvider):
+    source = 'stooq'
+    supports_historical_range = True
+
+    def __init__(self, *, quote_base_url=None, history_base_url=None, timeout=None, opener=None):
+        self.quote_base_url = quote_base_url or getattr(
+            settings,
+            'INVESTMENT_STOCK_PRICE_PROVIDER_BASE_URL',
+            'https://stooq.com/q/l/',
+        )
+        self.history_base_url = history_base_url or getattr(
+            settings,
+            'INVESTMENT_STOCK_PRICE_PROVIDER_HISTORY_BASE_URL',
+            'https://stooq.com/q/d/l/',
+        )
+        self.timeout = timeout if timeout is not None else getattr(settings, 'INVESTMENT_PRICE_PROVIDER_TIMEOUT', 10)
+        self.opener = opener or urlrequest.urlopen
+
+    def get_price(self, instrument):
+        symbol = self._stooq_symbol(instrument)
+        if not symbol:
+            raise PriceProviderError('У акции не указан provider_symbol или ticker.')
+        query = urlparse.urlencode({
+            's': symbol,
+            'f': 'sd2t2ohlcv',
+            'h': '',
+            'e': 'csv',
+        })
+        url = f'{self.quote_base_url}?{query}'
+        rows = self._read_csv_rows(url, symbol)
+        if not rows:
+            raise PriceProviderError(f'Provider не вернул цену акции {symbol}.')
+        row = rows[0]
+        price = self._parse_positive_decimal(row.get('Close'), symbol)
+        return PriceQuote(
+            instrument_id=str(instrument.id) if getattr(instrument, 'id', None) else None,
+            symbol=symbol,
+            price=price,
+            price_currency=(instrument.quote_currency or 'USD').strip().upper(),
+            source=self.source,
+        )
+
+    def get_historical_price(self, instrument, on_date):
+        prices = self.get_historical_prices(instrument, on_date, on_date)
+        normalized_date = _normalize_price_date(on_date)
+        try:
+            return prices[normalized_date]
+        except KeyError as exc:
+            raise PriceProviderError(f'Provider не вернул историческую цену акции за {normalized_date.isoformat()}.') from exc
+
+    def get_historical_prices(self, instrument, date_from, date_to):
+        symbol = self._stooq_symbol(instrument)
+        start_date = _normalize_price_date(date_from)
+        end_date = _normalize_price_date(date_to)
+        if not symbol:
+            raise PriceProviderError('У акции не указан provider_symbol или ticker.')
+        if start_date is None or end_date is None:
+            raise PriceProviderError('Не указан период исторических цен.')
+        if start_date > end_date:
+            raise PriceProviderError('Дата начала исторических цен больше даты окончания.')
+
+        query = urlparse.urlencode({
+            's': symbol,
+            'd1': start_date.strftime('%Y%m%d'),
+            'd2': end_date.strftime('%Y%m%d'),
+            'i': 'd',
+        })
+        url = f'{self.history_base_url}?{query}'
+        rows = self._read_csv_rows(url, symbol)
+        quotes = {}
+        for row in rows:
+            row_date = _parse_stooq_date(row.get('Date'))
+            if row_date is None or row_date < start_date or row_date > end_date:
+                continue
+            price = self._parse_positive_decimal(row.get('Close'), symbol)
+            quotes[row_date] = PriceQuote(
+                instrument_id=str(instrument.id) if getattr(instrument, 'id', None) else None,
+                symbol=symbol,
+                price=price,
+                price_currency=(instrument.quote_currency or 'USD').strip().upper(),
+                source=self.source,
+            )
+        if not quotes:
+            raise PriceProviderError(f'Provider не вернул исторические цены акции {symbol} за период.')
+        return quotes
+
+    def _read_csv_rows(self, url, symbol):
+        request = urlrequest.Request(
+            url,
+            headers={'User-Agent': 'MoneyInvestmentStockPriceProvider/1.0'},
+        )
+        try:
+            with self.opener(request, timeout=self.timeout) as response:
+                raw_text = response.read().decode('utf-8')
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            raise PriceProviderError(f'Не удалось получить цену акции {symbol}.') from exc
+
+        rows = [line.strip().split(',') for line in raw_text.splitlines() if line.strip()]
+        if len(rows) < 2:
+            raise PriceProviderError(f'Provider не вернул CSV с ценой акции {symbol}.')
+        headers = rows[0]
+        parsed_rows = []
+        for values in rows[1:]:
+            row = {header: values[index] if index < len(values) else '' for index, header in enumerate(headers)}
+            if row.get('Close') in {'', 'N/D', 'No data'}:
+                continue
+            parsed_rows.append(row)
+        return parsed_rows
+
+    def _parse_positive_decimal(self, value, symbol):
+        try:
+            price = Decimal(str(value))
+        except (InvalidOperation, TypeError) as exc:
+            raise PriceProviderError(f'Provider вернул некорректную цену акции {symbol}.') from exc
+        if price <= 0:
+            raise PriceProviderError(f'Provider вернул неположительную цену акции {symbol}.')
+        return price
+
+    def _stooq_symbol(self, instrument):
+        return (instrument.provider_symbol or instrument.ticker or '').strip().lower()
+
+
+class CompositePriceProvider(BasePriceProvider):
+    source = 'auto'
+    supports_historical_range = True
+
+    def __init__(self, *, crypto_provider=None, stock_provider=None):
+        self.crypto_provider = crypto_provider or CoinGeckoPriceProvider()
+        self.stock_provider = stock_provider or StooqPriceProvider()
+
+    def _provider_for(self, instrument):
+        instrument_type = getattr(instrument, 'type', 'crypto')
+        if instrument_type == 'stock':
+            return self.stock_provider
+        return self.crypto_provider
+
+    def get_price(self, instrument):
+        return self._provider_for(instrument).get_price(instrument)
+
+    def get_historical_price(self, instrument, on_date):
+        return self._provider_for(instrument).get_historical_price(instrument, on_date)
+
+    def get_historical_prices(self, instrument, date_from, date_to):
+        provider = self._provider_for(instrument)
+        return provider.get_historical_prices(instrument, date_from, date_to)
+
+
+def _parse_stooq_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_price_date(value):
     if value is None:
         return None
@@ -246,9 +402,13 @@ def _normalize_price_date(value):
 
 
 def get_price_provider(name=None):
-    provider_name = (name or getattr(settings, 'INVESTMENT_PRICE_PROVIDER', 'coingecko')).strip().lower()
+    provider_name = (name or getattr(settings, 'INVESTMENT_PRICE_PROVIDER', 'auto')).strip().lower()
+    if provider_name == 'auto':
+        return CompositePriceProvider()
     if provider_name == 'coingecko':
         return CoinGeckoPriceProvider()
+    if provider_name == 'stooq':
+        return StooqPriceProvider()
     if provider_name == 'static':
         return StaticPriceProvider({})
     if provider_name in {'disabled', 'manual'}:

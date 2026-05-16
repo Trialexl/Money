@@ -273,11 +273,15 @@ class InvestmentOperation(models.Model):
     TYPE_SELL = 'sell'
     TYPE_TRANSFER = 'transfer_instrument'
     TYPE_CORRECTION = 'correction'
+    TYPE_DIVIDEND = 'dividend'
+    TYPE_SPLIT = 'split'
     TYPES = [
         (TYPE_BUY, 'Покупка'),
         (TYPE_SELL, 'Продажа'),
         (TYPE_TRANSFER, 'Перевод инструмента'),
         (TYPE_CORRECTION, 'Корректировка'),
+        (TYPE_DIVIDEND, 'Дивиденд'),
+        (TYPE_SPLIT, 'Split'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -294,7 +298,7 @@ class InvestmentOperation(models.Model):
     )
     instrument = models.ForeignKey(Instrument, on_delete=models.PROTECT, related_name='operations')
     operation_type = models.CharField(max_length=30, choices=TYPES)
-    quantity = models.DecimalField(max_digits=24, decimal_places=10)
+    quantity = models.DecimalField(max_digits=24, decimal_places=10, default=ZERO_AMOUNT)
     price_usd = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
     amount_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
     fee_usd = models.DecimalField(max_digits=18, decimal_places=2, default=ZERO_AMOUNT)
@@ -324,15 +328,26 @@ class InvestmentOperation(models.Model):
         elif self.account_to is not None:
             errors['account_to'] = 'Счет-получатель используется только для перевода инструмента.'
 
-        if self.quantity == ZERO_AMOUNT:
+        if self.operation_type != self.TYPE_DIVIDEND and self.quantity == ZERO_AMOUNT:
             errors['quantity'] = 'Количество не может быть нулевым.'
         if self.operation_type in (self.TYPE_BUY, self.TYPE_SELL, self.TYPE_TRANSFER) and self.quantity < ZERO_AMOUNT:
             errors['quantity'] = 'Количество должно быть положительным.'
+        if self.operation_type == self.TYPE_SPLIT and self.quantity <= ZERO_AMOUNT:
+            errors['quantity'] = 'Коэффициент split должен быть положительным.'
         if self.operation_type in (self.TYPE_BUY, self.TYPE_SELL):
             if self.price_usd is None or self.price_usd <= ZERO_AMOUNT:
                 errors['price_usd'] = 'Укажите положительную цену в USD.'
             if self.amount_usd <= ZERO_AMOUNT:
                 errors['amount_usd'] = 'Укажите положительную сумму в USD.'
+        if self.operation_type == self.TYPE_DIVIDEND and self.amount_usd <= ZERO_AMOUNT:
+            errors['amount_usd'] = 'Укажите положительную сумму дивиденда в USD.'
+        if self.operation_type == self.TYPE_SPLIT:
+            if self.price_usd is not None:
+                errors['price_usd'] = 'Split не должен содержать цену.'
+            if self.amount_usd != ZERO_AMOUNT:
+                errors['amount_usd'] = 'Split не должен менять сумму операции.'
+            if self.fee_usd != ZERO_AMOUNT:
+                errors['fee_usd'] = 'Split не должен содержать комиссию.'
         if self.operation_type == self.TYPE_CORRECTION and self.account_to is not None:
             errors['account_to'] = 'Корректировка выполняется по одному счету.'
 

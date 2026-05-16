@@ -35,6 +35,8 @@ Endpoint требует обычную аутентификацию пользо
 - `message.text`
 - `message.caption`
 - `message.photo`
+- `message.voice`
+- `message.audio`
 
 Если настроен `AI_TELEGRAM_BOT_SECRET`, backend проверяет заголовок:
 
@@ -79,6 +81,9 @@ Backend использует их, чтобы:
 - если есть несколько кандидатов, отдает нумерованный список вариантов
 - пользователь может ответить номером варианта, текстом или `/cancel`
 - история уточнений сохраняется в `confirmation_history`
+- для batch-распознавания скриншота с несколькими строками backend сохраняет контекст изображения и при уточнении заново просит LLM вернуть итоговую структуру с учетом ответа пользователя
+- если все поля собраны, бот показывает финальный preview и не создает документы до подтверждения `Создать` или `да`
+- Telegram дополнительно отправляет reply keyboard: кнопки вариантов, `Создать` и `/cancel`
 
 ## Провайдеры
 
@@ -109,6 +114,12 @@ Backend использует их, чтобы:
 - `create_transfer`
 - `get_wallet_balance`
 - `get_all_wallet_balances`
+- `get_month_expenses_by_item`
+- `get_portfolio_overview`
+- `get_instrument_position`
+- `get_investment_rebalance`
+- `create_investment_buy`
+- `create_investment_sell`
 - `unknown`
 
 ## Текущий pipeline
@@ -118,6 +129,7 @@ Backend использует их, чтобы:
    - список кошельков
    - список статей движения средств
    - alias кошельков и статей
+   - список инвестиционных инструментов и счетов для investment intent'ов
 3. Выбранный provider возвращает структурированный JSON.
 4. Backend нормализует распознанные данные:
    - тип операции
@@ -130,6 +142,7 @@ Backend использует их, чтобы:
    - `Receipt`
    - `Expenditure`
    - `Transfer`
+   - `InvestmentOperation` для инвестиционных buy/sell intent'ов после финального подтверждения
 6. До фактического создания backend проверяет семантический дубль операции в окне `AI_DUPLICATE_WINDOW_SECONDS`.
 7. Если intent относится к остаткам, вместо документа возвращается balance response.
 8. Если данных не хватает, backend возвращает `needs_confirmation`.
@@ -146,6 +159,11 @@ Backend использует их, чтобы:
 - `перевод сбербанк альфа 20000`
 - `какой остаток на сбербанке`
 - `остатки по кошелькам`
+- `расходы апрель`
+- `расходы апрель май`
+- `портфель`
+- `сколько btc`
+- `купил btc 0.1 по 100000`
 
 ## Формат ответа
 
@@ -155,6 +173,7 @@ Backend использует их, чтобы:
 - `preview`
 - `needs_confirmation`
 - `balance`
+- `info`
 - `duplicate`
 
 В ответе могут приходить:
@@ -169,12 +188,14 @@ Backend использует их, чтобы:
 - `missing_fields`
 - `options`
 - `parsed`
+- `reply_parse_mode`
 
 ## Текущее поведение по обязательным полям
 
 - `Receipt`: нужен `wallet` и `cash_flow_item`
 - `Expenditure`: нужен `wallet` и `cash_flow_item`
 - `Transfer`: нужны `wallet_from` и `wallet_to`
+- `InvestmentOperation buy/sell`: нужны инвестиционный счет, инструмент, количество и цена или сумма в USD
 
 Если обязательное поле не распознано уверенно, документ не создается автоматически.
 
@@ -182,19 +203,21 @@ Backend использует их, чтобы:
 
 - alias для `Wallet` и `CashFlowItem` уже заведены в отдельные модели и участвуют в matching
 - `rule_based` provider не умеет распознавать изображения
-- Telegram endpoint уже умеет скачивать `message.photo` через Telegram Bot API и передавать изображение в AI pipeline; web по-прежнему принимает бинарное изображение напрямую
+- Telegram endpoint уже умеет скачивать `message.photo`, `message.voice` и `message.audio` через Telegram Bot API; изображения идут в AI pipeline, аудио сначала транскрибируется
 - backend уже сам отправляет `reply_text` обратно в Telegram через `sendMessage`
+- для Telegram-ответов поддерживается `parse_mode=HTML`, если результат содержит `reply_parse_mode`
 - для скриншотов нет отдельного OCR-слоя: разбор делегируется multimodal OpenRouter/Gemini, но backend уже умеет принимать `merchant`, `description`, `bank_name`, `occurred_at` и `operation_sign` из structured ответа
-- автоподбор `CashFlowItem` пока базовый: для текстового rule-based ввода он опирается на alias и текстовую подсказку, для LLM-сценария зависит от подсказки provider'а
+- автоподбор `CashFlowItem` использует alias/подсказки и переданный LLM контекст статей; при сомнении backend запрашивает уточнение
 - защита от дублей работает в два слоя:
   - точный fingerprint входа
   - семантический fingerprint операции
+- инвестиционные команды не меняют денежные кошельки и не попадают в 1С sync
 - по реальным банковским скриншотам еще нужна дополнительная калибровка prompt/schema на реальных примерах банков
-- бот пока не отправляет интерактивные кнопки; подтверждение работает текстом и номером варианта
+- Telegram reply keyboard не заменяет серверную проверку: создание все равно проходит через pending confirmation и финальный preview
 
 ## Что планируется дальше
 
 - расширять prompt и JSON schema под реальные банковские скриншоты разных банков
 - при желании вынести привязку Telegram в отдельный пользовательский flow в web-интерфейсе
 - усилить дедупликацию по merchant/date/amount для похожих, но не идентичных скриншотов
-- добавить более богатый preview и интерактивный UX подтверждения
+- улучшать preview и набор быстрых кнопок под реальные пользовательские сценарии

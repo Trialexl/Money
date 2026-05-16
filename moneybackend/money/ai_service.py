@@ -15,8 +15,13 @@ from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from investments.models import Instrument, InvestmentPortfolio
-from investments.services import calculate_portfolio_totals, calculate_positions, calculate_rebalance_status
+from investments.models import Instrument, InvestmentAccount, InvestmentOperation, InvestmentPortfolio
+from investments.services import (
+    calculate_instrument_quantity,
+    calculate_portfolio_totals,
+    calculate_positions,
+    calculate_rebalance_status,
+)
 
 from .models import BudgetExpense, CashFlowItem, Expenditure, FlowOfFunds, Receipt, Transfer, Wallet, ZERO_AMOUNT
 
@@ -30,6 +35,8 @@ INTENT_GET_MONTH_EXPENSES_BY_ITEM = 'get_month_expenses_by_item'
 INTENT_GET_PORTFOLIO_OVERVIEW = 'get_portfolio_overview'
 INTENT_GET_INSTRUMENT_POSITION = 'get_instrument_position'
 INTENT_GET_REBALANCE_STATUS = 'get_rebalance_status'
+INTENT_CREATE_INVESTMENT_BUY = 'create_investment_buy'
+INTENT_CREATE_INVESTMENT_SELL = 'create_investment_sell'
 INTENT_HELP_CAPABILITIES = 'help_capabilities'
 INTENT_UNKNOWN = 'unknown'
 INTENT_CREATE_MULTIPLE_OPERATIONS = 'create_multiple_operations'
@@ -47,6 +54,8 @@ SUPPORTED_INTENTS = {
     INTENT_GET_PORTFOLIO_OVERVIEW,
     INTENT_GET_INSTRUMENT_POSITION,
     INTENT_GET_REBALANCE_STATUS,
+    INTENT_CREATE_INVESTMENT_BUY,
+    INTENT_CREATE_INVESTMENT_SELL,
     INTENT_HELP_CAPABILITIES,
     INTENT_UNKNOWN,
 }
@@ -198,6 +207,43 @@ def _parse_amount(value):
         return Decimal(normalized).quantize(Decimal('0.01'))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _parse_decimal_value(value, *, quantize=None):
+    if value in (None, ''):
+        return None
+    if isinstance(value, Decimal):
+        parsed_value = value
+    else:
+        raw_value = (
+            str(value)
+            .strip()
+            .replace('\xa0', ' ')
+            .replace('−', '-')
+            .replace('–', '-')
+            .replace('—', '-')
+            .replace(',', '.')
+        )
+        number_match = re.search(r'[-+]?\d[\d\s]*(?:\.\d+)?', raw_value)
+        if not number_match:
+            return None
+        try:
+            parsed_value = Decimal(number_match.group(0).replace(' ', ''))
+        except (InvalidOperation, ValueError):
+            return None
+    if quantize is not None:
+        try:
+            return parsed_value.quantize(quantize)
+        except (InvalidOperation, ValueError):
+            return None
+    return parsed_value
+
+
+def _serialize_decimal_value(value, *, quantize=None):
+    parsed_value = _parse_decimal_value(value, quantize=quantize)
+    if parsed_value is None:
+        return None
+    return format(parsed_value, 'f')
 
 
 def _extract_amount_from_text(text):
@@ -412,6 +458,77 @@ def _detect_investment_readonly_intent(text):
         }
 
     return None
+
+
+def _extract_investment_operation_numbers(text):
+    normalized = _normalize_text(text)
+    numbers = [
+        {
+            'start': match.start(),
+            'end': match.end(),
+            'value': _parse_decimal_value(match.group(0), quantize=Decimal('0.0000000001')),
+        }
+        for match in re.finditer(r'[-+]?\d[\d\s]*(?:[.,]\d+)?', normalized)
+    ]
+    numbers = [item for item in numbers if item['value'] is not None]
+    if not numbers:
+        return {}
+
+    price = None
+    quantity = None
+    amount = None
+    price_match = re.search(r'\b(?:по|цена|курс)\s+([-+]?\d[\d\s]*(?:[.,]\d+)?)', normalized)
+    if price_match:
+        price = _parse_decimal_value(price_match.group(1), quantize=Decimal('0.00000001'))
+        before_price = [item for item in numbers if item['end'] <= price_match.start()]
+        if before_price:
+            quantity = before_price[-1]['value']
+
+    amount_match = re.search(r'\b(?:на|сумм[ауе]?|итог[оу]?)\s+([-+]?\d[\d\s]*(?:[.,]\d+)?)', normalized)
+    if amount_match:
+        amount = _parse_decimal_value(amount_match.group(1), quantize=Decimal('0.01'))
+
+    if quantity is None and price is None and len(numbers) >= 2:
+        quantity = numbers[0]['value']
+        amount = numbers[-1]['value'].quantize(Decimal('0.01'))
+    elif amount is None and len(numbers) == 1:
+        amount = numbers[0]['value'].quantize(Decimal('0.01'))
+
+    if amount is None and quantity is not None and price is not None:
+        amount = (quantity * price).quantize(Decimal('0.01'))
+
+    return {
+        'quantity': _serialize_decimal_value(quantity, quantize=Decimal('0.0000000001')),
+        'price_usd': _serialize_decimal_value(price, quantize=Decimal('0.00000001')),
+        'amount_usd': _serialize_decimal_value(amount, quantize=Decimal('0.01')),
+    }
+
+
+def _detect_investment_operation_intent(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if _is_transfer_command(normalized) and _extract_amount_from_text(normalized) is not None:
+        return None
+
+    instrument = _match_investment_instrument_by_hint(normalized)
+    has_buy_word = bool(re.search(r'\b(?:купил\w*|купить|покупк\w*|докуп\w*|приобрел\w*|приобрёл\w*|занеси|добавь)\b', normalized))
+    has_sell_word = bool(re.search(r'\b(?:продал\w*|продать|продаж\w*|сократил\w*|закрыл\w*)\b', normalized))
+    if instrument is None or not (has_buy_word or has_sell_word):
+        return None
+
+    values = _extract_investment_operation_numbers(text)
+    return {
+        'intent': INTENT_CREATE_INVESTMENT_SELL if has_sell_word else INTENT_CREATE_INVESTMENT_BUY,
+        'confidence': 0.9,
+        'instrument_id': str(instrument.id),
+        'instrument_hint': instrument.ticker,
+        'quantity': values.get('quantity'),
+        'price_usd': values.get('price_usd'),
+        'amount_usd': values.get('amount_usd'),
+        'fee_usd': None,
+        'comment': text,
+    }
 
 
 def _serialize_decimal(value):
@@ -1033,7 +1150,7 @@ class OpenRouterIntentProvider:
             'create_receipt, create_expenditure, create_transfer, '
             'get_wallet_balance, get_all_wallet_balances, get_month_expenses_by_item, '
             'get_portfolio_overview, get_instrument_position, get_rebalance_status, '
-            'help_capabilities, unknown. '
+            'create_investment_buy, create_investment_sell, help_capabilities, unknown. '
             'Если передано изображение, считай, что это банковский скриншот операции или истории операций, '
             f'{image_instruction}'
             'Если на изображении список или история операций, выбери одну самую вероятную строку операции: '
@@ -1065,6 +1182,10 @@ class OpenRouterIntentProvider:
             'period_month_from="YYYY-MM", period_month_to="YYYY-MM". '
             'Если пользователь пишет перевод/перевести/перевел/первод и сумму, верни create_transfer; '
             'слово "крипта" в таком тексте может быть названием кошелька, а не запросом портфеля. '
+            'Если пользователь пишет, что купил или продал криптовалюту/инструмент, верни create_investment_buy '
+            'или create_investment_sell. Это операция инвестмодуля: не меняй кошельки и не создавай денежный перевод. '
+            'Для инвестоперации заполни instrument_hint, investment_account_hint, quantity, price_usd, amount_usd, fee_usd. '
+            'Если известны любые два из quantity, price_usd, amount_usd, третье можно оставить null: backend рассчитает. '
             'Если пользователь спрашивает портфель, инвестиции, крипту или стоимость активов, '
             'верни intent=get_portfolio_overview. '
             'Если пользователь спрашивает сколько BTC/ETH/другого инструмента есть или просит позицию по инструменту, '
@@ -1079,7 +1200,8 @@ class OpenRouterIntentProvider:
             '"description": null, "occurred_at": null, "operation_sign": null, '
             '"comment": null, "include_in_budget": false, '
             '"period_month": null, "period_month_from": null, "period_month_to": null, '
-            '"instrument_hint": null, '
+            '"instrument_hint": null, "investment_account_hint": null, '
+            '"quantity": null, "price_usd": null, "amount_usd": null, "fee_usd": null, '
             '"operations": [{"source_index": 1, "intent": "...", "amount": "0.00", "merchant": "..."}] | null}. '
             'operation_sign может быть incoming, outgoing, transfer или null. '
             'amount возвращай числом без знака валюты и без символа ₽, а направление отражай в operation_sign. '
@@ -1090,6 +1212,7 @@ class OpenRouterIntentProvider:
             f'Доступные кошельки: {json.dumps(context.get("wallets", []), ensure_ascii=False)}. '
             f'Доступные статьи: {json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}. '
             f'Доступные инвест-инструменты: {json.dumps(context.get("investment_instruments", []), ensure_ascii=False)}. '
+            f'Доступные инвест-счета: {json.dumps(context.get("investment_accounts", []), ensure_ascii=False)}. '
             f'Текст пользователя: {text or ""}'
         )
 
@@ -1114,7 +1237,10 @@ class OpenRouterIntentProvider:
             'Схема JSON: '
             '{"intent": null, "amount": null, "wallet_id": null, "wallet_from_id": null, '
             '"wallet_to_id": null, "cash_flow_item_id": null, "wallet_hint": null, '
-            '"wallet_from_hint": null, "wallet_to_hint": null, "cash_flow_item_hint": null, "comment": null}. '
+            '"wallet_from_hint": null, "wallet_to_hint": null, "cash_flow_item_hint": null, '
+            '"instrument_id": null, "investment_account_id": null, "instrument_hint": null, '
+            '"investment_account_hint": null, "quantity": null, "price_usd": null, '
+            '"amount_usd": null, "fee_usd": null, "comment": null}. '
             'Для ответов с опечатками или лишними словами всё равно попытайся выбрать наиболее вероятный кошелек/статью '
             'из справочника. '
             f'Текущая структура: {json.dumps(current_payload or {}, ensure_ascii=False)}. '
@@ -1123,7 +1249,9 @@ class OpenRouterIntentProvider:
             f'Текущий ответ пользователя: {answer_text or ""}. '
             f'Подсказки-варианты: {json.dumps(options_payload or {}, ensure_ascii=False)}. '
             f'Доступные кошельки: {json.dumps(context.get("wallets", []), ensure_ascii=False)}. '
-            f'Доступные статьи: {json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}.'
+            f'Доступные статьи: {json.dumps(context.get("cash_flow_items", []), ensure_ascii=False)}. '
+            f'Доступные инвест-инструменты: {json.dumps(context.get("investment_instruments", []), ensure_ascii=False)}. '
+            f'Доступные инвест-счета: {json.dumps(context.get("investment_accounts", []), ensure_ascii=False)}.'
         )
 
     def _build_batch_confirmation_prompt(
@@ -1632,6 +1760,107 @@ def _investment_instrument_context():
     ]
 
 
+def _investment_account_context(user):
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return []
+    return [
+        {
+            'id': str(account.id),
+            'name': account.name,
+            'portfolio_id': str(account.portfolio_id),
+            'portfolio_name': account.portfolio.name,
+            'type': account.type,
+            'currency': account.currency,
+            'hidden': account.hidden,
+        }
+        for account in (
+            InvestmentAccount.objects
+            .select_related('portfolio')
+            .filter(portfolio__user=user)
+            .order_by('portfolio__name', 'name')
+        )
+    ]
+
+
+def _investment_account_candidates_by_hint(hint, *, user=None, portfolio=None, limit=6):
+    queryset = InvestmentAccount.objects.select_related('portfolio')
+    if portfolio is not None:
+        queryset = queryset.filter(portfolio=portfolio)
+    elif user is not None and getattr(user, 'is_authenticated', False):
+        queryset = queryset.filter(portfolio__user=user)
+
+    candidates = list(queryset.order_by('portfolio__name', 'name'))
+    if not hint:
+        return candidates[:limit]
+
+    scored_candidates = []
+    for account in candidates:
+        score = max(
+            _score_hint_against_pattern(hint, account.name),
+            _score_hint_against_pattern(hint, account.portfolio.name),
+        )
+        if score > 0:
+            scored_candidates.append((score, account.portfolio.name, account.name, account))
+    scored_candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return [account for _, _, _, account in scored_candidates[:limit]]
+
+
+def _match_investment_account_by_hint(hint, *, user=None, portfolio=None):
+    candidates = _investment_account_candidates_by_hint(hint, user=user, portfolio=portfolio, limit=2)
+    if not candidates:
+        return None
+    if not hint and len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    top_score = max(
+        _score_hint_against_pattern(hint, candidates[0].name),
+        _score_hint_against_pattern(hint, candidates[0].portfolio.name),
+    )
+    second_score = max(
+        _score_hint_against_pattern(hint, candidates[1].name),
+        _score_hint_against_pattern(hint, candidates[1].portfolio.name),
+    )
+    if top_score > second_score:
+        return candidates[0]
+    return None
+
+
+def _investment_instrument_confirmation_candidates(hint, limit=8):
+    if hint:
+        candidates = []
+        for instrument in Instrument.objects.filter(is_active=True).order_by('type', 'ticker'):
+            score = max(
+                _score_hint_against_pattern(hint, instrument.ticker),
+                _score_hint_against_pattern(hint, instrument.name),
+                _score_hint_against_pattern(hint, instrument.provider_symbol),
+            )
+            if score > 0:
+                candidates.append((score, instrument.ticker, instrument))
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        if candidates:
+            return [instrument for _, _, instrument in candidates[:limit]]
+    return list(Instrument.objects.filter(is_active=True).order_by('type', 'ticker')[:limit])
+
+
+def _serialize_investment_options(items, *, kind):
+    options = []
+    for index, item in enumerate(items, start=1):
+        if isinstance(item, Instrument):
+            label = f'{item.ticker} · {item.name}'
+        elif isinstance(item, InvestmentAccount):
+            label = f'{item.name} · {item.portfolio.name}'
+        else:
+            label = str(item)
+        options.append({
+            'index': index,
+            'kind': kind,
+            'id': str(item.id),
+            'label': label,
+        })
+    return options
+
+
 def _serialize_investment_position(position):
     return {
         'instrument_id': str(position.get('instrument_id') or ''),
@@ -1707,6 +1936,7 @@ class AiOperationService:
         }
         if user is not None and getattr(user, 'is_authenticated', False):
             context['investment_instruments'] = _investment_instrument_context()
+            context['investment_accounts'] = _investment_account_context(user)
         return context
 
     def _build_missing_portfolio_result(self, *, intent, provider_name, normalized):
@@ -1869,6 +2099,196 @@ class AiOperationService:
                 'current_value_usd': _serialize_decimal(status.get('current_value_usd')),
                 'positions': [_serialize_investment_position(position) for position in positions],
             },
+            'parsed': normalized,
+        }
+
+    def _is_investment_operation_intent(self, intent):
+        return intent in {INTENT_CREATE_INVESTMENT_BUY, INTENT_CREATE_INVESTMENT_SELL}
+
+    def _normalize_investment_operation(self, parsed, *, user, source_text=None, image_based=False):
+        intent = parsed.get('intent') or INTENT_UNKNOWN
+        if intent not in {INTENT_CREATE_INVESTMENT_BUY, INTENT_CREATE_INVESTMENT_SELL}:
+            intent = INTENT_UNKNOWN
+
+        portfolio = _investment_portfolio_for_user(user)
+        instrument = Instrument.objects.filter(pk=parsed.get('instrument_id')).first()
+        if instrument is None:
+            instrument = _match_investment_instrument_by_hint(
+                parsed.get('instrument_hint')
+                or parsed.get('ticker')
+                or source_text
+                or parsed.get('comment')
+            )
+
+        account = InvestmentAccount.objects.filter(pk=parsed.get('investment_account_id') or parsed.get('account_id')).first()
+        if account is None:
+            account = _match_investment_account_by_hint(
+                parsed.get('investment_account_hint') or parsed.get('account_hint'),
+                user=user,
+                portfolio=portfolio,
+            )
+        if account is None and portfolio is not None:
+            account = _match_investment_account_by_hint(None, user=user, portfolio=portfolio)
+
+        quantity = _parse_decimal_value(parsed.get('quantity'), quantize=Decimal('0.0000000001'))
+        price_usd = _parse_decimal_value(parsed.get('price_usd') or parsed.get('price'), quantize=Decimal('0.00000001'))
+        amount_usd = _parse_decimal_value(parsed.get('amount_usd') or parsed.get('amount'), quantize=Decimal('0.01'))
+        fee_usd = _parse_decimal_value(parsed.get('fee_usd') or parsed.get('fee'), quantize=Decimal('0.01')) or ZERO_AMOUNT
+
+        if amount_usd is None and quantity is not None and price_usd is not None:
+            amount_usd = (quantity * price_usd).quantize(Decimal('0.01'))
+        if price_usd is None and amount_usd is not None and quantity not in (None, ZERO_AMOUNT):
+            price_usd = (amount_usd / quantity).quantize(Decimal('0.00000001'))
+        if quantity is None and amount_usd is not None and price_usd not in (None, ZERO_AMOUNT):
+            quantity = (amount_usd / price_usd).quantize(Decimal('0.0000000001'))
+
+        occurred_at = _parse_datetime_value(parsed.get('occurred_at')) or timezone.now()
+        comment = (parsed.get('comment') or source_text or '').strip()
+
+        return {
+            'intent': intent,
+            'confidence': float(parsed.get('confidence') or 0.0),
+            'image_based': bool(image_based),
+            'portfolio': portfolio,
+            'account': account,
+            'instrument': instrument,
+            'operation_type': (
+                InvestmentOperation.TYPE_SELL
+                if intent == INTENT_CREATE_INVESTMENT_SELL
+                else InvestmentOperation.TYPE_BUY
+            ),
+            'quantity': quantity,
+            'price_usd': price_usd,
+            'amount_usd': amount_usd,
+            'fee_usd': fee_usd,
+            'occurred_at': occurred_at,
+            'comment': comment,
+            'raw': parsed,
+        }
+
+    def _build_investment_preview(self, normalized):
+        operation_type = normalized.get('operation_type')
+        operation_label = 'Продажа' if operation_type == InvestmentOperation.TYPE_SELL else 'Покупка'
+        return {
+            'model': 'InvestmentOperation',
+            'operation_type': operation_type,
+            'operation_label': operation_label,
+            'amount': _serialize_decimal(normalized.get('amount_usd')),
+            'amount_usd': _serialize_decimal(normalized.get('amount_usd')),
+            'quantity': _serialize_decimal_value(normalized.get('quantity'), quantize=Decimal('0.0000000001')),
+            'price_usd': _serialize_decimal_value(normalized.get('price_usd'), quantize=Decimal('0.00000001')),
+            'fee_usd': _serialize_decimal(normalized.get('fee_usd') or ZERO_AMOUNT),
+            'date': normalized.get('occurred_at').isoformat() if normalized.get('occurred_at') else None,
+            'comment': normalized.get('comment', ''),
+            'portfolio_name': normalized['portfolio'].name if normalized.get('portfolio') else None,
+            'account_name': normalized['account'].name if normalized.get('account') else None,
+            'instrument_ticker': normalized['instrument'].ticker if normalized.get('instrument') else None,
+            'instrument_name': normalized['instrument'].name if normalized.get('instrument') else None,
+        }
+
+    def _build_investment_created_reply(self, operation):
+        return 'Инвестиционная операция создана.'
+
+    def _create_investment_operation(self, normalized, *, provider_name, dry_run):
+        missing_fields = []
+        options = {}
+        portfolio = normalized.get('portfolio')
+        account = normalized.get('account')
+        instrument = normalized.get('instrument')
+        operation_type = normalized.get('operation_type')
+        quantity = normalized.get('quantity')
+        price_usd = normalized.get('price_usd')
+        amount_usd = normalized.get('amount_usd')
+
+        if portfolio is None:
+            missing_fields.append('portfolio')
+        if account is None:
+            missing_fields.append('investment_account')
+            options['investment_account'] = _serialize_investment_options(
+                (
+                    _investment_account_candidates_by_hint(
+                        (normalized.get('raw') or {}).get('investment_account_hint'),
+                        portfolio=portfolio,
+                    )
+                    if portfolio is not None
+                    else []
+                ),
+                kind='investment_account',
+            )
+        if instrument is None:
+            missing_fields.append('instrument')
+            options['instrument'] = _serialize_investment_options(
+                _investment_instrument_confirmation_candidates((normalized.get('raw') or {}).get('instrument_hint')),
+                kind='instrument',
+            )
+        if quantity is None or quantity <= ZERO_AMOUNT:
+            missing_fields.append('quantity')
+        if price_usd is None or price_usd <= ZERO_AMOUNT:
+            missing_fields.append('price_usd')
+        if amount_usd is None or amount_usd <= ZERO_AMOUNT:
+            missing_fields.append('amount_usd')
+
+        if missing_fields:
+            return self._needs_confirmation(
+                normalized,
+                provider_name,
+                missing_fields=missing_fields,
+                reply_text='Недостаточно данных для создания инвестиционной операции.',
+                options=options,
+                preview=self._build_investment_preview(normalized),
+            )
+
+        if operation_type == InvestmentOperation.TYPE_SELL:
+            available_quantity = calculate_instrument_quantity(portfolio, instrument)
+            if quantity > available_quantity:
+                return self._needs_confirmation(
+                    normalized,
+                    provider_name,
+                    missing_fields=['quantity'],
+                    reply_text=(
+                        'Недостаточно инструмента для продажи: '
+                        f'доступно {_serialize_decimal_value(available_quantity, quantize=Decimal("0.0000000001"))}.'
+                    ),
+                    preview=self._build_investment_preview(normalized),
+                )
+
+        if dry_run:
+            return {
+                'status': 'preview',
+                'intent': normalized['intent'],
+                'provider': provider_name,
+                'confidence': normalized['confidence'],
+                'reply_text': 'Команда распознана. Инвестиционная операция не создана, потому что включен dry_run.',
+                'preview': self._build_investment_preview(normalized),
+                'parsed': normalized,
+            }
+
+        operation = InvestmentOperation(
+            portfolio=portfolio,
+            account=account,
+            instrument=instrument,
+            operation_type=operation_type,
+            quantity=quantity,
+            price_usd=price_usd,
+            amount_usd=amount_usd,
+            fee_usd=normalized.get('fee_usd') or ZERO_AMOUNT,
+            comment=normalized.get('comment') or '',
+            date=normalized.get('occurred_at') or timezone.now(),
+        )
+        operation.full_clean()
+        operation.save()
+        return {
+            'status': 'created',
+            'intent': normalized['intent'],
+            'provider': provider_name,
+            'confidence': normalized['confidence'],
+            'reply_text': self._build_investment_created_reply(operation),
+            'created_object': {
+                'model': 'InvestmentOperation',
+                'id': str(operation.id),
+                'number': operation.number,
+            },
+            'preview': self._build_investment_preview(normalized),
             'parsed': normalized,
         }
 
@@ -2354,14 +2774,27 @@ class AiOperationService:
             'Receipt': '🟢',
             'Expenditure': '🔴',
             'Transfer': '🔄',
+            'InvestmentOperation': '📈',
         }.get(model_name, '•')
-        parts.append(f'{operation_icon} {amount}')
+        operation_label = (item or {}).get('operation_label')
+        if operation_label:
+            parts.append(f'{operation_icon} {operation_label} {amount} USD')
+        else:
+            parts.append(f'{operation_icon} {amount}')
         if item.get('wallet_name'):
             parts.append(f'👛 {item["wallet_name"]}')
         if item.get('wallet_out_name') and item.get('wallet_in_name'):
             parts.append(f'👛 {item["wallet_out_name"]} -> {item["wallet_in_name"]}')
         if item.get('cash_flow_item_name'):
             parts.append(f'🏷 {item["cash_flow_item_name"]}')
+        if item.get('instrument_ticker'):
+            parts.append(f'🪙 {item["instrument_ticker"]}')
+        if item.get('quantity'):
+            parts.append(f'кол-во {item["quantity"]}')
+        if item.get('price_usd'):
+            parts.append(f'цена {item["price_usd"]} USD')
+        if item.get('account_name'):
+            parts.append(f'счет {item["account_name"]}')
         prefix = f'{index}. ' if index is not None else '- '
         return prefix + ' | '.join(parts)
 
@@ -2435,6 +2868,12 @@ class AiOperationService:
             'cash_flow_item': 'статья движения',
             'wallet_from': 'кошелек списания',
             'wallet_to': 'кошелек зачисления',
+            'portfolio': 'инвестпортфель',
+            'investment_account': 'инвестсчет',
+            'instrument': 'инструмент',
+            'quantity': 'количество',
+            'price_usd': 'цена USD',
+            'amount_usd': 'сумма USD',
             FINAL_CONFIRMATION_FIELD: 'подтверждение создания',
             'binding': 'привязка Telegram',
             'intent': 'тип команды',
@@ -2557,6 +2996,8 @@ class AiOperationService:
         if parsed is None and not image_bytes and _is_transfer_command(text) and _extract_amount_from_text(text) is not None:
             parsed = RuleBasedIntentProvider().parse(text=text, context=context)
         if parsed is None and not image_bytes:
+            parsed = _detect_investment_operation_intent(text)
+        if parsed is None and not image_bytes:
             parsed = _detect_investment_readonly_intent(text)
         if parsed is None:
             provider, provider_name = _get_intent_provider()
@@ -2608,6 +3049,28 @@ class AiOperationService:
                 dry_run=dry_run,
             )
             if source == 'telegram' and bool(image_bytes) and dry_run and result.get('status') == 'preview':
+                return self._final_confirmation_result(
+                    parsed=result['parsed'],
+                    provider_name=provider_name,
+                    preview=result.get('preview') or {},
+                    confidence=float(result.get('confidence') or 0.0),
+            )
+            return result
+        if self._is_investment_operation_intent((parsed or {}).get('intent')):
+            normalized = self._normalize_investment_operation(
+                parsed,
+                user=user,
+                source_text=text,
+                image_based=bool(image_bytes),
+            )
+            normalized['provider'] = provider_name
+            normalized['source'] = source
+            result = self._create_investment_operation(
+                normalized,
+                provider_name=provider_name,
+                dry_run=dry_run,
+            )
+            if source == 'telegram' and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
                     parsed=result['parsed'],
                     provider_name=provider_name,
@@ -2727,6 +3190,8 @@ class AiOperationService:
     def create_from_normalized(self, *, normalized, provider_name):
         if self._is_batch_normalized(normalized):
             return self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=False)
+        if self._is_investment_operation_intent(normalized.get('intent')):
+            return self._create_investment_operation(normalized, provider_name=provider_name, dry_run=False)
         return self._create_financial_document(normalized, provider_name=provider_name, dry_run=False)
 
     def continue_confirmation(
@@ -2798,6 +3263,25 @@ class AiOperationService:
                         ]),
                         confidence=float(normalized.get('confidence') or 0.0),
                     )
+
+            if self._is_investment_operation_intent((normalized_payload or {}).get('intent')):
+                normalized = self.deserialize_normalized(normalized_payload)
+                if _is_affirmative_confirmation(answer_text):
+                    return {
+                        'status': 'preview',
+                        'intent': normalized.get('intent', INTENT_UNKNOWN),
+                        'provider': provider_name,
+                        'confidence': float(normalized.get('confidence') or 0.0),
+                        'reply_text': 'Подтверждение получено. Создаю инвестиционную операцию.',
+                        'preview': self._build_investment_preview(normalized),
+                        'parsed': normalized,
+                    }
+                return self._final_confirmation_result(
+                    parsed=normalized,
+                    provider_name=provider_name,
+                    preview=self._build_investment_preview(normalized),
+                    confidence=float(normalized.get('confidence') or 0.0),
+                )
 
             if _is_affirmative_confirmation(answer_text):
                 if self._is_batch_normalized(normalized_payload):
@@ -2908,6 +3392,24 @@ class AiOperationService:
             )
             result = self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=dry_run)
             if source == 'telegram' and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
+                return self._final_confirmation_result(
+                    parsed=result['parsed'],
+                    provider_name=provider_name,
+                    preview=result.get('preview') or {},
+                    confidence=float(result.get('confidence') or 0.0),
+                )
+            return result
+
+        if self._is_investment_operation_intent((normalized_payload or {}).get('intent')):
+            normalized = self.deserialize_normalized(normalized_payload)
+            normalized = self.apply_investment_confirmation_answer(
+                normalized=normalized,
+                answer_text=answer_text,
+                missing_fields=missing_fields,
+                options_payload=options_payload,
+            )
+            result = self._create_investment_operation(normalized, provider_name=provider_name, dry_run=dry_run)
+            if source == 'telegram' and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
                     parsed=result['parsed'],
                     provider_name=provider_name,
@@ -3056,7 +3558,7 @@ class AiOperationService:
         else:
             occurred_at_value = occurred_at
 
-        return {
+        payload = {
             'intent': normalized.get('intent', INTENT_UNKNOWN),
             'confidence': float(normalized.get('confidence') or 0.0),
             'image_based': bool(normalized.get('image_based')),
@@ -3091,9 +3593,33 @@ class AiOperationService:
             'period_month_to': normalized.get('period_month_to'),
             'raw': normalized.get('raw', fallback_raw),
         }
+        if self._is_investment_operation_intent(payload['intent']):
+            payload.update({
+                'portfolio_id': (
+                    str(normalized['portfolio'].id)
+                    if normalized.get('portfolio')
+                    else normalized.get('portfolio_id')
+                ),
+                'investment_account_id': (
+                    str(normalized['account'].id)
+                    if normalized.get('account')
+                    else normalized.get('investment_account_id') or normalized.get('account_id')
+                ),
+                'instrument_id': (
+                    str(normalized['instrument'].id)
+                    if normalized.get('instrument')
+                    else normalized.get('instrument_id')
+                ),
+                'operation_type': normalized.get('operation_type'),
+                'quantity': _serialize_decimal_value(normalized.get('quantity'), quantize=Decimal('0.0000000001')),
+                'price_usd': _serialize_decimal_value(normalized.get('price_usd'), quantize=Decimal('0.00000001')),
+                'amount_usd': _serialize_decimal(normalized.get('amount_usd')),
+                'fee_usd': _serialize_decimal(normalized.get('fee_usd') or ZERO_AMOUNT),
+            })
+        return payload
 
     def deserialize_normalized(self, payload):
-        return {
+        normalized = {
             'intent': payload.get('intent', INTENT_UNKNOWN),
             'confidence': float(payload.get('confidence') or 0.0),
             'image_based': bool(payload.get('image_based')),
@@ -3112,6 +3638,82 @@ class AiOperationService:
             'period_month_to': payload.get('period_month_to'),
             'raw': payload.get('raw', {}),
         }
+        if self._is_investment_operation_intent(normalized['intent']):
+            normalized.update({
+                'portfolio': InvestmentPortfolio.objects.filter(pk=payload.get('portfolio_id')).first(),
+                'account': InvestmentAccount.objects.filter(pk=payload.get('investment_account_id') or payload.get('account_id')).first(),
+                'instrument': Instrument.objects.filter(pk=payload.get('instrument_id')).first(),
+                'operation_type': payload.get('operation_type') or (
+                    InvestmentOperation.TYPE_SELL
+                    if normalized['intent'] == INTENT_CREATE_INVESTMENT_SELL
+                    else InvestmentOperation.TYPE_BUY
+                ),
+                'quantity': _parse_decimal_value(payload.get('quantity'), quantize=Decimal('0.0000000001')),
+                'price_usd': _parse_decimal_value(payload.get('price_usd'), quantize=Decimal('0.00000001')),
+                'amount_usd': _parse_decimal_value(payload.get('amount_usd'), quantize=Decimal('0.01')),
+                'fee_usd': _parse_decimal_value(payload.get('fee_usd'), quantize=Decimal('0.01')) or ZERO_AMOUNT,
+            })
+        return normalized
+
+    def apply_investment_confirmation_answer(self, *, normalized, answer_text, missing_fields, options_payload=None):
+        updated = dict(normalized)
+        answer_text = answer_text or ''
+        selected_option = None
+        option_index_match = re.fullmatch(r'\s*(\d+)\s*', answer_text or '')
+        if option_index_match and options_payload:
+            selected_index = int(option_index_match.group(1))
+            for option_list in options_payload.values():
+                for option in option_list:
+                    if option.get('index') == selected_index:
+                        selected_option = option
+                        break
+                if selected_option:
+                    break
+
+        if 'instrument' in missing_fields and updated.get('instrument') is None:
+            if selected_option and selected_option.get('kind') == 'instrument':
+                updated['instrument'] = Instrument.objects.filter(pk=selected_option.get('id')).first()
+            else:
+                updated['instrument'] = _match_investment_instrument_by_hint(answer_text)
+
+        if 'investment_account' in missing_fields and updated.get('account') is None:
+            if selected_option and selected_option.get('kind') == 'investment_account':
+                updated['account'] = InvestmentAccount.objects.filter(pk=selected_option.get('id')).first()
+            else:
+                updated['account'] = _match_investment_account_by_hint(
+                    answer_text,
+                    portfolio=updated.get('portfolio'),
+                )
+
+        values = _extract_investment_operation_numbers(answer_text)
+        if values.get('quantity') and ('quantity' in missing_fields or updated.get('quantity') is None):
+            updated['quantity'] = _parse_decimal_value(values['quantity'], quantize=Decimal('0.0000000001'))
+        if values.get('price_usd') and ('price_usd' in missing_fields or updated.get('price_usd') is None):
+            updated['price_usd'] = _parse_decimal_value(values['price_usd'], quantize=Decimal('0.00000001'))
+        if values.get('amount_usd') and ('amount_usd' in missing_fields or updated.get('amount_usd') is None):
+            updated['amount_usd'] = _parse_decimal_value(values['amount_usd'], quantize=Decimal('0.01'))
+
+        normalized_answer = _normalize_text(answer_text)
+        number_count = len(re.findall(r'[-+]?\d[\d\s]*(?:[.,]\d+)?', normalized_answer))
+        has_explicit_value_word = bool(re.search(r'\b(?:по|цена|курс|на|сумм[ауе]?|итог[оу]?)\b', normalized_answer))
+        single_value = _parse_decimal_value(answer_text)
+        if single_value is not None and number_count == 1 and not has_explicit_value_word:
+            if 'quantity' in missing_fields and updated.get('quantity') is None:
+                updated['quantity'] = single_value.quantize(Decimal('0.0000000001'))
+            elif 'price_usd' in missing_fields and updated.get('price_usd') is None:
+                updated['price_usd'] = single_value.quantize(Decimal('0.00000001'))
+            elif 'amount_usd' in missing_fields and updated.get('amount_usd') is None:
+                updated['amount_usd'] = single_value.quantize(Decimal('0.01'))
+
+        if updated.get('amount_usd') is None and updated.get('quantity') is not None and updated.get('price_usd') is not None:
+            updated['amount_usd'] = (updated['quantity'] * updated['price_usd']).quantize(Decimal('0.01'))
+        if updated.get('price_usd') is None and updated.get('amount_usd') is not None and updated.get('quantity') not in (None, ZERO_AMOUNT):
+            updated['price_usd'] = (updated['amount_usd'] / updated['quantity']).quantize(Decimal('0.00000001'))
+        if updated.get('quantity') is None and updated.get('amount_usd') is not None and updated.get('price_usd') not in (None, ZERO_AMOUNT):
+            updated['quantity'] = (updated['amount_usd'] / updated['price_usd']).quantize(Decimal('0.0000000001'))
+
+        updated['comment'] = updated.get('comment') or answer_text
+        return updated
 
     def apply_confirmation_answer(self, *, normalized, answer_text, missing_fields, options_payload=None):
         updated = dict(normalized)

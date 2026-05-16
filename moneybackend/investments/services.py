@@ -166,6 +166,12 @@ def calculate_positions(
             state.cost_basis_usd += amount_usd
             if state.quantity == ZERO_AMOUNT:
                 state.cost_basis_usd = ZERO_AMOUNT
+        elif operation.operation_type == InvestmentOperation.TYPE_DIVIDEND:
+            state.realized_pl_usd += amount_usd - fee_usd
+        elif operation.operation_type == InvestmentOperation.TYPE_SPLIT:
+            state.quantity *= quantity
+            if state.quantity == ZERO_AMOUNT:
+                state.cost_basis_usd = ZERO_AMOUNT
         elif operation.operation_type == InvestmentOperation.TYPE_TRANSFER:
             # Перевод между инвестиционными счетами не меняет агрегированную позицию портфеля.
             continue
@@ -179,7 +185,7 @@ def calculate_positions(
 
     result = []
     for instrument_id, state in positions.items():
-        if not include_zero and state.quantity == ZERO_AMOUNT:
+        if not include_zero and state.quantity == ZERO_AMOUNT and state.realized_pl_usd == ZERO_AMOUNT:
             continue
         snapshot = latest_prices.get(instrument_id)
         if snapshot is not None and price_max_age_days is not None and price_cutoff is not None:
@@ -285,7 +291,7 @@ def calculate_instrument_quantity(portfolio, instrument, *, exclude_operation=No
         instrument=instrument,
         deleted=False,
         posted=True,
-    )
+    ).order_by('date', 'created_at', 'id')
     if exclude_operation is not None and exclude_operation.pk:
         queryset = queryset.exclude(pk=exclude_operation.pk)
 
@@ -296,6 +302,8 @@ def calculate_instrument_quantity(portfolio, instrument, *, exclude_operation=No
             quantity -= operation.quantity
         elif operation.operation_type == InvestmentOperation.TYPE_CORRECTION:
             quantity += operation.quantity
+        elif operation.operation_type == InvestmentOperation.TYPE_SPLIT:
+            quantity *= operation.quantity
 
     return quantity
 

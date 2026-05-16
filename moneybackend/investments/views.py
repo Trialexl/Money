@@ -1,10 +1,14 @@
+import csv
+import io
 import logging
-from datetime import date
+from datetime import date, datetime, time
+from decimal import Decimal, InvalidOperation
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.utils.dateparse import parse_date
+from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, extend_schema_view
 
 from .models import (
@@ -149,6 +153,123 @@ def _rebuild_snapshots_after_investment_change(**kwargs):
         rebuild_portfolio_snapshots_for_change(**kwargs)
     except Exception:
         logger.exception('Failed to rebuild investment portfolio snapshots after data change.')
+
+
+CSV_COLUMN_ALIASES = {
+    'date': {'date', 'дата', 'datetime', 'created_at'},
+    'operation_type': {'operation_type', 'type', 'тип', 'операция', 'operation'},
+    'ticker': {'ticker', 'тикер', 'instrument', 'инструмент', 'symbol'},
+    'account': {'account', 'счет', 'счёт', 'account_name'},
+    'quantity': {'quantity', 'количество', 'qty', 'amount_asset'},
+    'price_usd': {'price_usd', 'price', 'цена', 'цена_usd'},
+    'amount_usd': {'amount_usd', 'amount', 'сумма', 'сумма_usd', 'total'},
+    'fee_usd': {'fee_usd', 'fee', 'комиссия', 'комиссия_usd'},
+    'comment': {'comment', 'комментарий', 'note', 'notes'},
+}
+
+OPERATION_TYPE_ALIASES = {
+    'buy': InvestmentOperation.TYPE_BUY,
+    'buy_asset': InvestmentOperation.TYPE_BUY,
+    'покупка': InvestmentOperation.TYPE_BUY,
+    'купить': InvestmentOperation.TYPE_BUY,
+    'купил': InvestmentOperation.TYPE_BUY,
+    'sell': InvestmentOperation.TYPE_SELL,
+    'sale': InvestmentOperation.TYPE_SELL,
+    'продажа': InvestmentOperation.TYPE_SELL,
+    'продать': InvestmentOperation.TYPE_SELL,
+    'продал': InvestmentOperation.TYPE_SELL,
+    'transfer': InvestmentOperation.TYPE_TRANSFER,
+    'transfer_instrument': InvestmentOperation.TYPE_TRANSFER,
+    'перевод': InvestmentOperation.TYPE_TRANSFER,
+    'correction': InvestmentOperation.TYPE_CORRECTION,
+    'корректировка': InvestmentOperation.TYPE_CORRECTION,
+    'dividend': InvestmentOperation.TYPE_DIVIDEND,
+    'дивиденд': InvestmentOperation.TYPE_DIVIDEND,
+    'дивиденды': InvestmentOperation.TYPE_DIVIDEND,
+    'split': InvestmentOperation.TYPE_SPLIT,
+    'сплит': InvestmentOperation.TYPE_SPLIT,
+    'reverse_split': InvestmentOperation.TYPE_SPLIT,
+}
+
+
+def _truthy(value):
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'да', 'y'}
+
+
+def _csv_get(row, canonical_name):
+    aliases = CSV_COLUMN_ALIASES[canonical_name]
+    normalized_row = {
+        (key or '').strip().lower().replace(' ', '_'): value
+        for key, value in row.items()
+    }
+    for alias in aliases:
+        if alias in normalized_row and str(normalized_row[alias]).strip() != '':
+            return str(normalized_row[alias]).strip()
+    return ''
+
+
+def _parse_csv_decimal(value, *, default=None):
+    if value in (None, ''):
+        return default
+    normalized = str(value).strip().replace('\xa0', ' ').replace(' ', '').replace(',', '.')
+    try:
+        return Decimal(normalized)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _parse_csv_operation_datetime(value):
+    if not value:
+        return timezone.now()
+    parsed_datetime = parse_datetime(value)
+    if parsed_datetime is not None:
+        return parsed_datetime if timezone.is_aware(parsed_datetime) else timezone.make_aware(parsed_datetime)
+    parsed_date = parse_date(value)
+    if parsed_date is None:
+        return None
+    return timezone.make_aware(datetime.combine(parsed_date, time(hour=12)))
+
+
+def _normalize_csv_operation_type(value):
+    normalized = (value or '').strip().lower()
+    return OPERATION_TYPE_ALIASES.get(normalized)
+
+
+def _match_csv_instrument(value):
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    return (
+        Instrument.objects
+        .filter(is_active=True)
+        .filter(ticker__iexact=normalized)
+        .first()
+        or Instrument.objects.filter(is_active=True, name__iexact=value.strip()).first()
+        or Instrument.objects.filter(is_active=True, provider_symbol__iexact=value.strip()).first()
+    )
+
+
+def _match_csv_account(value, *, portfolio):
+    queryset = InvestmentAccount.objects.filter(portfolio=portfolio)
+    if value:
+        account = queryset.filter(name__iexact=value.strip()).first()
+        if account is not None:
+            return account
+    accounts = list(queryset.order_by('name')[:2])
+    return accounts[0] if len(accounts) == 1 else None
+
+
+def _investment_operation_duplicate_exists(payload):
+    return InvestmentOperation.objects.filter(
+        portfolio_id=payload['portfolio'],
+        account_id=payload['account'],
+        instrument_id=payload['instrument'],
+        operation_type=payload['operation_type'],
+        date=payload['date'],
+        quantity=payload['quantity'],
+        amount_usd=payload['amount_usd'],
+        deleted=False,
+    ).exists()
 
 
 @extend_schema_view(
@@ -614,6 +735,192 @@ class InvestmentOperationViewSet(viewsets.ModelViewSet):
             portfolio=portfolio_id,
             changed_at=changed_at,
         )
+
+    def _csv_import_payload_for_response(self, payload):
+        return {
+            'portfolio': str(payload['portfolio']),
+            'account': str(payload['account']),
+            'instrument': str(payload['instrument']),
+            'operation_type': payload['operation_type'],
+            'date': payload['date'].isoformat(),
+            'quantity': str(payload['quantity']),
+            'price_usd': str(payload['price_usd']) if payload.get('price_usd') is not None else None,
+            'amount_usd': str(payload['amount_usd']),
+            'fee_usd': str(payload.get('fee_usd') or Decimal('0')),
+            'comment': payload.get('comment') or '',
+        }
+
+    def _build_csv_operation_payload(self, *, row, portfolio):
+        errors = {}
+        operation_type = _normalize_csv_operation_type(_csv_get(row, 'operation_type'))
+        if operation_type is None:
+            errors['operation_type'] = 'Неизвестный тип операции.'
+
+        instrument = _match_csv_instrument(_csv_get(row, 'ticker'))
+        if instrument is None:
+            errors['instrument'] = 'Инструмент не найден.'
+
+        account = _match_csv_account(_csv_get(row, 'account'), portfolio=portfolio)
+        if account is None:
+            errors['account'] = 'Счет не найден или неоднозначен.'
+
+        operation_date = _parse_csv_operation_datetime(_csv_get(row, 'date'))
+        if operation_date is None:
+            errors['date'] = 'Некорректная дата.'
+
+        quantity = _parse_csv_decimal(_csv_get(row, 'quantity'))
+        price_usd = _parse_csv_decimal(_csv_get(row, 'price_usd'))
+        amount_usd = _parse_csv_decimal(_csv_get(row, 'amount_usd'))
+        fee_usd = _parse_csv_decimal(_csv_get(row, 'fee_usd'), default=Decimal('0'))
+
+        if operation_type == InvestmentOperation.TYPE_DIVIDEND and quantity is None:
+            quantity = Decimal('0')
+        if operation_type != InvestmentOperation.TYPE_DIVIDEND and (quantity is None or quantity <= 0):
+            errors['quantity'] = 'Укажите положительное количество.'
+        if fee_usd is None or fee_usd < 0:
+            errors['fee_usd'] = 'Комиссия должна быть неотрицательной.'
+
+        if operation_type not in {InvestmentOperation.TYPE_DIVIDEND, InvestmentOperation.TYPE_SPLIT} and quantity is not None and quantity > 0:
+            if amount_usd is None and price_usd is not None:
+                amount_usd = (quantity * price_usd).quantize(Decimal('0.01'))
+            if price_usd is None and amount_usd is not None:
+                price_usd = (amount_usd / quantity).quantize(Decimal('0.00000001'))
+        if operation_type not in {InvestmentOperation.TYPE_DIVIDEND, InvestmentOperation.TYPE_SPLIT} and (price_usd is None or price_usd <= 0):
+            errors['price_usd'] = 'Укажите положительную цену USD.'
+        if operation_type == InvestmentOperation.TYPE_SPLIT and amount_usd is None:
+            amount_usd = Decimal('0')
+        if operation_type != InvestmentOperation.TYPE_SPLIT and (amount_usd is None or amount_usd <= 0):
+            errors['amount_usd'] = 'Укажите положительную сумму USD.'
+
+        if errors:
+            return None, errors
+
+        return {
+            'portfolio': portfolio.id,
+            'account': account.id,
+            'instrument': instrument.id,
+            'operation_type': operation_type,
+            'date': operation_date,
+            'quantity': quantity,
+            'price_usd': price_usd,
+            'amount_usd': amount_usd,
+            'fee_usd': fee_usd or Decimal('0'),
+            'comment': _csv_get(row, 'comment'),
+        }, {}
+
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        responses={200: OpenApiTypes.OBJECT, 201: OpenApiTypes.OBJECT},
+        description=(
+            'Импорт инвестиционных операций из CSV. По умолчанию dry_run=true: '
+            'валидирует строки, считает суммы/цены и показывает preview без создания.'
+        ),
+    )
+    @action(detail=False, methods=['post'], url_path='import-csv')
+    def import_csv(self, request):
+        portfolio_id = request.data.get('portfolio')
+        portfolio_queryset = InvestmentPortfolio.objects.all()
+        if not request.user.is_staff:
+            portfolio_queryset = portfolio_queryset.filter(user=request.user)
+        portfolio = portfolio_queryset.filter(pk=portfolio_id).first() if portfolio_id else get_default_portfolio(request.user)
+        if portfolio is None:
+            return Response({'portfolio': 'Портфель не найден.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dry_run = not (str(request.data.get('dry_run', 'true')).strip().lower() in {'false', '0', 'нет', 'no'})
+        uploaded_file = request.FILES.get('file')
+        if uploaded_file is not None:
+            content = uploaded_file.read().decode('utf-8-sig')
+        else:
+            content = request.data.get('csv') or request.data.get('content') or ''
+        if not content.strip():
+            return Response({'csv': 'Передайте CSV-файл или поле csv/content.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sample = content[:2048]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=',;	')
+        except csv.Error:
+            dialect = csv.excel
+        reader = csv.DictReader(io.StringIO(content), dialect=dialect)
+        if not reader.fieldnames:
+            return Response({'csv': 'CSV должен содержать заголовки.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = []
+        created = 0
+        skipped = 0
+        failed = 0
+        seen_keys = set()
+        earliest_changed_at = None
+
+        for row_number, row in enumerate(reader, start=2):
+            payload, errors = self._build_csv_operation_payload(row=row, portfolio=portfolio)
+            if errors:
+                failed += 1
+                results.append({'row': row_number, 'status': 'error', 'errors': errors})
+                continue
+
+            response_payload = self._csv_import_payload_for_response(payload)
+            dedupe_key = tuple(response_payload[key] for key in (
+                'portfolio',
+                'account',
+                'instrument',
+                'operation_type',
+                'date',
+                'quantity',
+                'amount_usd',
+            ))
+            if dedupe_key in seen_keys or _investment_operation_duplicate_exists(payload):
+                skipped += 1
+                seen_keys.add(dedupe_key)
+                results.append({
+                    'row': row_number,
+                    'status': 'skipped',
+                    'reason': 'duplicate',
+                    'payload': response_payload,
+                })
+                continue
+            seen_keys.add(dedupe_key)
+
+            serializer = self.get_serializer(data=payload)
+            if not serializer.is_valid():
+                failed += 1
+                results.append({
+                    'row': row_number,
+                    'status': 'error',
+                    'errors': serializer.errors,
+                    'payload': response_payload,
+                })
+                continue
+
+            if dry_run:
+                results.append({'row': row_number, 'status': 'preview', 'payload': response_payload})
+                continue
+
+            instance = serializer.save()
+            created += 1
+            earliest_changed_at = _min_date(earliest_changed_at, instance.date)
+            results.append({
+                'row': row_number,
+                'status': 'created',
+                'operation_id': str(instance.id),
+                'number': instance.number,
+                'payload': response_payload,
+            })
+
+        if not dry_run and created > 0:
+            _rebuild_snapshots_after_investment_change(
+                portfolio=portfolio.id,
+                changed_at=earliest_changed_at,
+            )
+
+        response_status = status.HTTP_200_OK if dry_run else status.HTTP_201_CREATED
+        return Response({
+            'dry_run': dry_run,
+            'portfolio_id': str(portfolio.id),
+            'created': created,
+            'skipped': skipped,
+            'failed': failed,
+            'results': results,
+        }, status=response_status)
 
 
 class InvestmentOverviewViewSet(viewsets.ViewSet):

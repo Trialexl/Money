@@ -22,7 +22,15 @@ from .models import (
     InvestmentPortfolioSnapshot,
     InvestmentTargetAllocation,
 )
-from .price_providers import CoinGeckoPriceProvider, PriceProviderError, PriceQuote, StaticPriceProvider, get_price_provider
+from .price_providers import (
+    CoinGeckoPriceProvider,
+    CompositePriceProvider,
+    PriceProviderError,
+    PriceQuote,
+    StaticPriceProvider,
+    StooqPriceProvider,
+    get_price_provider,
+)
 from .services import (
     calculate_portfolio_performance,
     calculate_positions,
@@ -215,14 +223,92 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(positions[0]['total_pl_usd'], Decimal('50.00'))
         self.assertEqual(positions[0]['return_percent'], Decimal('50.00'))
         self.assertEqual(positions[0]['allocation_percent'], Decimal('100.00'))
+
+    def test_dividend_increases_realized_pl_without_money_movement(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_DIVIDEND,
+            quantity=Decimal('0'),
+            amount_usd=Decimal('25.00'),
+            fee_usd=Decimal('1.00'),
+            date=timezone.now(),
+        )
+
+        positions = calculate_positions(self.portfolio)
+        totals = calculate_portfolio_totals(self.portfolio)
+
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions[0]['quantity'], Decimal('0'))
+        self.assertEqual(positions[0]['realized_pl_usd'], Decimal('24.00'))
+        self.assertEqual(totals['realized_pl_usd'], Decimal('24.00'))
+        self.assertEqual(totals['total_pl_usd'], Decimal('24.00'))
+        self.assertFalse(FlowOfFunds.objects.exists())
         self.assertIsNone(positions[0]['target_allocation_percent'])
         self.assertIsNone(positions[0]['allocation_deviation_percent'])
-        self.assertEqual(totals['current_value_usd'], Decimal('150.00'))
-        self.assertEqual(totals['unrealized_pl_usd'], Decimal('50.00'))
-        self.assertEqual(totals['total_pl_usd'], Decimal('50.00'))
+        self.assertEqual(totals['current_value_usd'], Decimal('0.00'))
+        self.assertEqual(totals['unrealized_pl_usd'], Decimal('0.00'))
+        self.assertEqual(totals['total_pl_usd'], Decimal('24.00'))
         self.assertTrue(totals['valuation_complete'])
-        self.assertEqual(totals['largest_asset']['instrument_ticker'], 'BTC')
-        self.assertIsNotNone(totals['latest_price_at'])
+        self.assertIsNone(totals['largest_asset'])
+        self.assertIsNone(totals['latest_price_at'])
+
+    def test_split_changes_quantity_without_creating_pl(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('10.0000000000'),
+            price_usd=Decimal('10.00000000'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 10),
+        )
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_SPLIT,
+            quantity=Decimal('2.0000000000'),
+            amount_usd=Decimal('0.00'),
+            date=self._dt(2026, 1, 11),
+        )
+
+        positions = calculate_positions(self.portfolio)
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions[0]['quantity'], Decimal('20.0000000000'))
+        self.assertEqual(positions[0]['cost_basis_usd'], Decimal('100.00'))
+        self.assertEqual(positions[0]['average_buy_price_usd'], Decimal('5.00'))
+        self.assertEqual(positions[0]['realized_pl_usd'], Decimal('0.00'))
+        self.assertEqual(positions[0]['total_pl_usd'], Decimal('0.00'))
+        self.assertFalse(FlowOfFunds.objects.exists())
+
+    def test_reverse_split_changes_quantity_without_changing_cost_basis(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('10.0000000000'),
+            price_usd=Decimal('10.00000000'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 10),
+        )
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_SPLIT,
+            quantity=Decimal('0.5000000000'),
+            amount_usd=Decimal('0.00'),
+            date=self._dt(2026, 1, 11),
+        )
+
+        positions = calculate_positions(self.portfolio)
+        self.assertEqual(positions[0]['quantity'], Decimal('5.00000000000'))
+        self.assertEqual(positions[0]['cost_basis_usd'], Decimal('100.00'))
+        self.assertEqual(positions[0]['average_buy_price_usd'], Decimal('20.00'))
 
     def test_target_allocations_reject_total_above_100_percent(self):
         eth = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='ETH', name='Ethereum')
@@ -337,6 +423,72 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(result['intent'], 'get_rebalance_status')
         self.assertEqual(result['investment_rebalance']['portfolio_id'], str(self.portfolio.id))
         self.assertIn('Ребаланс', result['reply_text'])
+
+    def test_ai_service_previews_investment_buy_before_creation(self):
+        service = AiOperationService()
+
+        result = service.process(
+            text='купил btc 0.1 по 100000',
+            user=self.user,
+            source='telegram',
+            dry_run=True,
+        )
+
+        self.assertEqual(result['status'], 'needs_confirmation')
+        self.assertEqual(result['intent'], 'create_investment_buy')
+        self.assertEqual(result['missing_fields'], ['final_confirmation'])
+        self.assertIn('BTC', result['reply_text'])
+        self.assertEqual(InvestmentOperation.objects.count(), 0)
+
+        confirmation = service.continue_confirmation(
+            normalized_payload=service.serialize_normalized(result['parsed']),
+            missing_fields=result['missing_fields'],
+            answer_text='да',
+            provider_name=result['provider'],
+            dry_run=True,
+            source='telegram',
+        )
+        created = service.create_from_normalized(
+            normalized=confirmation['parsed'],
+            provider_name=confirmation['provider'],
+        )
+
+        self.assertEqual(created['status'], 'created')
+        operation = InvestmentOperation.objects.get()
+        self.assertEqual(operation.operation_type, InvestmentOperation.TYPE_BUY)
+        self.assertEqual(operation.instrument, self.instrument)
+        self.assertEqual(operation.account, self.account)
+        self.assertEqual(operation.quantity, Decimal('0.1000000000'))
+        self.assertEqual(operation.price_usd, Decimal('100000.00000000'))
+        self.assertEqual(operation.amount_usd, Decimal('10000.00'))
+
+    def test_ai_service_asks_missing_investment_trade_fields(self):
+        result = AiOperationService().process(
+            text='купил btc на 1000',
+            user=self.user,
+            source='telegram',
+            dry_run=True,
+        )
+
+        self.assertEqual(result['status'], 'needs_confirmation')
+        self.assertEqual(result['intent'], 'create_investment_buy')
+        self.assertIn('quantity', result['missing_fields'])
+        self.assertIn('price_usd', result['missing_fields'])
+        self.assertEqual(InvestmentOperation.objects.count(), 0)
+
+    def test_ai_service_keeps_money_transfer_to_crypto_wallet_out_of_investments(self):
+        Wallet.objects.create(name='Крипта')
+
+        result = AiOperationService().process(
+            text='перевод альфа в крипта 2000',
+            user=self.user,
+            source='telegram',
+            dry_run=True,
+        )
+
+        self.assertEqual(result['intent'], 'create_transfer')
+        self.assertNotIn('investment', result['intent'])
+        self.assertEqual(InvestmentOperation.objects.count(), 0)
 
     def test_portfolio_performance_uses_opening_value_before_period(self):
         InvestmentOperation.objects.create(
@@ -733,6 +885,106 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(operation.amount_usd, Decimal('110.00'))
         self.assertEqual(operation.fee_usd, Decimal('2.00'))
 
+    def test_operation_api_accepts_dividend_without_price_or_wallet_movement(self):
+        response = self.client.post('/api/v1/investment/operations/', {
+            'portfolio': str(self.portfolio.id),
+            'account': str(self.account.id),
+            'instrument': str(self.instrument.id),
+            'operation_type': InvestmentOperation.TYPE_DIVIDEND,
+            'amount_usd': '25.00',
+            'fee_usd': '1.00',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        operation = InvestmentOperation.objects.get(id=response.data['id'])
+        self.assertEqual(operation.quantity, Decimal('0E-10'))
+        self.assertIsNone(operation.price_usd)
+        self.assertEqual(operation.amount_usd, Decimal('25.00'))
+        self.assertFalse(FlowOfFunds.objects.exists())
+
+    def test_operation_api_accepts_split_without_price_or_amount(self):
+        response = self.client.post('/api/v1/investment/operations/', {
+            'portfolio': str(self.portfolio.id),
+            'account': str(self.account.id),
+            'instrument': str(self.instrument.id),
+            'operation_type': InvestmentOperation.TYPE_SPLIT,
+            'quantity': '2.0000000000',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        operation = InvestmentOperation.objects.get(id=response.data['id'])
+        self.assertEqual(operation.operation_type, InvestmentOperation.TYPE_SPLIT)
+        self.assertEqual(operation.quantity, Decimal('2.0000000000'))
+        self.assertIsNone(operation.price_usd)
+        self.assertEqual(operation.amount_usd, Decimal('0.00'))
+        self.assertFalse(FlowOfFunds.objects.exists())
+
+    def test_operation_api_rejects_split_with_money_amount(self):
+        response = self.client.post('/api/v1/investment/operations/', {
+            'portfolio': str(self.portfolio.id),
+            'account': str(self.account.id),
+            'instrument': str(self.instrument.id),
+            'operation_type': InvestmentOperation.TYPE_SPLIT,
+            'quantity': '2.0000000000',
+            'amount_usd': '10.00',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('amount_usd', response.data)
+
+    def test_operation_api_rejects_split_with_price(self):
+        response = self.client.post('/api/v1/investment/operations/', {
+            'portfolio': str(self.portfolio.id),
+            'account': str(self.account.id),
+            'instrument': str(self.instrument.id),
+            'operation_type': InvestmentOperation.TYPE_SPLIT,
+            'quantity': '2.0000000000',
+            'price_usd': '10.00000000',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('price_usd', response.data)
+
+    def test_investment_operations_csv_import_dry_run_and_create(self):
+        csv_content = '\n'.join([
+            'date,operation_type,ticker,account,quantity,price_usd,comment',
+            '2026-01-10,buy,BTC,Биржа,0.1000000000,100000.00000000,first buy',
+        ])
+
+        preview_response = self.client.post('/api/v1/investment/operations/import-csv/', {
+            'portfolio': str(self.portfolio.id),
+            'csv': csv_content,
+        }, format='json')
+
+        self.assertEqual(preview_response.status_code, 200, preview_response.data)
+        self.assertTrue(preview_response.data['dry_run'])
+        self.assertEqual(preview_response.data['results'][0]['status'], 'preview')
+        self.assertEqual(InvestmentOperation.objects.count(), 0)
+
+        create_response = self.client.post('/api/v1/investment/operations/import-csv/', {
+            'portfolio': str(self.portfolio.id),
+            'csv': csv_content,
+            'dry_run': False,
+        }, format='json')
+
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        self.assertEqual(create_response.data['created'], 1)
+        operation = InvestmentOperation.objects.get()
+        self.assertEqual(operation.instrument, self.instrument)
+        self.assertEqual(operation.account, self.account)
+        self.assertEqual(operation.amount_usd, Decimal('10000.00'))
+
+        duplicate_response = self.client.post('/api/v1/investment/operations/import-csv/', {
+            'portfolio': str(self.portfolio.id),
+            'csv': csv_content,
+            'dry_run': False,
+        }, format='json')
+
+        self.assertEqual(duplicate_response.status_code, 201, duplicate_response.data)
+        self.assertEqual(duplicate_response.data['created'], 0)
+        self.assertEqual(duplicate_response.data['skipped'], 1)
+        self.assertEqual(InvestmentOperation.objects.count(), 1)
+
     def test_openapi_schema_contains_investment_contract(self):
         response = self.client.get('/api/schema/')
 
@@ -749,6 +1001,7 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertIn('/api/v1/investment/target-allocations/', content)
         self.assertIn('/api/v1/investment/accounts/', content)
         self.assertIn('/api/v1/investment/operations/', content)
+        self.assertIn('/api/v1/investment/operations/import-csv/', content)
         self.assertIn('/api/v1/investment/portfolio-overview/', content)
         self.assertIn('/api/v1/investment/market-health/', content)
         self.assertIn('InstrumentPriceSnapshot', content)
@@ -1115,6 +1368,46 @@ class InvestmentPriceProviderTests(SimpleTestCase):
 
         with self.assertRaises(PriceProviderError):
             provider.get_price(instrument)
+
+    def test_stooq_provider_reads_stock_quote(self):
+        opener = _FakeOpener('Symbol,Date,Time,Open,High,Low,Close,Volume\nAAPL.US,2026-01-10,22:00:00,190,195,189,194.50,1000\n')
+        instrument = SimpleNamespace(id='aapl-id', type='stock', provider_symbol='AAPL.US', ticker='AAPL', quote_currency='USD')
+        provider = StooqPriceProvider(quote_base_url='https://stocks.example/q/l/', opener=opener)
+
+        quote = provider.get_price(instrument)
+
+        self.assertIn('s=aapl.us', opener.request_url)
+        self.assertEqual(quote.symbol, 'aapl.us')
+        self.assertEqual(quote.price, Decimal('194.50'))
+        self.assertEqual(quote.price_currency, 'USD')
+        self.assertEqual(quote.source, 'stooq')
+
+    def test_stooq_provider_reads_historical_stock_prices(self):
+        opener = _FakeOpener('Date,Open,High,Low,Close,Volume\n2026-01-10,190,195,189,194.50,1000\n2026-01-11,194,198,193,197.10,900\n')
+        instrument = SimpleNamespace(id='aapl-id', type='stock', provider_symbol='AAPL.US', ticker='AAPL', quote_currency='USD')
+        provider = StooqPriceProvider(history_base_url='https://stocks.example/q/d/l/', opener=opener)
+
+        quotes = provider.get_historical_prices(instrument, date(2026, 1, 10), date(2026, 1, 11))
+
+        self.assertIn('s=aapl.us', opener.request_url)
+        self.assertIn('d1=20260110', opener.request_url)
+        self.assertIn('d2=20260111', opener.request_url)
+        self.assertEqual(quotes[date(2026, 1, 10)].price, Decimal('194.50'))
+        self.assertEqual(quotes[date(2026, 1, 11)].price, Decimal('197.10'))
+
+    def test_composite_provider_routes_stocks_and_crypto(self):
+        crypto_provider = StaticPriceProvider({('BTC', 'USD'): '62000.00'})
+        stock_provider = StaticPriceProvider({('AAPL.US', 'USD'): '194.50'})
+        provider = CompositePriceProvider(crypto_provider=crypto_provider, stock_provider=stock_provider)
+
+        crypto_quote = provider.get_price(SimpleNamespace(id='btc-id', type='crypto', provider_symbol='BTC', ticker='BTC', quote_currency='USD'))
+        stock_quote = provider.get_price(SimpleNamespace(id='aapl-id', type='stock', provider_symbol='AAPL.US', ticker='AAPL', quote_currency='USD'))
+
+        self.assertEqual(crypto_quote.price, Decimal('62000.00'))
+        self.assertEqual(stock_quote.price, Decimal('194.50'))
+
+    def test_provider_factory_defaults_to_composite_provider(self):
+        self.assertIsInstance(get_price_provider(), CompositePriceProvider)
 
     @override_settings(INVESTMENT_PRICE_PROVIDER='coingecko')
     def test_provider_factory_reads_settings(self):
