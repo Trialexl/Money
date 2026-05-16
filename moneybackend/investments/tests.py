@@ -506,6 +506,57 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual([snapshot.current_value_usd for snapshot in snapshots], [Decimal('100.00'), Decimal('110.00')])
         self.assertEqual(snapshots[1].positions_payload[0]['instrument_ticker'], 'BTC')
 
+    def test_operation_api_rebuilds_portfolio_snapshots_after_create(self):
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('100.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('100.00'),
+            captured_at=self._dt(2026, 1, 1),
+        )
+
+        with patch('investments.services.timezone.localdate', return_value=date(2026, 1, 2)):
+            response = self.client.post('/api/v1/investment/operations/', {
+                'portfolio': str(self.portfolio.id),
+                'account': str(self.account.id),
+                'instrument': str(self.instrument.id),
+                'operation_type': InvestmentOperation.TYPE_BUY,
+                'quantity': '1.0000000000',
+                'price_usd': '100.00000000',
+                'amount_usd': '100.00',
+                'date': self._dt(2026, 1, 1).isoformat(),
+            }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        snapshots = InvestmentPortfolioSnapshot.objects.filter(portfolio=self.portfolio).order_by('snapshot_date')
+        self.assertEqual([snapshot.snapshot_date for snapshot in snapshots], [date(2026, 1, 1), date(2026, 1, 2)])
+
+    def test_price_api_rebuilds_related_portfolio_snapshots_after_create(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0'),
+            price_usd=Decimal('100.00'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 1, 1),
+        )
+
+        with patch('investments.services.timezone.localdate', return_value=date(2026, 1, 2)):
+            response = self.client.post('/api/v1/investment/prices/', {
+                'instrument': str(self.instrument.id),
+                'captured_at': self._dt(2026, 1, 2).isoformat(),
+                'price': '120.00000000',
+                'price_currency': 'USD',
+                'fx_rate_to_usd': '1.00000000',
+            }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        snapshot = InvestmentPortfolioSnapshot.objects.get(portfolio=self.portfolio, snapshot_date=date(2026, 1, 2))
+        self.assertEqual(snapshot.current_value_usd, Decimal('120.00'))
+
     def test_portfolio_performance_can_use_fresh_snapshot_without_price_snapshot(self):
         InvestmentOperation.objects.create(
             portfolio=self.portfolio,

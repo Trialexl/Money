@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 from rest_framework import permissions, status, viewsets
@@ -37,9 +38,12 @@ from .services import (
     calculate_rebalance_status,
     backfill_fx_rate_snapshots,
     backfill_price_snapshots,
+    rebuild_portfolio_snapshots_for_change,
     refresh_fx_rate_snapshots,
     refresh_price_snapshots,
 )
+
+logger = logging.getLogger(__name__)
 
 
 instrument_list_parameters = [
@@ -124,6 +128,24 @@ def _parse_performance_period(request):
     return date_from, date_to, group_by, display_currency, scope, instrument_id, None
 
 
+def _date_part(value):
+    if value is None:
+        return None
+    return value.date() if hasattr(value, 'date') else value
+
+
+def _min_date(*values):
+    dates = [_date_part(value) for value in values if _date_part(value) is not None]
+    return min(dates) if dates else None
+
+
+def _rebuild_snapshots_after_investment_change(**kwargs):
+    try:
+        rebuild_portfolio_snapshots_for_change(**kwargs)
+    except Exception:
+        logger.exception('Failed to rebuild investment portfolio snapshots after data change.')
+
+
 @extend_schema_view(
     list=extend_schema(
         parameters=instrument_list_parameters,
@@ -177,6 +199,41 @@ class InstrumentPriceSnapshotViewSet(viewsets.ModelViewSet):
         if source:
             queryset = queryset.filter(source=source)
         return queryset
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        _rebuild_snapshots_after_investment_change(
+            instrument=instance.instrument_id,
+            changed_at=instance.captured_at,
+        )
+
+    def perform_update(self, serializer):
+        previous_instrument_id = serializer.instance.instrument_id
+        previous_captured_at = serializer.instance.captured_at
+        instance = serializer.save()
+        if previous_instrument_id == instance.instrument_id:
+            _rebuild_snapshots_after_investment_change(
+                instrument=instance.instrument_id,
+                date_from=_min_date(previous_captured_at, instance.captured_at),
+            )
+            return
+        _rebuild_snapshots_after_investment_change(
+            instrument=previous_instrument_id,
+            changed_at=previous_captured_at,
+        )
+        _rebuild_snapshots_after_investment_change(
+            instrument=instance.instrument_id,
+            changed_at=instance.captured_at,
+        )
+
+    def perform_destroy(self, instance):
+        instrument_id = instance.instrument_id
+        changed_at = instance.captured_at
+        instance.delete()
+        _rebuild_snapshots_after_investment_change(
+            instrument=instrument_id,
+            changed_at=changed_at,
+        )
 
     @extend_schema(
         request=None,
@@ -517,6 +574,41 @@ class InvestmentOperationViewSet(viewsets.ModelViewSet):
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(portfolio__user=self.request.user)
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        _rebuild_snapshots_after_investment_change(
+            portfolio=instance.portfolio_id,
+            changed_at=instance.date,
+        )
+
+    def perform_update(self, serializer):
+        previous_portfolio_id = serializer.instance.portfolio_id
+        previous_date = serializer.instance.date
+        instance = serializer.save()
+        if previous_portfolio_id == instance.portfolio_id:
+            _rebuild_snapshots_after_investment_change(
+                portfolio=instance.portfolio_id,
+                date_from=_min_date(previous_date, instance.date),
+            )
+            return
+        _rebuild_snapshots_after_investment_change(
+            portfolio=previous_portfolio_id,
+            changed_at=previous_date,
+        )
+        _rebuild_snapshots_after_investment_change(
+            portfolio=instance.portfolio_id,
+            changed_at=instance.date,
+        )
+
+    def perform_destroy(self, instance):
+        portfolio_id = instance.portfolio_id
+        changed_at = instance.date
+        instance.delete()
+        _rebuild_snapshots_after_investment_change(
+            portfolio=portfolio_id,
+            changed_at=changed_at,
+        )
 
 
 class InvestmentOverviewViewSet(viewsets.ViewSet):

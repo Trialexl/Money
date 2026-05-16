@@ -437,6 +437,60 @@ def rebuild_portfolio_snapshots(*, portfolio=None, date_from=None, date_to=None,
     return summary
 
 
+def rebuild_portfolio_snapshots_for_change(
+    *,
+    portfolio=None,
+    instrument=None,
+    changed_at=None,
+    date_from=None,
+    date_to=None,
+    price_max_age_days=0,
+):
+    today = timezone.localdate()
+    start_date = _date_part(date_from or changed_at) or today
+    if date_to is None or date_to > today:
+        date_to = today
+
+    summary = {
+        'portfolios': 0,
+        'created': 0,
+        'updated': 0,
+        'skipped': 0,
+        'snapshots': 0,
+    }
+    if start_date > date_to:
+        summary['skipped'] += 1
+        return summary
+
+    if portfolio is not None:
+        portfolios = _resolve_snapshot_portfolios(portfolio)
+    elif instrument is not None:
+        instrument_id = instrument.pk if isinstance(instrument, Instrument) else instrument
+        portfolios = (
+            InvestmentPortfolio.objects
+            .filter(
+                operations__instrument_id=instrument_id,
+                operations__deleted=False,
+                operations__posted=True,
+            )
+            .distinct()
+            .order_by('user_id', 'name')
+        )
+    else:
+        return summary
+
+    for portfolio_obj in portfolios:
+        partial = rebuild_portfolio_snapshots(
+            portfolio=portfolio_obj,
+            date_from=start_date,
+            date_to=date_to,
+            price_max_age_days=price_max_age_days,
+        )
+        for key in summary:
+            summary[key] += partial[key]
+    return summary
+
+
 def _resolve_snapshot_portfolios(portfolio):
     if portfolio is None:
         return InvestmentPortfolio.objects.all().order_by('user_id', 'name')
