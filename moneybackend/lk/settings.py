@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 from decouple import config
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,18 +26,43 @@ def csv_list(value):
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-u^8jk*-tm6(!hy!*^swkm6#c%!0l=)z6!*8)h3z((vxtr4+5p8')
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)
+ALLOW_INSECURE_SETTINGS = config('DJANGO_ALLOW_INSECURE_SETTINGS', default=False, cast=bool)
+
+# SECURITY WARNING: keep the secret key used in production secret!
+_DEFAULT_SECRET_KEY = 'django-insecure-dev-only-change-me'
+SECRET_KEY = config('SECRET_KEY', default=_DEFAULT_SECRET_KEY)
+if not DEBUG and not ALLOW_INSECURE_SETTINGS and SECRET_KEY == _DEFAULT_SECRET_KEY:
+    raise ImproperlyConfigured('SECRET_KEY must be set when DEBUG=False.')
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=csv_list)
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=csv_list)
+if not DEBUG and not ALLOW_INSECURE_SETTINGS:
+    if not ALLOWED_HOSTS or '*' in ALLOWED_HOSTS:
+        raise ImproperlyConfigured('ALLOWED_HOSTS must be explicit when DEBUG=False.')
+    if not CSRF_TRUSTED_ORIGINS:
+        raise ImproperlyConfigured('CSRF_TRUSTED_ORIGINS must be set when DEBUG=False.')
+
 USE_X_FORWARDED_HOST = config('USE_X_FORWARDED_HOST', default=True, cast=bool)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
-CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
+SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
+SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=31536000 if not DEBUG else 0, cast=int)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=not DEBUG, cast=bool)
+SECURE_HSTS_PRELOAD = config('SECURE_HSTS_PRELOAD', default=False, cast=bool)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = config('SECURE_REFERRER_POLICY', default='same-origin')
+SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=not DEBUG, cast=bool)
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = config('SESSION_COOKIE_SAMESITE', default='Lax')
+CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=not DEBUG, cast=bool)
+CSRF_COOKIE_SAMESITE = config('CSRF_COOKIE_SAMESITE', default='Lax')
+AUTH_ACCESS_COOKIE_NAME = config('AUTH_ACCESS_COOKIE_NAME', default='money_access')
+AUTH_REFRESH_COOKIE_NAME = config('AUTH_REFRESH_COOKIE_NAME', default='money_refresh')
+AUTH_SESSION_COOKIE_NAME = config('AUTH_SESSION_COOKIE_NAME', default='money_session')
+AUTH_COOKIE_SECURE = config('AUTH_COOKIE_SECURE', default=not DEBUG, cast=bool)
+AUTH_COOKIE_SAMESITE = config('AUTH_COOKIE_SAMESITE', default='Lax')
+AUTH_COOKIE_PATH = config('AUTH_COOKIE_PATH', default='/')
 
 
 # Application definition
@@ -67,6 +93,7 @@ MIDDLEWARE = [
     'money.middleware.OneCSyncRequestMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'money.middleware.SuppressApiAuthenticateHeaderMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -154,6 +181,7 @@ AUTH_USER_MODEL = 'users.CustomUser'
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        'users.authentication.CookieJWTAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
@@ -165,6 +193,7 @@ CORS_ALLOWED_ORIGINS = config(
     default='http://localhost:8080,http://localhost:3000',
     cast=csv_list
 )
+CORS_ALLOW_CREDENTIALS = config('CORS_ALLOW_CREDENTIALS', default=True, cast=bool)
 
 AI_DEFAULT_PROVIDER = config('AI_DEFAULT_PROVIDER', default='openrouter')
 AI_OPENROUTER_API_KEY = config('AI_OPENROUTER_API_KEY', default='')

@@ -1,7 +1,14 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   db:
     image: postgres:14
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: ${DB_MEMORY_LIMIT:-768m}
     mem_reservation: ${DB_MEMORY_RESERVATION:-256m}
     pids_limit: ${DB_PIDS_LIMIT:-256}
@@ -20,6 +27,7 @@ services:
   backend:
     image: trialexl/money-backend:latest
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: ${BACKEND_MEMORY_LIMIT:-768m}
     mem_reservation: ${BACKEND_MEMORY_RESERVATION:-256m}
     pids_limit: ${BACKEND_PIDS_LIMIT:-256}
@@ -37,6 +45,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/', timeout=3).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     expose:
       - "8000"
     volumes:
@@ -45,30 +59,47 @@ services:
   frontend:
     image: trialexl/money-frontend:latest
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-512m}
     mem_reservation: ${FRONTEND_MEMORY_RESERVATION:-128m}
     pids_limit: ${FRONTEND_PIDS_LIMIT:-128}
     environment:
       NODE_OPTIONS: ${FRONTEND_NODE_OPTIONS:---max-old-space-size=256}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     expose:
       - "3000"
 
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: ${CADDY_MEMORY_LIMIT:-128m}
     mem_reservation: ${CADDY_MEMORY_RESERVATION:-32m}
     pids_limit: ${CADDY_PIDS_LIMIT:-128}
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     environment:
       APP_DOMAIN: ${APP_DOMAIN:-localhost}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --header=\"Host: ${APP_DOMAIN:-localhost}\" -qO- http://127.0.0.1/ >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - django_static:/srv/django-static:ro

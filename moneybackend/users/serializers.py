@@ -86,7 +86,7 @@ class ProfileCustomUserSerializer(serializers.ModelSerializer):
 
 
 class LogoutRequestSerializer(serializers.Serializer):
-    refresh = serializers.CharField()
+    refresh = serializers.CharField(required=False, allow_blank=True)
 
 
 class LogoutResponseSerializer(serializers.Serializer):

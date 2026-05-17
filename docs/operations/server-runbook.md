@@ -42,6 +42,8 @@ nano .env
 - `ALLOWED_HOSTS` - тот же домен.
 - `CSRF_TRUSTED_ORIGINS=https://<домен>`.
 - `CORS_ALLOWED_ORIGINS=https://<домен>`.
+- `CORS_ALLOW_CREDENTIALS=True` - нужно для cookie-auth web frontend.
+- `AUTH_COOKIE_SECURE=True`, `SESSION_COOKIE_SECURE=True`, `CSRF_COOKIE_SECURE=True` - для HTTPS.
 - `SECRET_KEY` - заменить на сильный секрет.
 - `DB_PASSWORD` - заменить.
 - `AI_TELEGRAM_BOT_TOKEN` и `AI_TELEGRAM_BOT_SECRET`, если нужен Telegram bot.
@@ -60,6 +62,7 @@ sudo docker compose ps
 Проверка HTTPS:
 
 ```bash
+curl -fsS https://<домен>/api/v1/health/
 curl -I https://<домен>/api/schema/
 curl -I https://<домен>/
 ```
@@ -210,6 +213,9 @@ API_TOKEN=replace-with-api-token
 
 # Контроль свежести рыночных данных.
 10 8 * * * curl -fsS -H "Authorization: Token $API_TOKEN" "$API_BASE/api/v1/investment/market-health/?max_age_days=2" >/tmp/money-market-health.log 2>&1
+
+# Базовый healthcheck приложения с опциональным webhook-уведомлением.
+*/5 * * * * cd "$APP_DIR" && HEALTH_URL="$API_BASE/api/v1/health/" ./health-check.sh >/tmp/money-health-cron.log 2>&1
 ```
 
 Почему такой порядок:
@@ -218,13 +224,44 @@ API_TOKEN=replace-with-api-token
 - потом цены инструментов;
 - потом проверяется healthcheck.
 
+## 6. Диагностика health и логов
+
+Проверить health всех контейнеров:
+
+```bash
+cd /opt/money
+sudo docker compose ps
+curl -fsS https://<домен>/api/v1/health/
+```
+
+Проверить последние логи без риска разрастания файла:
+
+```bash
+sudo docker compose logs --tail=200 backend
+sudo docker compose logs --tail=200 frontend
+sudo docker compose logs --tail=200 caddy
+```
+
+Ограничение docker logs задается через `.env`:
+
+```text
+DOCKER_LOG_MAX_SIZE=10m
+DOCKER_LOG_MAX_FILE=5
+```
+
+Если нужен внешний alert, укажи webhook перед запуском `health-check.sh`:
+
+```bash
+ALERT_WEBHOOK_URL=https://example.com/webhook ./health-check.sh
+```
+
 Что не надо ставить в ежедневный cron без причины:
 
 - `prices/backfill/` - только для первичного заполнения истории или восстановления пропусков;
 - `fx-rates/backfill/` - только для первичного заполнения истории или восстановления пропусков;
 - `rebuild_investment_snapshots` - теперь snapshots пересчитываются при изменении сделок и цен, команда нужна как аварийная.
 
-## 6. Ручные команды для инвестиций
+## 7. Ручные команды для инвестиций
 
 Обновить FX-курсы:
 
@@ -276,7 +313,7 @@ sudo docker compose exec backend python manage.py rebuild_investment_snapshots \
   --date-to 2026-05-16
 ```
 
-## 7. Как смотреть результаты регламентных заданий
+## 8. Как смотреть результаты регламентных заданий
 
 Последний backup:
 
@@ -300,6 +337,7 @@ tail -100 /tmp/money-prices-refresh.log
 Последняя проверка healthcheck:
 
 ```bash
+tail -100 /tmp/money-health-cron.log
 tail -100 /tmp/money-market-health.log
 ```
 
@@ -322,7 +360,7 @@ sudo docker compose logs --tail=200 backend
 sudo docker compose logs --tail=200 caddy
 ```
 
-## 8. Типовые проблемы
+## 9. Типовые проблемы
 
 `no space left on device`:
 
@@ -357,12 +395,14 @@ docker system prune --volumes
 - проверить, что `docker compose pull` подтянул новый frontend image;
 - проверить `sudo docker compose logs --tail=200 frontend`.
 
-## 9. Минимальный чеклист после обновления
+## 10. Минимальный чеклист после обновления
 
 ```bash
 cd /opt/money
 sudo docker compose ps
+curl -fsS https://trialexl.freemyip.com/api/v1/health/
 curl -I https://trialexl.freemyip.com/
 curl -I https://trialexl.freemyip.com/api/schema/
+tail -50 /tmp/money-health-cron.log
 tail -50 /tmp/money-market-health.log
 ```

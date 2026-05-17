@@ -44,6 +44,15 @@ from .models import (
 )
 
 
+class HealthCheckTests(TestCase):
+    def test_health_endpoint_is_public(self):
+        response = APIClient().get('/api/v1/health/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'ok')
+        self.assertEqual(response.data['checks']['database'], 'ok')
+
+
 class MoneyRegisterParityTests(TestCase):
     @classmethod
     def setUpTestData(cls):

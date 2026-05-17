@@ -16,6 +16,8 @@
 
 ### P0-SEC-001. Жесткие production-настройки Django
 
+Статус: готово - production settings теперь fail-fast без `SECRET_KEY`, `DEBUG=False` по умолчанию, secure cookies/HSTS/CORS credentials настраиваются через `.env`.
+
 Проблема: backend сейчас допускает небезопасные значения по умолчанию: fallback `SECRET_KEY`, `DEBUG=True`, secure cookies выключены.
 
 Задачи:
@@ -34,6 +36,8 @@ Acceptance criteria:
 
 ### P0-SEC-002. Перевести web-auth с localStorage на безопасное хранение
 
+Статус: готово - web JWT хранится в `HttpOnly` cookies, frontend больше не сохраняет access/refresh в `localStorage`, DRF token auth для 1C сохранен.
+
 Проблема: access/refresh tokens лежат в `localStorage`, что повышает риск кражи токенов при XSS.
 
 Задачи:
@@ -51,6 +55,8 @@ Acceptance criteria:
 - 1C sync продолжает использовать `Authorization: Token`.
 
 ### P0-OPS-001. Healthchecks, log rotation и базовые алерты
+
+Статус: готово - добавлен `/api/v1/health/`, Docker healthchecks для backend/frontend/caddy, ограничение размера docker logs и `health-check.sh` для cron/webhook уведомлений.
 
 Проблема: в docker compose healthcheck есть только у PostgreSQL, а падение backend/frontend/caddy, OOM и переполнение диска не контролируются.
 

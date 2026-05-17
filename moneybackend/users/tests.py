@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
@@ -82,6 +83,11 @@ class CustomUserParityTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['user']['tax_id'], '123456789012')
 
+    def test_profile_requires_authentication(self):
+        response = APIClient().get('/api/v1/profile/')
+
+        self.assertEqual(response.status_code, 401)
+
     def test_patch_user_supports_is_active_for_onec_deactivation(self):
         user = CustomUser.objects.create_user(
             username='one-c-user',
@@ -151,3 +157,70 @@ class TokenAuthenticationCompatibilityTests(TestCase):
         response = client.get('/api/v1/users/')
 
         self.assertEqual(response.status_code, 200)
+
+
+class CookieAuthenticationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = CustomUser.objects.create_superuser(
+            username='cookie-admin',
+            email='cookie-admin@example.com',
+            password='adminpass123',
+        )
+
+    def test_login_sets_http_only_auth_cookies(self):
+        client = APIClient()
+
+        response = client.post('/api/v1/auth/token/', {
+            'username': 'cookie-admin',
+            'password': 'adminpass123',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(settings.AUTH_ACCESS_COOKIE_NAME, response.cookies)
+        self.assertIn(settings.AUTH_REFRESH_COOKIE_NAME, response.cookies)
+        self.assertIn(settings.AUTH_SESSION_COOKIE_NAME, response.cookies)
+        self.assertTrue(response.cookies[settings.AUTH_ACCESS_COOKIE_NAME]['httponly'])
+        self.assertTrue(response.cookies[settings.AUTH_REFRESH_COOKIE_NAME]['httponly'])
+        self.assertFalse(response.cookies[settings.AUTH_SESSION_COOKIE_NAME]['httponly'])
+
+    def test_profile_can_use_cookie_jwt(self):
+        client = APIClient()
+        login_response = client.post('/api/v1/auth/token/', {
+            'username': 'cookie-admin',
+            'password': 'adminpass123',
+        }, format='json')
+        self.assertEqual(login_response.status_code, 200)
+
+        response = client.get('/api/v1/profile/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['user']['username'], 'cookie-admin')
+
+    def test_refresh_uses_refresh_cookie_when_body_is_empty(self):
+        client = APIClient()
+        login_response = client.post('/api/v1/auth/token/', {
+            'username': 'cookie-admin',
+            'password': 'adminpass123',
+        }, format='json')
+        self.assertEqual(login_response.status_code, 200)
+
+        response = client.post('/api/v1/auth/refresh/', {}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(settings.AUTH_ACCESS_COOKIE_NAME, response.cookies)
+
+    def test_logout_clears_auth_cookies_without_body_refresh(self):
+        client = APIClient()
+        login_response = client.post('/api/v1/auth/token/', {
+            'username': 'cookie-admin',
+            'password': 'adminpass123',
+        }, format='json')
+        self.assertEqual(login_response.status_code, 200)
+
+        response = client.post('/api/v1/auth/logout/', {}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.cookies[settings.AUTH_ACCESS_COOKIE_NAME]['max-age'], 0)
+        self.assertEqual(response.cookies[settings.AUTH_REFRESH_COOKIE_NAME]['max-age'], 0)
+        self.assertEqual(response.cookies[settings.AUTH_SESSION_COOKIE_NAME]['max-age'], 0)

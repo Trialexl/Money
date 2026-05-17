@@ -1,5 +1,5 @@
 import api from "@/lib/api"
-import { setAuthTokens, clearAuthTokens, getRefreshToken } from "@/lib/auth"
+import { clearAuthTokens } from "@/lib/auth"
 
 interface LoginRequest {
   username: string
@@ -43,16 +43,12 @@ function normalizeProfile(raw: any): UserProfile {
 export const AuthService = {
   login: async (data: LoginRequest) => {
     const response = await api.post<LoginResponse>("/auth/token/", data)
-    setAuthTokens(response.data.access, response.data.refresh)
     return response.data
   },
 
   logout: async () => {
-    const refresh = getRefreshToken()
     try {
-      if (refresh) {
-        await api.post("/auth/logout/", { refresh })
-      }
+      await api.post("/auth/logout/", {})
     } catch (error) {
       console.error("Logout error:", error)
     } finally {
@@ -61,7 +57,7 @@ export const AuthService = {
   },
 
   refreshToken: async (refreshToken: string) => {
-    const response = await api.post<{ access: string }>("/auth/refresh/", { refresh: refreshToken })
+    const response = await api.post<{ access: string }>("/auth/refresh/", refreshToken ? { refresh: refreshToken } : {})
     return response.data
   },
 

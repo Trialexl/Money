@@ -1,15 +1,15 @@
 from django.urls import path, include
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
+from .health import HealthCheckView
+from users.views import CookieTokenObtainPairView, CookieTokenRefreshView
 
 app_name = 'api'
 
 urlpatterns = [
+    path('health/', HealthCheckView.as_view(), name='health'),
+
     # Аутентификация
-    path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/token/', CookieTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('auth/refresh/', CookieTokenRefreshView.as_view(), name='token_refresh'),
     
     # Приложения
     path('', include('money.api_urls')),

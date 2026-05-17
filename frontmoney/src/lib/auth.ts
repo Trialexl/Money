@@ -1,36 +1,30 @@
-// Auth utility functions for token management
+const SESSION_COOKIE_NAME = "money_session"
 
-export const setAuthTokens = (accessToken: string, refreshToken: string) => {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('authToken', accessToken)
-    localStorage.setItem('refreshToken', refreshToken)
+function hasSessionMarker(): boolean {
+  if (typeof document === "undefined") {
+    return false
   }
+  return document.cookie.split(";").some((cookie) => cookie.trim().startsWith(`${SESSION_COOKIE_NAME}=`))
 }
 
-export const getAuthToken = (): string | null => {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('authToken')
-  }
-  return null
+export const setAuthTokens = (_accessToken?: string, _refreshToken?: string) => {
+  // Tokens are stored by the backend in HttpOnly cookies.
 }
 
-export const getRefreshToken = (): string | null => {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('refreshToken')
-  }
-  return null
-}
+export const getAuthToken = (): string | null => null
+
+export const getRefreshToken = (): string | null => null
 
 export const clearAuthTokens = () => {
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem('authToken')
-    localStorage.removeItem('refreshToken')
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("authToken")
+    localStorage.removeItem("refreshToken")
+  }
+  if (typeof document !== "undefined") {
+    document.cookie = `${SESSION_COOKIE_NAME}=; Max-Age=0; path=/; SameSite=Lax`
   }
 }
 
 export const isAuthenticated = (): boolean => {
-  if (typeof window !== 'undefined') {
-    return !!localStorage.getItem('authToken')
-  }
-  return false
+  return hasSessionMarker()
 }

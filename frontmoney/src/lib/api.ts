@@ -1,10 +1,11 @@
 import axios from "axios"
-import { clearAuthTokens, getAuthToken, getRefreshToken, setAuthTokens } from "@/lib/auth"
+import { clearAuthTokens } from "@/lib/auth"
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
 const api = axios.create({
   baseURL: BASE_URL,
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },
@@ -39,22 +40,9 @@ async function refreshAccessToken() {
   }
 
   refreshPromise = (async () => {
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) {
-      throw new Error("Missing refresh token")
-    }
+    const response = await axios.post(`${BASE_URL}/auth/refresh/`, {}, { withCredentials: true })
 
-    const response = await axios.post(`${BASE_URL}/auth/refresh/`, {
-      refresh: refreshToken,
-    })
-
-    const nextAccessToken = response.data?.access
-    if (!nextAccessToken) {
-      throw new Error("Missing access token")
-    }
-
-    setAuthTokens(nextAccessToken, response.data?.refresh || refreshToken)
-    return nextAccessToken
+    return response.data?.access || "cookie-session"
   })().finally(() => {
     refreshPromise = null
   })
@@ -62,13 +50,8 @@ async function refreshAccessToken() {
   return refreshPromise
 }
 
-// Request interceptor for adding auth token
 api.interceptors.request.use(
   (config) => {
-    const token = getAuthToken()
-    if (token) {
-      config.headers["Authorization"] = `Bearer ${token}`
-    }
     return config
   },
   (error) => {
@@ -87,9 +70,7 @@ api.interceptors.response.use(
       originalRequest._retry = true
       
       try {
-        const accessToken = await refreshAccessToken()
-        originalRequest.headers = originalRequest.headers ?? {}
-        originalRequest.headers["Authorization"] = `Bearer ${accessToken}`
+        await refreshAccessToken()
         return api(originalRequest)
       } catch (refreshError) {
         redirectToLogin()

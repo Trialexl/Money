@@ -37,6 +37,15 @@ make ci
 
 Скрипт сохраняет дампы PostgreSQL в `backups/postgres/`, требует явное подтверждение `RESTORE` перед восстановлением и не удаляет Docker volumes.
 
+## Healthcheck
+
+```bash
+./health-check.sh
+curl -fsS https://<домен>/api/v1/health/
+```
+
+В production compose включены healthchecks для backend/frontend/caddy и ограничение размера docker logs.
+
 ## Обновление сервера
 
 ```bash
