@@ -2855,8 +2855,13 @@ class AiOperationService:
             'items': previews,
         }
 
-    def _build_batch_created_reply(self, created_results):
-        return 'Документы созданы.'
+    def _build_batch_created_reply(self, created_results, *, include_wallet_balances=False):
+        reply_text = 'Документы созданы.'
+        if not include_wallet_balances:
+            return reply_text
+
+        documents = self._documents_from_created_results(created_results)
+        return self._append_wallet_balances_to_reply(reply_text, self._wallet_balance_rows_for_documents(documents))
 
     def _build_batch_confirmation_reply(self, count):
         return f'Недостаточно данных для автоматического создания {count} документов.'
@@ -2894,7 +2899,7 @@ class AiOperationService:
             })
         return details
 
-    def _create_multiple_financial_documents(self, normalized, *, provider_name, dry_run):
+    def _create_multiple_financial_documents(self, normalized, *, provider_name, dry_run, include_wallet_balances=False):
         item_results = [
             self._create_financial_document(item, provider_name=provider_name, dry_run=True)
             for item in normalized.get('items', [])
@@ -2968,9 +2973,15 @@ class AiOperationService:
             'intent': batch_parsed['intent'],
             'provider': provider_name,
             'confidence': batch_parsed['confidence'],
-            'reply_text': self._build_batch_created_reply(created_results),
+            'reply_text': self._build_batch_created_reply(
+                created_results,
+                include_wallet_balances=include_wallet_balances,
+            ),
             'created_object': created_objects[0] if len(created_objects) == 1 else None,
             'created_objects': created_objects,
+            'wallet_balances': self._wallet_balance_rows_for_documents(
+                self._documents_from_created_results(created_results)
+            ) if include_wallet_balances else [],
             'preview': preview,
             'parsed': batch_parsed,
         }
@@ -3047,6 +3058,7 @@ class AiOperationService:
                 normalized_batch,
                 provider_name=provider_name,
                 dry_run=dry_run,
+                include_wallet_balances=source == 'telegram',
             )
             if source == 'telegram' and bool(image_bytes) and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
@@ -3177,7 +3189,12 @@ class AiOperationService:
                 reply_text='Не удалось уверенно определить команду. Нужна формулировка точнее.',
             )
 
-        result = self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
+        result = self._create_financial_document(
+            normalized,
+            provider_name=provider_name,
+            dry_run=dry_run,
+            include_wallet_balances=source == 'telegram',
+        )
         if source == 'telegram' and bool(image_bytes) and dry_run and result.get('status') == 'preview':
             return self._final_confirmation_result(
                 parsed=result['parsed'],
@@ -3187,12 +3204,22 @@ class AiOperationService:
             )
         return result
 
-    def create_from_normalized(self, *, normalized, provider_name):
+    def create_from_normalized(self, *, normalized, provider_name, source='web'):
         if self._is_batch_normalized(normalized):
-            return self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=False)
+            return self._create_multiple_financial_documents(
+                normalized,
+                provider_name=provider_name,
+                dry_run=False,
+                include_wallet_balances=source == 'telegram',
+            )
         if self._is_investment_operation_intent(normalized.get('intent')):
             return self._create_investment_operation(normalized, provider_name=provider_name, dry_run=False)
-        return self._create_financial_document(normalized, provider_name=provider_name, dry_run=False)
+        return self._create_financial_document(
+            normalized,
+            provider_name=provider_name,
+            dry_run=False,
+            include_wallet_balances=source == 'telegram',
+        )
 
     def continue_confirmation(
         self,
@@ -3223,6 +3250,7 @@ class AiOperationService:
                             revised['normalized'],
                             provider_name=revised['provider_name'],
                             dry_run=dry_run,
+                            include_wallet_balances=source == 'telegram',
                         )
                         if source == 'telegram' and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
                             return self._final_confirmation_result(
@@ -3345,6 +3373,7 @@ class AiOperationService:
                     revised['normalized'],
                     provider_name=revised['provider_name'],
                     dry_run=dry_run,
+                    include_wallet_balances=source == 'telegram',
                 )
                 if source == 'telegram' and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
                     return self._final_confirmation_result(
@@ -3390,7 +3419,12 @@ class AiOperationService:
                 missing_fields=missing_fields,
                 options_payload=options_payload,
             )
-            result = self._create_multiple_financial_documents(normalized, provider_name=provider_name, dry_run=dry_run)
+            result = self._create_multiple_financial_documents(
+                normalized,
+                provider_name=provider_name,
+                dry_run=dry_run,
+                include_wallet_balances=source == 'telegram',
+            )
             if source == 'telegram' and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
                     parsed=result['parsed'],
@@ -3435,7 +3469,12 @@ class AiOperationService:
             missing_fields=missing_fields,
             options_payload=options_payload,
         )
-        result = self._create_financial_document(normalized, provider_name=provider_name, dry_run=dry_run)
+        result = self._create_financial_document(
+            normalized,
+            provider_name=provider_name,
+            dry_run=dry_run,
+            include_wallet_balances=source == 'telegram',
+        )
         if source == 'telegram' and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
             return self._final_confirmation_result(
                 parsed=result['parsed'],
@@ -3776,7 +3815,7 @@ class AiOperationService:
         updated['comment'] = updated.get('comment') or answer_text
         return updated
 
-    def _create_financial_document(self, normalized, *, provider_name, dry_run):
+    def _create_financial_document(self, normalized, *, provider_name, dry_run, include_wallet_balances=False):
         intent = normalized['intent']
         amount = normalized['amount']
         missing_fields = []
@@ -3892,19 +3931,78 @@ class AiOperationService:
         with transaction.atomic():
             document = model_class.objects.create(**create_kwargs)
 
+        wallet_balances = self._wallet_balance_rows_for_documents([document]) if include_wallet_balances else []
         return {
             'status': 'created',
             'intent': intent,
             'provider': provider_name,
             'confidence': normalized['confidence'],
-            'reply_text': self._build_created_reply(document),
+            'reply_text': self._append_wallet_balances_to_reply(
+                self._build_created_reply(document),
+                wallet_balances,
+            ),
             'created_object': {
                 'model': model_class.__name__,
                 'id': str(document.id),
                 'number': document.number,
             },
+            'wallet_balances': wallet_balances,
             'parsed': normalized,
         }
+
+    def _documents_from_created_results(self, created_results):
+        model_by_name = {
+            'Receipt': Receipt,
+            'Expenditure': Expenditure,
+            'Transfer': Transfer,
+        }
+        documents = []
+        for result in created_results:
+            created_object = result.get('created_object') or {}
+            model_class = model_by_name.get(created_object.get('model'))
+            object_id = created_object.get('id')
+            if not model_class or not object_id:
+                continue
+            document = model_class.objects.filter(pk=object_id).first()
+            if document is not None:
+                documents.append(document)
+        return documents
+
+    def _wallets_for_document(self, document):
+        if isinstance(document, (Receipt, Expenditure)):
+            return [document.wallet] if document.wallet_id else []
+        if isinstance(document, Transfer):
+            wallets = []
+            if document.wallet_out_id:
+                wallets.append(document.wallet_out)
+            if document.wallet_in_id:
+                wallets.append(document.wallet_in)
+            return wallets
+        return []
+
+    def _wallet_balance_rows_for_documents(self, documents):
+        rows = []
+        seen_wallet_ids = set()
+        for document in documents:
+            for wallet in self._wallets_for_document(document):
+                if wallet.id in seen_wallet_ids:
+                    continue
+                seen_wallet_ids.add(wallet.id)
+                rows.append({
+                    'wallet_id': str(wallet.id),
+                    'wallet_name': wallet.name,
+                    'balance': _serialize_decimal(_wallet_balance(wallet, at_time=timezone.now())),
+                })
+        return rows
+
+    def _append_wallet_balances_to_reply(self, reply_text, wallet_balances):
+        if not wallet_balances:
+            return reply_text
+
+        lines = [reply_text, 'Остатки:']
+        for row in wallet_balances:
+            lines.append(f'- {row["wallet_name"]}: {row["balance"]}')
+        return '\n'.join(lines)
 
     def _build_preview(self, model_class, create_kwargs):
         preview = {

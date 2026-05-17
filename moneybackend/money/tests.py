@@ -3370,6 +3370,37 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(len(response.data['balances']), 1)
         self.assertEqual(response.data['balances'][0]['wallet_name'], 'Сбербанк')
 
+    def test_ai_telegram_webhook_created_reply_includes_operation_wallet_balances(self):
+        client = APIClient()
+        response = client.post(
+            '/api/v1/ai/telegram-webhook/',
+            {
+                'update_id': 2,
+                'message': {
+                    'message_id': 11,
+                    'text': 'расход сбер еда 2500',
+                    'chat': {'id': 100},
+                    'from': {'id': 200, 'username': 'trialex'},
+                },
+            },
+            format='json',
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN='telegram-secret',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        self.assertIn('Создан расход', response.data['reply_text'])
+        self.assertIn('Остатки:', response.data['reply_text'])
+        self.assertIn('- Сбербанк: 7500.00', response.data['reply_text'])
+        self.assertEqual(
+            response.data['wallet_balances'],
+            [{
+                'wallet_id': str(self.wallet_sber.id),
+                'wallet_name': 'Сбербанк',
+                'balance': '7500.00',
+            }],
+        )
+
     def test_ai_telegram_webhook_returns_help_before_binding(self):
         client = APIClient()
         response = client.post(
@@ -3792,7 +3823,17 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(third_response.status_code, 201)
         self.assertEqual(third_response.data['status'], 'created')
         self.assertEqual(len(third_response.data['created_objects']), 2)
-        self.assertEqual(third_response.data['reply_text'], 'Документы созданы.')
+        self.assertIn('Документы созданы.', third_response.data['reply_text'])
+        self.assertIn('Остатки:', third_response.data['reply_text'])
+        self.assertIn('- Альфа: -807.75', third_response.data['reply_text'])
+        self.assertEqual(
+            third_response.data['wallet_balances'],
+            [{
+                'wallet_id': str(self.wallet_alpha.id),
+                'wallet_name': 'Альфа',
+                'balance': '-807.75',
+            }],
+        )
         self.assertNotIn('0.00 | Без комментария', third_response.data['reply_text'])
         self.assertNotIn('комм.', third_response.data['reply_text'])
         expenditures = list(

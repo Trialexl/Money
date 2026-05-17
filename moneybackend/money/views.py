@@ -2524,6 +2524,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             result = self.get_operation_service().create_from_normalized(
                 normalized=result['parsed'],
                 provider_name=result['provider'],
+                source='web',
             )
         self._store_processed_input(
             source='web',
@@ -2797,6 +2798,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 result = self.get_operation_service().create_from_normalized(
                     normalized=result['parsed'],
                     provider_name=result['provider'],
+                    source='telegram',
                 )
                 self._close_pending_confirmation(pending)
                 fingerprint, normalized_text, image_sha256 = self._build_input_fingerprint(
@@ -2918,6 +2920,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             result = self.get_operation_service().create_from_normalized(
                 normalized=result['parsed'],
                 provider_name=result['provider'],
+                source='telegram',
             )
         self._upsert_pending_confirmation(
             binding=binding,
