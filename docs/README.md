@@ -8,6 +8,7 @@
 
 - [PRD: финансовые инструменты](product/financial-instruments-prd.md)
 - [Backlog: финансовые инструменты](product/financial-instruments-tasks.md)
+- [Backlog: стабилизация приложения](product/application-stabilization-tasks.md)
 - [Investment module](investment-module.md)
 
 ## Общая эксплуатация
