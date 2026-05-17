@@ -91,6 +91,13 @@ curl "https://api.telegram.org/bot<AI_TELEGRAM_BOT_TOKEN>/getWebhookInfo"
 
 ## 3. Быстрое обновление сервера
 
+Перед обновлением на рабочей машине желательно выполнить pre-deploy проверку:
+
+```bash
+cd /opt/money
+./ci.sh
+```
+
 Основной скрипт обновления:
 
 ```bash

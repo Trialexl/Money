@@ -214,7 +214,7 @@ SIMPLE_JWT = {
 # Spectacular API docs settings
 SPECTACULAR_SETTINGS = {
     'TITLE': 'LK API',
-    'DESCRIPTION': 'Автоматически сгенерированная документация REST API',
+    'DESCRIPTION': 'Автоматически сгенерированная документация REST API. Инвестиционный модуль не синхронизируется с 1С.',
     'VERSION': '1.0.0',
     'COMPONENT_SPLIT_REQUEST': True,
     'ENUM_NAME_OVERRIDES': {

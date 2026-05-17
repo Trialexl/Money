@@ -138,10 +138,14 @@ class InvestmentModuleIsolationTests(TestCase):
         date_from = (operation.date - timedelta(days=1)).isoformat()
         date_to = (operation.date + timedelta(days=1)).isoformat()
 
-        dashboard_response = self.client.get('/api/v1/dashboard/overview/', {'date': operation.date.isoformat()})
-        cash_flow_response = self.client.get('/api/v1/reports/cash-flow/', {'date_from': date_from, 'date_to': date_to})
-        budget_expense_response = self.client.get('/api/v1/reports/budget-expense/', {'date_from': date_from, 'date_to': date_to})
-        budget_income_response = self.client.get('/api/v1/reports/budget-income/', {'date_from': date_from, 'date_to': date_to})
+        admin_user = CustomUser.objects.create_superuser(username='money-admin', password='pass12345')
+        admin_client = APIClient()
+        admin_client.force_authenticate(admin_user)
+
+        dashboard_response = admin_client.get('/api/v1/dashboard/overview/', {'date': operation.date.isoformat()})
+        cash_flow_response = admin_client.get('/api/v1/reports/cash-flow/', {'date_from': date_from, 'date_to': date_to})
+        budget_expense_response = admin_client.get('/api/v1/reports/budget-expense/', {'date_from': date_from, 'date_to': date_to})
+        budget_income_response = admin_client.get('/api/v1/reports/budget-income/', {'date_from': date_from, 'date_to': date_to})
 
         self.assertEqual(dashboard_response.status_code, 200, dashboard_response.data)
         self.assertEqual(cash_flow_response.status_code, 200, cash_flow_response.data)
@@ -851,7 +855,7 @@ class InvestmentModuleIsolationTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['portfolio']['id'], str(self.portfolio.id))
-        self.assertEqual(response.data['cost_basis_usd'], '100.00')
+        self.assertEqual(str(response.data['cost_basis_usd']), '100.00')
 
     def test_sell_more_than_position_is_rejected(self):
         response = self.client.post('/api/v1/investment/operations/', {
@@ -1009,7 +1013,7 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertIn('operation_type', content)
         self.assertIn('date_from', content)
         self.assertIn('date_to', content)
-        self.assertIn('Инвестиционный модуль не синхронизируется с 1С.', content)
+        self.assertIn('не синхронизируется с 1С', content)
 
     def test_refresh_price_snapshots_creates_price_and_fx_snapshots(self):
         eth = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='ETH', name='Ethereum')

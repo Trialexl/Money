@@ -17,8 +17,10 @@ frontmoney/out/
 frontmoney/coverage/
 
 moneybackend/.venv/
+moneybackend/ci.sqlite3
 moneybackend/staticfiles/
 moneybackend/media/
+moneybackend/test-media/
 
 **/__pycache__/
 **/*.py[cod]

@@ -228,9 +228,17 @@ class FinancialOperationListFilteringMixin:
         if not search or not self.search_fields:
             return queryset
 
+        search_variants = {
+            search,
+            search.lower(),
+            search.upper(),
+            search.capitalize(),
+            search.title(),
+        }
         conditions = Q()
         for field_name in self.search_fields:
-            conditions |= Q(**{f'{field_name}__icontains': search})
+            for search_variant in search_variants:
+                conditions |= Q(**{f'{field_name}__icontains': search_variant})
         return queryset.filter(conditions)
 
 

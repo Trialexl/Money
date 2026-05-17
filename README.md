@@ -16,6 +16,16 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+## Проверка перед deploy
+
+```bash
+./ci.sh
+# или
+make ci
+```
+
+Скрипт запускает backend checks/tests/schema smoke, frontend typecheck/tests/build и `docker compose config`. Backend-тесты идут на `lk.test_settings` с SQLite и не трогают production-базу.
+
 ## Backup базы
 
 ```bash

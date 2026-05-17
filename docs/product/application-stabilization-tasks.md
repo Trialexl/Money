@@ -144,6 +144,8 @@ Acceptance criteria:
 
 ### P0-QA-001. CI pipeline для обязательных проверок
 
+Статус: готово частично - добавлены `./ci.sh`, `make ci` и GitHub Actions workflow. Frontend lint оставлен за `P1-FE-001`, потому что текущий `next lint` требует отдельной настройки под Next 15/ESLint 9.
+
 Проблема: нет единого gate перед deploy/push, поэтому регрессии ловятся уже на сервере.
 
 Задачи:
