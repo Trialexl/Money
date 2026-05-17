@@ -42,6 +42,8 @@ services:
       GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-30}
       GUNICORN_MAX_REQUESTS: ${GUNICORN_MAX_REQUESTS:-500}
       GUNICORN_MAX_REQUESTS_JITTER: ${GUNICORN_MAX_REQUESTS_JITTER:-50}
+      BACKUP_DIR: /app/backups/postgres
+      BACKUP_LOG_DIR: /app/backups/logs
     depends_on:
       db:
         condition: service_healthy
@@ -55,6 +57,8 @@ services:
       - "8000"
     volumes:
       - django_static:/app/staticfiles
+      - ./backups/postgres:/app/backups/postgres
+      - ./backups/logs:/app/backups/logs
 
   frontend:
     image: trialexl/money-frontend:latest

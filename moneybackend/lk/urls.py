@@ -8,11 +8,15 @@ from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.shortcuts import redirect
 
+from .admin_backup import install_admin_backup
+
 
 def home_redirect(request):
     """Перенаправление с главной страницы на админку"""
     return redirect('admin:index')
 
+
+install_admin_backup(admin.site)
 
 urlpatterns = [
     # Главная страница

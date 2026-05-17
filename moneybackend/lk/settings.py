@@ -64,6 +64,17 @@ AUTH_COOKIE_SECURE = config('AUTH_COOKIE_SECURE', default=not DEBUG, cast=bool)
 AUTH_COOKIE_SAMESITE = config('AUTH_COOKIE_SAMESITE', default='Lax')
 AUTH_COOKIE_PATH = config('AUTH_COOKIE_PATH', default='/')
 
+BACKUP_DIR = config('BACKUP_DIR', default=str(BASE_DIR / 'backups/postgres'))
+BACKUP_LOG_DIR = config('BACKUP_LOG_DIR', default=str(BASE_DIR / 'backups/logs'))
+BACKUP_MIN_BYTES = config('BACKUP_MIN_BYTES', default=1024, cast=int)
+BACKUP_UPLOAD_AFTER_CREATE = config('BACKUP_UPLOAD_AFTER_CREATE', default=True, cast=bool)
+BACKUP_REMOTE_DIR = config('BACKUP_REMOTE_DIR', default='')
+BACKUP_RCLONE_REMOTE = config('BACKUP_RCLONE_REMOTE', default='')
+BACKUP_RSYNC_TARGET = config('BACKUP_RSYNC_TARGET', default='')
+BACKUP_SCP_TARGET = config('BACKUP_SCP_TARGET', default='')
+SCHEDULED_JOBS_ALERT_WEBHOOK_URL = config('SCHEDULED_JOBS_ALERT_WEBHOOK_URL', default='')
+SCHEDULED_JOBS_MARKET_MAX_AGE_DAYS = config('SCHEDULED_JOBS_MARKET_MAX_AGE_DAYS', default=2, cast=int)
+
 
 # Application definition
 
@@ -83,6 +94,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'money',
     'investments.apps.InvestmentsConfig',
+    'ops.apps.OpsConfig',
 ]
 
 MIDDLEWARE = [

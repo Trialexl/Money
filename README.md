@@ -31,11 +31,16 @@ make ci
 ```bash
 ./backup-db.sh backup
 ./backup-db.sh list
+./backup-db.sh status
+./backup-db.sh restore-check latest
+./backup-db.sh sync latest
 ./backup-db.sh restore backups/postgres/money-postgres-YYYYMMDD-HHMMSS.dump.gz
 ./backup-db.sh cleanup 30
 ```
 
-Скрипт сохраняет дампы PostgreSQL в `backups/postgres/`, требует явное подтверждение `RESTORE` перед восстановлением и не удаляет Docker volumes.
+Скрипт сохраняет дампы PostgreSQL в `backups/postgres/`, проверяет gzip/размер, умеет проверять restore во временной БД, вести журнал `backups/logs/backup-events.log` и выгружать backup во внешний storage через `BACKUP_REMOTE_DIR`, `BACKUP_RCLONE_REMOTE`, `BACKUP_RSYNC_TARGET` или `BACKUP_SCP_TARGET`. Restore рабочей базы требует явное подтверждение `RESTORE` и не удаляет Docker volumes.
+
+В Django admin для superuser доступен раздел `Обслуживание -> Backup базы`: можно создать backup, скачать файл и запустить restore-check во временной БД.
 
 ## Healthcheck
 
@@ -45,6 +50,15 @@ curl -fsS https://<домен>/api/v1/health/
 ```
 
 В production compose включены healthchecks для backend/frontend/caddy и ограничение размера docker logs.
+
+## Регламентные задания
+
+```bash
+docker compose exec backend python manage.py run_scheduled_jobs --list
+docker compose exec backend python manage.py run_scheduled_jobs
+```
+
+Cron должен вызывать только `run_scheduled_jobs`; FX, prices, market-health, backup и restore-check хранят статус запусков в admin-разделе `Регламентные задания`.
 
 ## Обновление сервера
 

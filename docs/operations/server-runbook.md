@@ -134,6 +134,39 @@ sudo ./backup-db.sh backup
 
 ## 4. Backup и restore базы
 
+Минимальная настройка off-server backup в `.env`:
+
+```text
+BACKUP_RETENTION_DAYS=30
+BACKUP_MIN_BYTES=1024
+BACKUP_UPLOAD_AFTER_CREATE=true
+BACKUP_ALERT_WEBHOOK_URL=
+```
+
+Выбрать нужно только один внешний target, остальные оставить пустыми:
+
+```text
+# Самый простой вариант: примонтированный внешний диск/сетевой каталог.
+BACKUP_REMOTE_DIR=/mnt/backup/money/postgres
+
+# Или rclone remote.
+BACKUP_RCLONE_REMOTE=remote:money/postgres
+
+# Или отдельная машина по rsync/scp.
+BACKUP_RSYNC_TARGET=user@backup-host:/srv/backups/money/postgres
+BACKUP_SCP_TARGET=user@backup-host:/srv/backups/money/postgres
+```
+
+Если target задан, `backup` после создания локального файла автоматически выполнит `sync`.
+
+В Django admin для superuser есть раздел:
+
+```text
+Обслуживание -> Backup базы
+```
+
+Там можно создать backup, скачать файл и запустить restore-check. В production backend контейнер пишет в тот же host-каталог `backups/postgres/`, потому что он примонтирован в `docker-compose.yml`.
+
 Создать backup:
 
 ```bash
@@ -151,6 +184,21 @@ backups/postgres/
 
 ```bash
 sudo ./backup-db.sh list
+sudo ./backup-db.sh status
+```
+
+Проверить, что backup можно восстановить, не трогая рабочую базу:
+
+```bash
+sudo ./backup-db.sh restore-check latest
+```
+
+Команда создает временную БД внутри PostgreSQL, восстанавливает туда выбранный dump, выполняет smoke-запрос и удаляет временную БД.
+
+Выгрузить backup во внешний storage вручную:
+
+```bash
+sudo ./backup-db.sh sync latest
 ```
 
 Восстановить backup:
@@ -177,6 +225,12 @@ sudo ./backup-db.sh cleanup 30
 - Docker volumes не удаляются;
 - текущая база PostgreSQL не удаляется.
 
+Журнал backup/restore-check:
+
+```bash
+tail -100 backups/logs/backup-events.log
+```
+
 ## 5. Регламентные задания
 
 Редактировать cron:
@@ -199,30 +253,28 @@ APP_DIR=/opt/money
 API_BASE=https://trialexl.freemyip.com
 API_TOKEN=replace-with-api-token
 
-# Backup базы каждый день ночью.
-30 3 * * * cd "$APP_DIR" && sudo ./backup-db.sh backup >/tmp/money-db-backup.log 2>&1
-
-# Очистка backup-файлов старше 30 дней раз в неделю.
-45 3 * * 0 cd "$APP_DIR" && sudo ./backup-db.sh cleanup 30 >/tmp/money-db-backup-cleanup.log 2>&1
-
-# Курсы валют USD/EUR/RUB через CBR.
-0 8 * * * curl -fsS -X POST -H "Authorization: Token $API_TOKEN" "$API_BASE/api/v1/investment/fx-rates/refresh/" >/tmp/money-fx-refresh.log 2>&1
-
-# Цены активных финансовых инструментов.
-5 8 * * * curl -fsS -X POST -H "Authorization: Token $API_TOKEN" "$API_BASE/api/v1/investment/prices/refresh/" >/tmp/money-prices-refresh.log 2>&1
-
-# Контроль свежести рыночных данных.
-10 8 * * * curl -fsS -H "Authorization: Token $API_TOKEN" "$API_BASE/api/v1/investment/market-health/?max_age_days=2" >/tmp/money-market-health.log 2>&1
+# Единая точка регламентных заданий backend.
+*/5 * * * * cd "$APP_DIR" && sudo docker compose exec -T backend python manage.py run_scheduled_jobs >/tmp/money-scheduled-jobs.log 2>&1
 
 # Базовый healthcheck приложения с опциональным webhook-уведомлением.
 */5 * * * * cd "$APP_DIR" && HEALTH_URL="$API_BASE/api/v1/health/" ./health-check.sh >/tmp/money-health-cron.log 2>&1
 ```
 
-Почему такой порядок:
+Внутри `run_scheduled_jobs` backend сам хранит расписание, `last_run`, `status`, `duration`, `error` и историю запусков в admin-разделе `Регламентные задания`.
 
-- сначала обновляются FX-курсы;
-- потом цены инструментов;
-- потом проверяется healthcheck.
+Проверить список jobs:
+
+```bash
+sudo docker compose exec backend python manage.py run_scheduled_jobs --list
+```
+
+Запустить конкретную job вручную:
+
+```bash
+sudo docker compose exec backend python manage.py run_scheduled_jobs --job investment.fx_refresh
+```
+
+Старые cron+cURL строки для `fx-rates/refresh`, `prices/refresh`, `market-health`, `backup` и `restore-check` после обновления нужно удалить, чтобы задания не запускались дважды.
 
 ## 6. Диагностика health и логов
 
@@ -319,26 +371,34 @@ sudo docker compose exec backend python manage.py rebuild_investment_snapshots \
 
 ```bash
 sudo ./backup-db.sh list | tail
-tail -100 /tmp/money-db-backup.log
+sudo ./backup-db.sh status
+tail -100 backups/logs/backup-events.log
+```
+
+Последние регламентные задания:
+
+```bash
+tail -100 /tmp/money-scheduled-jobs.log
+sudo docker compose exec backend python manage.py run_scheduled_jobs --list
 ```
 
 Последнее обновление FX:
 
 ```bash
-tail -100 /tmp/money-fx-refresh.log
+sudo docker compose exec backend python manage.py run_scheduled_jobs --list | grep investment.fx_refresh
 ```
 
 Последнее обновление цен:
 
 ```bash
-tail -100 /tmp/money-prices-refresh.log
+sudo docker compose exec backend python manage.py run_scheduled_jobs --list | grep investment.price_refresh
 ```
 
 Последняя проверка healthcheck:
 
 ```bash
 tail -100 /tmp/money-health-cron.log
-tail -100 /tmp/money-market-health.log
+sudo docker compose exec backend python manage.py run_scheduled_jobs --list | grep investment.market_health
 ```
 
 Состояние контейнеров:
@@ -387,7 +447,7 @@ docker system prune --volumes
 `market-health` показывает `stale`:
 
 - данные есть, но старше `max_age_days`;
-- проверить cron и логи `/tmp/money-prices-refresh.log`, `/tmp/money-fx-refresh.log`.
+- проверить `run_scheduled_jobs --list`, admin-раздел `Регламентные задания` и лог `/tmp/money-scheduled-jobs.log`.
 
 После deploy frontend падает на chunk loading:
 
@@ -404,5 +464,6 @@ curl -fsS https://trialexl.freemyip.com/api/v1/health/
 curl -I https://trialexl.freemyip.com/
 curl -I https://trialexl.freemyip.com/api/schema/
 tail -50 /tmp/money-health-cron.log
-tail -50 /tmp/money-market-health.log
+tail -50 /tmp/money-scheduled-jobs.log
+sudo docker compose exec backend python manage.py run_scheduled_jobs --list
 ```

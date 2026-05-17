@@ -1,7 +1,10 @@
 import json
+import gzip
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from django.forms import inlineformset_factory, modelform_factory
@@ -13,6 +16,7 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from users.models import CustomUser
+from lk.admin_backup import BackupFile
 
 from . import ai_service
 from .admin import ExpenditureGraphicAdminForm, ExpenditureGraphicInlineFormSet
@@ -51,6 +55,74 @@ class HealthCheckTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'ok')
         self.assertEqual(response.data['checks']['database'], 'ok')
+
+
+class AdminBackupViewTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = CustomUser.objects.create_superuser(
+            username='backup-admin',
+            email='backup-admin@example.com',
+            password='adminpass123',
+        )
+
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.override = override_settings(
+            BACKUP_DIR=self.temp_dir.name,
+            BACKUP_LOG_DIR=str(Path(self.temp_dir.name) / 'logs'),
+            BACKUP_MIN_BYTES=1,
+        )
+        self.override.enable()
+        self.client.login(username='backup-admin', password='adminpass123')
+
+    def tearDown(self):
+        self.override.disable()
+        self.temp_dir.cleanup()
+
+    def test_admin_backup_page_is_available_for_superuser(self):
+        response = self.client.get('/admin/db-backups/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Backup базы')
+
+    def test_admin_backup_requires_superuser(self):
+        staff_user = CustomUser.objects.create_user(
+            username='backup-staff',
+            password='adminpass123',
+            is_staff=True,
+        )
+        self.client.force_login(staff_user)
+
+        response = self.client.get('/admin/db-backups/')
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_backup_create_action_calls_backup_service(self):
+        backup_path = Path(self.temp_dir.name) / 'money-postgres-20260101-000000.dump.gz'
+        backup_path.write_bytes(b'fake')
+        backup = BackupFile(
+            name=backup_path.name,
+            path=backup_path,
+            size=backup_path.stat().st_size,
+            created_at=timezone.now(),
+        )
+
+        with patch('lk.admin_backup.create_database_backup', return_value=backup) as create_backup:
+            response = self.client.post('/admin/db-backups/', {'action': 'create'})
+
+        self.assertEqual(response.status_code, 302)
+        create_backup.assert_called_once()
+
+    def test_admin_backup_download_returns_file(self):
+        backup_path = Path(self.temp_dir.name) / 'money-postgres-20260101-000000.dump.gz'
+        with gzip.open(backup_path, 'wb') as archive:
+            archive.write(b'fake-backup')
+
+        response = self.client.get(f'/admin/db-backups/{backup_path.name}/download/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Disposition'], f'attachment; filename="{backup_path.name}"')
 
 
 class MoneyRegisterParityTests(TestCase):

@@ -1,0 +1,72 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    Настоящий PostgreSQL dump создается через <code>pg_dump --format=custom</code>.
+    Restore-check восстанавливает файл во временную БД и не трогает рабочую базу.
+  </p>
+
+  <form method="post" style="margin: 0 0 24px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create">
+    <button type="submit" class="button default">Создать backup</button>
+  </form>
+
+  <div class="module">
+    <h2>Настройки</h2>
+    <table>
+      <tbody>
+        <tr>
+          <th scope="row">Каталог</th>
+          <td><code>{{ backup_dir }}</code></td>
+        </tr>
+        <tr>
+          <th scope="row">Журнал</th>
+          <td><code>{{ journal_path }}</code></td>
+        </tr>
+        <tr>
+          <th scope="row">Off-server target</th>
+          <td>{% if has_remote_target %}настроен{% else %}не настроен{% endif %}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <h2>Файлы</h2>
+    {% if backups %}
+      <table>
+        <thead>
+          <tr>
+            <th>Файл</th>
+            <th>Размер</th>
+            <th>Дата</th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for backup in backups %}
+            <tr>
+              <td><code>{{ backup.name }}</code></td>
+              <td>{{ backup.size|filesizeformat }}</td>
+              <td>{{ backup.created_at }}</td>
+              <td>
+                <a class="button" href="{% url 'admin:database_backup_download' backup.name %}">Скачать</a>
+                <form method="post" style="display:inline-block; margin-left: 8px;">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="restore-check">
+                  <input type="hidden" name="filename" value="{{ backup.name }}">
+                  <button type="submit" class="button">Проверить restore</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Backup-файлов пока нет.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

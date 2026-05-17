@@ -76,6 +76,8 @@ Acceptance criteria:
 
 ### P0-OPS-002. Off-server backup и проверка restore
 
+Статус: готово - `backup-db.sh` проверяет gzip/размер backup, пишет журнал, умеет выгружать backup во внешний storage и выполнять `restore-check` во временной БД без перезаписи production. В Django admin добавлен раздел для создания, скачивания и restore-check backup-файлов.
+
 Проблема: текущий backup сохраняется локально в `backups/postgres/`, но локального backup недостаточно при потере сервера или диска.
 
 Задачи:
@@ -93,6 +95,8 @@ Acceptance criteria:
 - restore-процедура проверена и описана.
 
 ### P0-OPS-003. Заменить разрозненные cron+cURL задачи на управляемые background jobs
+
+Статус: готово - добавлен backend app `ops` с registry регламентных заданий, состоянием `last_run/status/duration/error`, историей запусков в admin и management-командой `run_scheduled_jobs`; cron теперь нужен один, без набора curl-команд.
 
 Проблема: регламентные задачи сейчас запускаются через cron и HTTP endpoints. Это плохо контролируется, сложно ретраить и сложно диагностировать.
 
