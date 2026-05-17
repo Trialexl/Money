@@ -926,6 +926,20 @@ export default function ReportsPage() {
         title="Аналитика денег"
         description="Расходы, бюджет, чистый поток и кошельки за выбранный период."
         compact
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            className="h-auto max-w-full rounded-full px-4 py-2.5 text-sm font-semibold tracking-[-0.02em] shadow-sm"
+            onClick={() => handlePeriodDialogOpenChange(true)}
+          >
+            <CalendarDays className="mr-2 h-4 w-4 shrink-0 text-primary" />
+            <span className="min-w-0 truncate">
+              Период: {formatDate(dateFrom)} — {formatDate(dateTo)}
+            </span>
+            <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+          </Button>
+        }
       />
 
       <Card>
@@ -997,30 +1011,9 @@ export default function ReportsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <Card>
-          <CardContent className="space-y-4 p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-1">
-                <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">Период отчета</div>
-                <div className="text-sm leading-5 text-muted-foreground">
-                  С {formatDate(dateFrom)} по {formatDate(dateTo)}
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-auto justify-between gap-3 rounded-[18px] px-4 py-3 sm:min-w-[280px]"
-                onClick={() => handlePeriodDialogOpenChange(true)}
-              >
-                <span className="flex items-center gap-2">
-                  <CalendarDays className="h-4 w-4 text-primary" />
-                  Выбрать период
-                </span>
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </div>
-
-            {isBudgetTab ? (
+        {isBudgetTab ? (
+          <Card>
+            <CardContent className="space-y-4 p-4">
               <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1fr)]">
                 <div className="space-y-2">
                   <Label htmlFor="budget-project">Проект бюджета</Label>
@@ -1053,9 +1046,9 @@ export default function ReportsPage() {
                     <Label htmlFor="budget-forecast-mode" className="cursor-pointer">
                       Прогноз бюджета
                     </Label>
-                <div className="text-sm leading-5 text-muted-foreground">
-                  План до даты окончания, факт можно ограничить сегодняшним днем.
-                </div>
+                    <div className="text-sm leading-5 text-muted-foreground">
+                      План до даты окончания, факт можно ограничить сегодняшним днем.
+                    </div>
                   </div>
                   <Switch
                     id="budget-forecast-mode"
@@ -1068,15 +1061,13 @@ export default function ReportsPage() {
                   />
                 </div>
               </div>
-            ) : null}
-
-            <div className="rounded-[18px] border border-border/70 bg-background/70 px-3 py-2.5 text-sm text-muted-foreground">
-              Период: с {formatDate(dateFrom)} по {formatDate(dateTo)}
-              {isBudgetTab ? ` · проект: ${selectedBudgetProjectName}` : ""}
-              {isBudgetTab && isFutureReportDate && budgetForecast ? " · прогноз по бюджету включен" : ""}
-            </div>
-          </CardContent>
-        </Card>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline">Проект: {selectedBudgetProjectName}</Badge>
+                {isFutureReportDate && budgetForecast ? <Badge variant="secondary">Прогноз включен</Badge> : null}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Dialog.Root open={periodDialogOpen} onOpenChange={handlePeriodDialogOpenChange}>
           <Dialog.Portal>
