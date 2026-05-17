@@ -64,16 +64,6 @@ type BudgetPlanningRow = {
   executionPercent: number
 }
 
-type BudgetPlanDetailRow = {
-  key: string
-  monthKey: string
-  monthLabel: string
-  itemKey: string
-  itemName: string
-  amount: number
-  documentId: string | null
-}
-
 type BudgetPlanningGroup = {
   key: string
   label: string
@@ -125,6 +115,36 @@ type MonthlyCashFlowGroup = {
   expense: number
   net: number
   rows: MonthlyCashFlowItemRow[]
+}
+
+type ReportDocumentBreakdownRow = {
+  key: string
+  period: string
+  documentId: string | null
+  documentKind: EditableDocumentKind | null
+  documentTypeLabel: string
+  entryTypeLabel?: string
+  walletName?: string | null
+  itemName: string
+  income?: number
+  expense?: number
+  net?: number
+  amount?: number
+}
+
+type ReportDocumentBreakdown = {
+  mode: "cashflow" | "budget"
+  title: string
+  description: string
+  rows: ReportDocumentBreakdownRow[]
+  totals: {
+    income?: number
+    expense?: number
+    net?: number
+    plan?: number
+    actual?: number
+    balance?: number
+  }
 }
 
 const REPORT_ITEM_COLORS = [
@@ -225,6 +245,41 @@ function getReportTabParam(value: ReportTab) {
   return value === "categories" ? "expenses" : value
 }
 
+function getEditableDocumentKind(documentType?: string | null): EditableDocumentKind | null {
+  if (documentType === "Receipt") {
+    return "receipt"
+  }
+  if (documentType === "Expenditure") {
+    return "expenditure"
+  }
+  if (documentType === "Transfer") {
+    return "transfer"
+  }
+  if (documentType === "Budget") {
+    return "budget"
+  }
+  if (documentType === "AutoPayment") {
+    return "auto-payment"
+  }
+  return null
+}
+
+function formatDocumentTypeLabel(documentType?: string | null) {
+  return (
+    {
+      Receipt: "Приход",
+      Expenditure: "Расход",
+      Transfer: "Перевод",
+      Budget: "Бюджет",
+      AutoPayment: "Автосписание",
+    }[documentType || ""] || documentType || "Документ"
+  )
+}
+
+function formatBudgetEntryTypeLabel(entryType?: string | null) {
+  return entryType === "budget" ? "План" : "Факт"
+}
+
 function renderNoData(title: string, description: string) {
   return (
     <Card>
@@ -264,6 +319,7 @@ export default function ReportsPage() {
   const [hiddenMonthlyExpenseItemKeys, setHiddenMonthlyExpenseItemKeys] = useState<Record<string, boolean>>({})
   const [hiddenBudgetPlanItemKeys, setHiddenBudgetPlanItemKeys] = useState<Record<string, boolean>>({})
   const [editingDocument, setEditingDocument] = useState<{ kind: EditableDocumentKind; id: string } | null>(null)
+  const [documentBreakdown, setDocumentBreakdown] = useState<ReportDocumentBreakdown | null>(null)
   const [periodDialogOpen, setPeriodDialogOpen] = useState(false)
   const periodFromMonth = getMonthInputValue(draftDateFrom)
   const periodToMonth = getMonthInputValue(draftDateTo)
@@ -878,38 +934,9 @@ export default function ReportsPage() {
       .filter((row) => row.monthKey === monthKey)
       .forEach((row) => {
         chartRow[row.itemKey] = (Number(chartRow[row.itemKey]) || 0) + row.plannedAmount
-      })
+    })
     return chartRow
   })
-  const budgetPlanDetailRows: BudgetPlanDetailRow[] = budgetExpense.details
-    .filter((row) => row.entry_type === "budget" && row.amount > 0)
-    .map((row) => {
-      const monthKey = getMonthKey(row.period)
-      const itemKey = row.cash_flow_item_id || row.cash_flow_item_name || "unknown"
-      return {
-        key: `${row.document_id || "unknown"}:${row.period}:${itemKey}:${row.amount}`,
-        monthKey,
-        monthLabel: formatMonthLabel(monthKey),
-        itemKey,
-        itemName: row.cash_flow_item_name || "Неизвестная статья",
-        amount: row.amount,
-        documentId: row.document_id && row.document_type === "Budget" ? row.document_id : null,
-      }
-    })
-    .sort((left, right) => {
-      const monthCompare = left.monthKey.localeCompare(right.monthKey)
-      if (monthCompare !== 0) {
-        return monthCompare
-      }
-      return left.itemName.localeCompare(right.itemName, "ru")
-    })
-  const visibleBudgetPlanDetailRows = budgetPlanDetailRows.filter((row) => {
-    if (hiddenBudgetPlanItemKeySet.has(row.itemKey)) {
-      return false
-    }
-    return activeSelectedBudgetPlanItemKey ? row.itemKey === activeSelectedBudgetPlanItemKey : true
-  })
-  const visibleBudgetPlanDetailTotal = visibleBudgetPlanDetailRows.reduce((sum, row) => sum + row.amount, 0)
   const budgetPlanExportRows = visibleBudgetPlanningRows.map((row) => ({
     month: row.monthLabel,
     cashFlowItem: row.itemName,
@@ -918,6 +945,88 @@ export default function ReportsPage() {
     balance: row.balance,
     executionPercent: row.executionPercent,
   }))
+
+  const openDocument = (documentId: string | null, documentKind: EditableDocumentKind | null) => {
+    if (!documentId || !documentKind) {
+      return
+    }
+    setDocumentBreakdown(null)
+    setEditingDocument({ kind: documentKind, id: documentId })
+  }
+
+  const openMonthlyCashFlowBreakdown = (row: MonthlyCashFlowItemRow) => {
+    const rows: ReportDocumentBreakdownRow[] = cashFlow.details
+      .filter((detail) => getMonthKey(detail.period) === row.monthKey)
+      .filter((detail) => (detail.cash_flow_item_id || detail.cash_flow_item_name || "unknown") === row.itemKey)
+      .map((detail, index) => {
+        const documentKind = getEditableDocumentKind(detail.document_type)
+        const net = detail.income - detail.expense
+        return {
+          key: `${detail.document_id || "unknown"}:${detail.period}:${index}:${detail.income}:${detail.expense}`,
+          period: detail.period,
+          documentId: detail.document_id ?? null,
+          documentKind,
+          documentTypeLabel: formatDocumentTypeLabel(detail.document_type),
+          walletName: detail.wallet_name,
+          itemName: detail.cash_flow_item_name || "Неизвестная статья",
+          income: detail.income,
+          expense: detail.expense,
+          net,
+        }
+      })
+
+    const income = rows.reduce((sum, detail) => sum + (detail.income || 0), 0)
+    const expense = rows.reduce((sum, detail) => sum + (detail.expense || 0), 0)
+    setDocumentBreakdown({
+      mode: "cashflow",
+      title: `Документы: ${row.itemName}`,
+      description: `${row.monthLabel} · приход ${formatCurrency(income)} · расход ${formatCurrency(expense)}`,
+      rows,
+      totals: {
+        income,
+        expense,
+        net: income - expense,
+      },
+    })
+  }
+
+  const openBudgetPlanBreakdown = (row: BudgetPlanningRow) => {
+    const rows: ReportDocumentBreakdownRow[] = budgetExpense.details
+      .filter((detail) => getMonthKey(detail.period) === row.monthKey)
+      .filter((detail) => (detail.cash_flow_item_id || detail.cash_flow_item_name || "unknown") === row.itemKey)
+      .map((detail, index) => {
+        const documentKind = getEditableDocumentKind(detail.document_type)
+        return {
+          key: `${detail.entry_type}:${detail.document_id || "unknown"}:${detail.period}:${index}:${detail.amount}`,
+          period: detail.period,
+          documentId: detail.document_id ?? null,
+          documentKind,
+          documentTypeLabel: formatDocumentTypeLabel(detail.document_type),
+          entryTypeLabel: formatBudgetEntryTypeLabel(detail.entry_type),
+          itemName: detail.cash_flow_item_name || "Неизвестная статья",
+          amount: detail.amount,
+        }
+      })
+
+    const plan = rows
+      .filter((detail) => detail.entryTypeLabel === "План")
+      .reduce((sum, detail) => sum + (detail.amount || 0), 0)
+    const actual = rows
+      .filter((detail) => detail.entryTypeLabel !== "План")
+      .reduce((sum, detail) => sum + (detail.amount || 0), 0)
+
+    setDocumentBreakdown({
+      mode: "budget",
+      title: `Документы: ${row.itemName}`,
+      description: `${row.monthLabel} · план ${formatCurrency(plan)} · факт ${formatCurrency(actual)}`,
+      rows,
+      totals: {
+        plan,
+        actual,
+        balance: plan - actual,
+      },
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -1554,7 +1663,7 @@ export default function ReportsPage() {
                   <div className="space-y-1">
                     <CardTitle>Расходы по месяцам и статьям</CardTitle>
                     <CardDescription>
-                      Клик по названию статьи включает отбор. Кнопка с глазом исключает статью из графика и таблицы.
+                      Клик по легенде включает отбор, глаз исключает статью. Клик по строке таблицы открывает документы.
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1793,7 +1902,11 @@ export default function ReportsPage() {
                             </td>
                           </tr>
                           {isCollapsed ? null : group.rows.map((row) => (
-                            <tr key={row.key} className="border-b border-border/60">
+                            <tr
+                              key={row.key}
+                              className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40"
+                              onClick={() => openMonthlyCashFlowBreakdown(row)}
+                            >
                               <td className="py-2.5 pl-5 font-medium">{row.itemName}</td>
                               <td className="py-2.5 text-right text-emerald-600 dark:text-emerald-300">
                                 {row.income > 0 ? formatCurrency(row.income) : "—"}
@@ -1892,7 +2005,7 @@ export default function ReportsPage() {
                   <div className="space-y-1">
                     <CardTitle>График планируемых расходов: {selectedBudgetProjectName}</CardTitle>
                     <CardDescription>
-                      Клик по названию статьи включает отбор. Кнопка с глазом исключает статью из графика и таблиц.
+                      Клик по легенде включает отбор, глаз исключает статью. Клик по строке таблицы открывает документы.
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -2131,11 +2244,7 @@ export default function ReportsPage() {
                               <tr
                                 key={row.key}
                                 className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40"
-                                onClick={() =>
-                                  setSelectedBudgetPlanItemKey((current) =>
-                                    current === row.itemKey ? null : row.itemKey
-                                  )
-                                }
+                                onClick={() => openBudgetPlanBreakdown(row)}
                               >
                                 <td className="py-2.5 pl-5 font-medium">{row.itemName}</td>
                                 <td className="py-2.5 text-right">{formatCurrency(row.plannedAmount)}</td>
@@ -2167,66 +2276,162 @@ export default function ReportsPage() {
                     </table>
                   </div>
                   )}
-
-                  <div className="space-y-3">
-                    <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">
-                      Строки документов, из которых сложился план
-                    </div>
-                    {visibleBudgetPlanDetailRows.length === 0 ? (
-                      <div className="rounded-[18px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
-                        Нет видимых строк графика бюджета. Сними отбор или верни скрытые статьи.
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-[13px] sm:text-sm">
-                          <thead>
-                            <tr className="border-b text-left text-xs text-muted-foreground">
-                              <th className="pb-3">Месяц</th>
-                              <th className="pb-3">Статья</th>
-                              <th className="pb-3">Документ</th>
-                              <th className="pb-3 text-right">Сумма</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {visibleBudgetPlanDetailRows.map((row) => (
-                              <tr key={row.key} className="border-b border-border/60">
-                                <td className="py-2.5">{row.monthLabel}</td>
-                                <td className="py-2.5">{row.itemName}</td>
-                                <td className="py-2.5">
-                                  {row.documentId ? (
-                                    <button
-                                      type="button"
-                                      className="text-primary hover:underline"
-                                      onClick={() => setEditingDocument({ kind: "budget", id: row.documentId! })}
-                                    >
-                                      Открыть
-                                    </button>
-                                  ) : (
-                                    <span className="text-muted-foreground">—</span>
-                                  )}
-                                </td>
-                                <td className="py-2.5 text-right font-medium">{formatCurrency(row.amount)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot>
-                            <tr className="border-t bg-muted/40 text-sm font-semibold">
-                              <td className="py-3" colSpan={3}>
-                                Итого по строкам
-                              </td>
-                              <td className="py-3 text-right">{formatCurrency(visibleBudgetPlanDetailTotal)}</td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    )}
-                  </div>
                 </CardContent>
               </Card>
             </>
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog.Root
+        open={Boolean(documentBreakdown)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDocumentBreakdown(null)
+          }
+        }}
+      >
+        {documentBreakdown ? (
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm" />
+            <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[min(calc(100vw-18px),980px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[28px] border border-border/70 bg-background shadow-[0_35px_120px_-45px_rgba(15,23,42,0.85)]">
+              <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4 sm:px-6">
+                <div className="min-w-0">
+                  <Dialog.Title className="truncate text-xl font-semibold tracking-[-0.03em] text-foreground">
+                    {documentBreakdown.title}
+                  </Dialog.Title>
+                  <Dialog.Description className="mt-1 text-sm leading-5 text-muted-foreground">
+                    {documentBreakdown.description}
+                  </Dialog.Description>
+                </div>
+                <Dialog.Close asChild>
+                  <Button variant="ghost" size="icon" className="shrink-0 rounded-2xl" aria-label="Закрыть">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </Dialog.Close>
+              </div>
+
+              <div className="max-h-[calc(92vh-92px)] overflow-y-auto px-4 py-4 sm:px-6">
+                {documentBreakdown.rows.length === 0 ? (
+                  <div className="rounded-[18px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                    Документы для этой строки не найдены.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[13px] sm:text-sm">
+                      <thead>
+                        {documentBreakdown.mode === "cashflow" ? (
+                          <tr className="border-b text-left text-xs text-muted-foreground">
+                            <th className="pb-3">Дата</th>
+                            <th className="pb-3">Документ</th>
+                            <th className="pb-3">Кошелек</th>
+                            <th className="pb-3 text-right">Приход</th>
+                            <th className="pb-3 text-right">Расход</th>
+                            <th className="pb-3 text-right">Итог</th>
+                            <th className="pb-3 text-right">Действие</th>
+                          </tr>
+                        ) : (
+                          <tr className="border-b text-left text-xs text-muted-foreground">
+                            <th className="pb-3">Дата</th>
+                            <th className="pb-3">Вид</th>
+                            <th className="pb-3">Документ</th>
+                            <th className="pb-3 text-right">Сумма</th>
+                            <th className="pb-3 text-right">Действие</th>
+                          </tr>
+                        )}
+                      </thead>
+                      <tbody>
+                        {documentBreakdown.rows.map((row) =>
+                          documentBreakdown.mode === "cashflow" ? (
+                            <tr key={row.key} className="border-b border-border/60">
+                              <td className="py-2.5 whitespace-nowrap">{formatDate(row.period)}</td>
+                              <td className="py-2.5">
+                                <div className="font-medium">{row.documentTypeLabel}</div>
+                                <div className="text-xs text-muted-foreground">{row.itemName}</div>
+                              </td>
+                              <td className="py-2.5 text-muted-foreground">{row.walletName || "—"}</td>
+                              <td className="py-2.5 text-right text-emerald-600 dark:text-emerald-300">
+                                {(row.income || 0) > 0 ? formatCurrency(row.income || 0) : "—"}
+                              </td>
+                              <td className="py-2.5 text-right text-rose-600 dark:text-rose-300">
+                                {(row.expense || 0) > 0 ? formatCurrency(row.expense || 0) : "—"}
+                              </td>
+                              <td className={`py-2.5 text-right ${(row.net || 0) >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                                {formatCurrency(row.net || 0)}
+                              </td>
+                              <td className="py-2.5 text-right">
+                                {row.documentId && row.documentKind ? (
+                                  <Button variant="outline" size="sm" onClick={() => openDocument(row.documentId, row.documentKind)}>
+                                    Открыть
+                                  </Button>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ) : (
+                            <tr key={row.key} className="border-b border-border/60">
+                              <td className="py-2.5 whitespace-nowrap">{formatDate(row.period)}</td>
+                              <td className="py-2.5">
+                                <Badge variant={row.entryTypeLabel === "План" ? "outline" : "secondary"}>
+                                  {row.entryTypeLabel}
+                                </Badge>
+                              </td>
+                              <td className="py-2.5">
+                                <div className="font-medium">{row.documentTypeLabel}</div>
+                                <div className="text-xs text-muted-foreground">{row.itemName}</div>
+                              </td>
+                              <td className="py-2.5 text-right font-medium">{formatCurrency(row.amount || 0)}</td>
+                              <td className="py-2.5 text-right">
+                                {row.documentId && row.documentKind ? (
+                                  <Button variant="outline" size="sm" onClick={() => openDocument(row.documentId, row.documentKind)}>
+                                    Открыть
+                                  </Button>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                      <tfoot>
+                        {documentBreakdown.mode === "cashflow" ? (
+                          <tr className="border-t bg-muted/40 text-sm font-semibold">
+                            <td className="py-3" colSpan={3}>
+                              Итого
+                            </td>
+                            <td className="py-3 text-right text-emerald-600 dark:text-emerald-300">
+                              {formatCurrency(documentBreakdown.totals.income || 0)}
+                            </td>
+                            <td className="py-3 text-right text-rose-600 dark:text-rose-300">
+                              {formatCurrency(documentBreakdown.totals.expense || 0)}
+                            </td>
+                            <td className={`py-3 text-right ${(documentBreakdown.totals.net || 0) >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                              {formatCurrency(documentBreakdown.totals.net || 0)}
+                            </td>
+                            <td />
+                          </tr>
+                        ) : (
+                          <tr className="border-t bg-muted/40 text-sm font-semibold">
+                            <td className="py-3" colSpan={3}>
+                              План {formatCurrency(documentBreakdown.totals.plan || 0)} · факт {formatCurrency(documentBreakdown.totals.actual || 0)}
+                            </td>
+                            <td className={`py-3 text-right ${(documentBreakdown.totals.balance || 0) >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
+                              {formatCurrency(documentBreakdown.totals.balance || 0)}
+                            </td>
+                            <td />
+                          </tr>
+                        )}
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        ) : null}
+      </Dialog.Root>
 
       <DocumentEditDialog
         document={editingDocument}
