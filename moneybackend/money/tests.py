@@ -1,5 +1,6 @@
 import json
 import gzip
+import io
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
@@ -123,6 +124,37 @@ class AdminBackupViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Disposition'], f'attachment; filename="{backup_path.name}"')
+
+    def test_admin_backup_create_writes_real_gzip_archive(self):
+        from lk.admin_backup import create_database_backup
+
+        class FakeDumpProcess:
+            def __init__(self, *args, **kwargs):
+                self.stdout = io.BytesIO(b'postgres-custom-dump')
+
+            def wait(self):
+                return 0
+
+            def kill(self):
+                return None
+
+        postgres_database = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': 'money',
+                'USER': 'money',
+                'PASSWORD': 'secret',
+                'HOST': 'db',
+                'PORT': '5432',
+            }
+        }
+
+        with override_settings(DATABASES=postgres_database, BACKUP_UPLOAD_AFTER_CREATE=False):
+            with patch('lk.admin_backup.subprocess.Popen', FakeDumpProcess):
+                backup = create_database_backup()
+
+        with gzip.open(backup.path, 'rb') as archive:
+            self.assertEqual(archive.read(), b'postgres-custom-dump')
 
 
 class MoneyRegisterParityTests(TestCase):

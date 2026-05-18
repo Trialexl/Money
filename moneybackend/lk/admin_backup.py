@@ -2,6 +2,7 @@ import gzip
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -195,16 +196,32 @@ def create_database_backup() -> BackupFile:
     ]
 
     try:
-        with gzip.open(tmp, 'wb') as archive:
-            process = subprocess.run(
+        with tempfile.TemporaryFile() as stderr_buffer:
+            process = subprocess.Popen(
                 command,
-                stdout=archive,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=stderr_buffer,
                 env=_pg_env(database),
-                check=False,
             )
-        if process.returncode != 0:
-            stderr = process.stderr.decode('utf-8', errors='replace') if process.stderr else ''
+            try:
+                if process.stdout is None:
+                    raise BackupError('pg_dump не вернул поток данных.')
+                with gzip.open(tmp, 'wb') as archive:
+                    shutil.copyfileobj(process.stdout, archive)
+                returncode = process.wait()
+            except Exception:
+                process.kill()
+                process.wait()
+                raise
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
+
+            stderr_buffer.seek(0)
+            stderr_output = stderr_buffer.read()
+
+        if returncode != 0:
+            stderr = stderr_output.decode('utf-8', errors='replace') if stderr_output else ''
             raise BackupError(stderr.strip() or 'pg_dump завершился с ошибкой.')
 
         tmp.replace(target)
@@ -214,6 +231,9 @@ def create_database_backup() -> BackupFile:
             synced_to = _sync_backup(target)
         _append_journal('backup', 'ok', target, f'created {synced_to}'.strip())
         return list_backup_files()[0]
+    except FileNotFoundError as exc:
+        tmp.unlink(missing_ok=True)
+        raise BackupError('Не найдена утилита pg_dump. Проверь postgresql-client в backend image.') from exc
     except Exception:
         tmp.unlink(missing_ok=True)
         if target.exists():
