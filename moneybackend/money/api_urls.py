@@ -1,5 +1,5 @@
 from django.urls import path, include
-from . import views
+from . import graphic_views, register_views, sync_views, technical_views, views
 from rest_framework import routers
 
 
@@ -12,7 +12,7 @@ router.register(r'wallets', views.WalletViewSet, basename='wallets')
 router.register(r'projects', views.ProjectViewSet, basename='projects')
 router.register(r'dashboard', views.DashboardViewSet, basename='dashboard')
 router.register(r'reports', views.ReportViewSet, basename='reports')
-router.register(r'technical-health', views.TechnicalHealthViewSet, basename='technical-health')
+router.register(r'technical-health', technical_views.TechnicalHealthViewSet, basename='technical-health')
 
 # Финансовые операции
 router.register(r'receipts', views.ReceiptViewSet, basename='receipts')
@@ -22,15 +22,15 @@ router.register(r'budgets', views.BudgetViewSet, basename='budgets')
 router.register(r'auto-payments', views.AutoPaymentViewSet, basename='auto-payments')
 
 # Регистры (только для чтения)
-router.register(r'flow-of-funds', views.FlowOfFundsViewSet, basename='flow-of-funds')
-router.register(r'budget-income', views.BudgetIncomeViewSet, basename='budget-income')
-router.register(r'budget-expense', views.BudgetExpenseViewSet, basename='budget-expense')
+router.register(r'flow-of-funds', register_views.FlowOfFundsViewSet, basename='flow-of-funds')
+router.register(r'budget-income', register_views.BudgetIncomeViewSet, basename='budget-income')
+router.register(r'budget-expense', register_views.BudgetExpenseViewSet, basename='budget-expense')
 
 # Графики планирования
-router.register(r'expenditure-graphics', views.ExpenditureGraphicViewSet, basename='expenditure-graphics')
-router.register(r'transfer-graphics', views.TransferGraphicViewSet, basename='transfer-graphics')
-router.register(r'budget-graphics', views.BudgetGraphicViewSet, basename='budget-graphics')
-router.register(r'auto-payment-graphics', views.AutoPaymentGraphicViewSet, basename='auto-payment-graphics')
+router.register(r'expenditure-graphics', graphic_views.ExpenditureGraphicViewSet, basename='expenditure-graphics')
+router.register(r'transfer-graphics', graphic_views.TransferGraphicViewSet, basename='transfer-graphics')
+router.register(r'budget-graphics', graphic_views.BudgetGraphicViewSet, basename='budget-graphics')
+router.register(r'auto-payment-graphics', graphic_views.AutoPaymentGraphicViewSet, basename='auto-payment-graphics')
 
 app_name = 'money_api'
 
@@ -53,12 +53,12 @@ urlpatterns = [
     ),
     path(
         'onec-sync/outbox/',
-        views.OneCSyncOutboxViewSet.as_view({'get': 'list'}),
+        sync_views.OneCSyncOutboxViewSet.as_view({'get': 'list'}),
         name='onec-sync-outbox',
     ),
     path(
         'onec-sync/outbox/ack/',
-        views.OneCSyncOutboxViewSet.as_view({'post': 'ack'}),
+        sync_views.OneCSyncOutboxViewSet.as_view({'post': 'ack'}),
         name='onec-sync-outbox-ack',
     ),
 ]
