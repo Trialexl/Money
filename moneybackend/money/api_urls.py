@@ -12,6 +12,7 @@ router.register(r'wallets', views.WalletViewSet, basename='wallets')
 router.register(r'projects', views.ProjectViewSet, basename='projects')
 router.register(r'dashboard', views.DashboardViewSet, basename='dashboard')
 router.register(r'reports', views.ReportViewSet, basename='reports')
+router.register(r'technical-health', views.TechnicalHealthViewSet, basename='technical-health')
 
 # Финансовые операции
 router.register(r'receipts', views.ReceiptViewSet, basename='receipts')

@@ -312,6 +312,13 @@ class InvestmentOperation(models.Model):
         verbose_name = 'Инвестиционная операция'
         verbose_name_plural = 'Инвестиционные операции'
         ordering = ['-date', '-created_at']
+        indexes = [
+            models.Index(fields=['portfolio', '-date'], name='inv_op_portfolio_date_idx'),
+            models.Index(fields=['account', '-date'], name='inv_op_account_date_idx'),
+            models.Index(fields=['instrument', '-date'], name='inv_op_instr_date_idx'),
+            models.Index(fields=['deleted', 'posted', '-date'], name='inv_op_state_date_idx'),
+            models.Index(fields=['operation_type', '-date'], name='inv_op_type_date_idx'),
+        ]
 
     def clean(self):
         errors = {}

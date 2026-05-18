@@ -24,9 +24,10 @@ from django.db.models import Sum, Count, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiTypes, extend_schema
 
 from .ai_service import AiOperationService, FINAL_CONFIRMATION_FIELD
+from .data_health import generate_data_health_report
 from .models import *
 from .onec_context import is_onec_sync_request
 from .serializers import *
@@ -1017,6 +1018,20 @@ class DashboardViewSet(viewsets.ViewSet):
             'overrun': _dashboard_money_str(overrun),
             'details': details,
         })
+
+
+class TechnicalHealthViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAdminUser]
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def list(self, request):
+        try:
+            detail_limit = int(request.query_params.get('limit', '50'))
+        except (TypeError, ValueError):
+            return Response({'limit': 'Укажите целое число.'}, status=status.HTTP_400_BAD_REQUEST)
+        if detail_limit < 0 or detail_limit > 200:
+            return Response({'limit': 'Значение должно быть от 0 до 200.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(generate_data_health_report(detail_limit=detail_limit))
 
 
 class ReportViewSet(viewsets.ViewSet):

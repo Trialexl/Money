@@ -1,0 +1,69 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    Read-only сверка данных. Отчет показывает расхождения документов и регистров,
+    orphan-регистры, очередь 1С, AI-уточнения, регламентные задания и качество рыночных данных.
+  </p>
+
+  <div class="module">
+    <h2>Итог</h2>
+    <table>
+      <tbody>
+        <tr>
+          <th scope="row">Статус</th>
+          <td><strong>{{ report.status }}</strong></td>
+        </tr>
+        <tr>
+          <th scope="row">Сформировано</th>
+          <td>{{ report.generated_at }}</td>
+        </tr>
+        <tr>
+          <th scope="row">Проверки</th>
+          <td>
+            всего {{ report.summary.checks_total }},
+            ok {{ report.summary.ok }},
+            warning {{ report.summary.warning }},
+            error {{ report.summary.error }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <h2>Проверки</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Проверка</th>
+          <th>Статус</th>
+          <th>Количество</th>
+          <th>Описание</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for check in report.checks %}
+          <tr>
+            <th scope="row">{{ check.title }}</th>
+            <td><strong>{{ check.status }}</strong></td>
+            <td>{{ check.count }}</td>
+            <td>{{ check.summary }}</td>
+          </tr>
+          {% if check.items %}
+            <tr>
+              <td colspan="4">
+                <details>
+                  <summary>Показать детали</summary>
+                  <pre style="white-space: pre-wrap;">{{ check.items|pprint }}</pre>
+                </details>
+              </td>
+            </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

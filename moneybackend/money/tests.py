@@ -18,6 +18,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from users.models import CustomUser
 from lk.admin_backup import BackupFile
+from .data_health import generate_data_health_report
 
 from . import ai_service
 from .admin import ExpenditureGraphicAdminForm, ExpenditureGraphicInlineFormSet
@@ -155,6 +156,55 @@ class AdminBackupViewTests(TestCase):
 
         with gzip.open(backup.path, 'rb') as archive:
             self.assertEqual(archive.read(), b'postgres-custom-dump')
+
+
+class DataHealthReportTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = CustomUser.objects.create_superuser(
+            username='health-admin',
+            email='health-admin@example.com',
+            password='adminpass123',
+        )
+
+    def setUp(self):
+        self.client.login(username='health-admin', password='adminpass123')
+
+    def test_technical_health_api_returns_report_shape(self):
+        client = APIClient()
+        client.force_authenticate(self.admin_user)
+
+        response = client.get('/api/v1/technical-health/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(response.data['status'], ['ok', 'warning', 'error'])
+        self.assertIn('checks', response.data)
+
+    def test_data_health_detects_missing_document_registers(self):
+        wallet = Wallet.objects.create(name='Основной')
+        item = CashFlowItem.objects.create(name='Продукты')
+        expenditure = Expenditure.objects.create(
+            amount=Decimal('100.00'),
+            wallet=wallet,
+            cash_flow_item=item,
+            date=timezone.now(),
+        )
+        FlowOfFunds.objects.filter(document_id=expenditure.id).delete()
+
+        report = generate_data_health_report()
+        register_check = next(check for check in report['checks'] if check['key'] == 'register_consistency')
+
+        self.assertEqual(report['status'], 'error')
+        self.assertEqual(register_check['status'], 'error')
+        self.assertEqual(register_check['count'], 1)
+        self.assertEqual(register_check['items'][0]['document_id'], str(expenditure.id))
+        self.assertEqual(register_check['items'][0]['register'], 'flow_of_funds')
+
+    def test_data_health_admin_page_is_available_for_superuser(self):
+        response = self.client.get('/admin/data-health/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Сверка данных')
 
 
 class MoneyRegisterParityTests(TestCase):

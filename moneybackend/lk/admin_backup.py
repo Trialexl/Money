@@ -16,6 +16,8 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
 
+from money.data_health import generate_data_health_report
+
 
 class BackupError(RuntimeError):
     pass
@@ -324,6 +326,25 @@ def backup_download_view(request, filename: str):
     return FileResponse(file_path.open('rb'), as_attachment=True, filename=file_path.name)
 
 
+def data_health_admin_view(request):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    try:
+        detail_limit = int(request.GET.get('limit', '50'))
+    except (TypeError, ValueError):
+        detail_limit = 50
+    detail_limit = max(0, min(detail_limit, 200))
+
+    context = {
+        **admin.site.each_context(request),
+        'title': 'Сверка данных',
+        'report': generate_data_health_report(detail_limit=detail_limit),
+        'detail_limit': detail_limit,
+    }
+    return TemplateResponse(request, 'admin/data_health.html', context)
+
+
 def install_admin_backup(site: admin.AdminSite) -> None:
     if getattr(site, '_money_database_backup_installed', False):
         return
@@ -335,6 +356,7 @@ def install_admin_backup(site: admin.AdminSite) -> None:
         custom_urls = [
             path('db-backups/', site.admin_view(backup_admin_view), name='database_backup'),
             path('db-backups/<str:filename>/download/', site.admin_view(backup_download_view), name='database_backup_download'),
+            path('data-health/', site.admin_view(data_health_admin_view), name='data_health'),
         ]
         return custom_urls + original_get_urls()
 
@@ -351,6 +373,13 @@ def install_admin_backup(site: admin.AdminSite) -> None:
                     'object_name': 'DatabaseBackup',
                     'perms': {'view': True},
                     'admin_url': reverse('admin:database_backup'),
+                    'add_url': None,
+                    'view_only': True,
+                }, {
+                    'name': 'Сверка данных',
+                    'object_name': 'DataHealth',
+                    'perms': {'view': True},
+                    'admin_url': reverse('admin:data_health'),
                     'add_url': None,
                     'view_only': True,
                 }],

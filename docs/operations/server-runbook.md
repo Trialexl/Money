@@ -163,9 +163,12 @@ BACKUP_SCP_TARGET=user@backup-host:/srv/backups/money/postgres
 
 ```text
 Обслуживание -> Backup базы
+Обслуживание -> Сверка данных
 ```
 
 Там можно создать backup, скачать файл и запустить restore-check. В production backend контейнер пишет в тот же host-каталог `backups/postgres/`, потому что он примонтирован в `docker-compose.yml`.
+
+В `Сверка данных` доступен read-only технический отчет: документы и регистры, orphan-регистры, очередь 1С, AI-уточнения, регламентные задания и качество рыночных данных.
 
 Создать backup:
 

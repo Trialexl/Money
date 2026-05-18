@@ -346,6 +346,12 @@ class Receipt(FinancialOperationMixin, models.Model):
         verbose_name = 'Приход'
         verbose_name_plural = 'Приходы'
         ordering = ['-date']
+        indexes = [
+            models.Index(fields=['-date'], name='m_receipt_date_idx'),
+            models.Index(fields=['deleted', 'posted', '-date'], name='m_receipt_state_date_idx'),
+            models.Index(fields=['wallet', '-date'], name='m_receipt_wallet_date_idx'),
+            models.Index(fields=['cash_flow_item', '-date'], name='m_receipt_cfi_date_idx'),
+        ]
 
     def clean(self):
         errors = {}
@@ -411,6 +417,12 @@ class Expenditure(FinancialOperationMixin, models.Model):
         verbose_name = 'Расход'
         verbose_name_plural = 'Расходы'
         ordering = ['-date']
+        indexes = [
+            models.Index(fields=['-date'], name='m_exp_date_idx'),
+            models.Index(fields=['deleted', 'posted', '-date'], name='m_exp_state_date_idx'),
+            models.Index(fields=['wallet', '-date'], name='m_exp_wallet_date_idx'),
+            models.Index(fields=['cash_flow_item', '-date'], name='m_exp_cfi_date_idx'),
+        ]
 
     def clean(self):
         errors = {}
@@ -535,6 +547,13 @@ class Transfer(FinancialOperationMixin, models.Model):
         verbose_name = 'Перевод'
         verbose_name_plural = 'Переводы'
         ordering = ['-date']
+        indexes = [
+            models.Index(fields=['-date'], name='m_transfer_date_idx'),
+            models.Index(fields=['deleted', 'posted', '-date'], name='m_transfer_state_date_idx'),
+            models.Index(fields=['wallet_out', '-date'], name='m_transfer_out_date_idx'),
+            models.Index(fields=['wallet_in', '-date'], name='m_transfer_in_date_idx'),
+            models.Index(fields=['cash_flow_item', '-date'], name='m_transfer_cfi_date_idx'),
+        ]
 
     def clean(self):
         errors = {}
@@ -670,6 +689,13 @@ class Budget(FinancialOperationMixin, models.Model):
         verbose_name = 'Бюджет'
         verbose_name_plural = 'Бюджеты'
         ordering = ['-date']
+        indexes = [
+            models.Index(fields=['-date'], name='m_budget_date_idx'),
+            models.Index(fields=['date_start'], name='m_budget_start_idx'),
+            models.Index(fields=['deleted', 'posted', '-date'], name='m_budget_state_date_idx'),
+            models.Index(fields=['type_of_budget', 'cash_flow_item', 'date_start'], name='m_budget_type_cfi_start_idx'),
+            models.Index(fields=['project', 'date_start'], name='m_budget_project_start_idx'),
+        ]
 
     def clean(self):
         errors = {}
@@ -776,6 +802,14 @@ class AutoPayment(FinancialOperationMixin, models.Model):
         verbose_name = 'Автоплатеж'
         verbose_name_plural = 'Автоплатежи'
         ordering = ['-date']
+        indexes = [
+            models.Index(fields=['-date'], name='m_autopay_date_idx'),
+            models.Index(fields=['date_start'], name='m_autopay_start_idx'),
+            models.Index(fields=['deleted', 'posted', '-date'], name='m_autopay_state_date_idx'),
+            models.Index(fields=['wallet_out', 'date_start'], name='m_autopay_out_start_idx'),
+            models.Index(fields=['wallet_in', 'date_start'], name='m_autopay_in_start_idx'),
+            models.Index(fields=['cash_flow_item', 'date_start'], name='m_autopay_cfi_start_idx'),
+        ]
 
     def clean(self):
         errors = {}
@@ -935,6 +969,12 @@ class FlowOfFunds(models.Model):
         verbose_name = 'Движение средств'
         verbose_name_plural = 'Движения средств'
         ordering = ['-period']
+        indexes = [
+            models.Index(fields=['-period'], name='m_flow_period_idx'),
+            models.Index(fields=['wallet', '-period'], name='m_flow_wallet_period_idx'),
+            models.Index(fields=['cash_flow_item', '-period'], name='m_flow_cfi_period_idx'),
+            models.Index(fields=['type_of_document', 'document_id'], name='m_flow_doc_idx'),
+        ]
 
 
 class BudgetExpense(models.Model):
@@ -958,6 +998,12 @@ class BudgetExpense(models.Model):
         verbose_name = 'Расход бюджета'
         verbose_name_plural = 'Расходы бюджета'
         ordering = ['-period']
+        indexes = [
+            models.Index(fields=['-period'], name='m_bexp_period_idx'),
+            models.Index(fields=['cash_flow_item', '-period'], name='m_bexp_cfi_period_idx'),
+            models.Index(fields=['project', '-period'], name='m_bexp_project_period_idx'),
+            models.Index(fields=['type_of_document', 'document_id'], name='m_bexp_doc_idx'),
+        ]
 
 
 class BudgetIncome(models.Model):
@@ -981,6 +1027,12 @@ class BudgetIncome(models.Model):
         verbose_name = 'Доход бюджета'
         verbose_name_plural = 'Доходы бюджета'
         ordering = ['-period']
+        indexes = [
+            models.Index(fields=['-period'], name='m_binc_period_idx'),
+            models.Index(fields=['cash_flow_item', '-period'], name='m_binc_cfi_period_idx'),
+            models.Index(fields=['project', '-period'], name='m_binc_project_period_idx'),
+            models.Index(fields=['type_of_document', 'document_id'], name='m_binc_doc_idx'),
+        ]
 
 
 class OneCSyncOutbox(models.Model):

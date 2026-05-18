@@ -40,7 +40,10 @@ make ci
 
 Скрипт сохраняет дампы PostgreSQL в `backups/postgres/`, проверяет gzip/размер, умеет проверять restore во временной БД, вести журнал `backups/logs/backup-events.log` и выгружать backup во внешний storage через `BACKUP_REMOTE_DIR`, `BACKUP_RCLONE_REMOTE`, `BACKUP_RSYNC_TARGET` или `BACKUP_SCP_TARGET`. Restore рабочей базы требует явное подтверждение `RESTORE` и не удаляет Docker volumes.
 
-В Django admin для superuser доступен раздел `Обслуживание -> Backup базы`: можно создать backup, скачать файл и запустить restore-check во временной БД.
+В Django admin для superuser доступны разделы обслуживания:
+
+- `Обслуживание -> Backup базы`: создать backup, скачать файл и запустить restore-check во временной БД.
+- `Обслуживание -> Сверка данных`: read-only отчет по документам, регистрам, 1С outbox, AI pending, jobs и рыночным данным.
 
 ## Healthcheck
 
