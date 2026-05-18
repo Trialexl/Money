@@ -1,5 +1,5 @@
 from django.urls import path, include
-from . import dashboard_views, graphic_views, register_views, report_views, sync_views, technical_views, views
+from . import dashboard_views, document_views, graphic_views, register_views, report_views, sync_views, technical_views, views
 from rest_framework import routers
 
 
@@ -15,11 +15,11 @@ router.register(r'reports', report_views.ReportViewSet, basename='reports')
 router.register(r'technical-health', technical_views.TechnicalHealthViewSet, basename='technical-health')
 
 # Финансовые операции
-router.register(r'receipts', views.ReceiptViewSet, basename='receipts')
-router.register(r'expenditures', views.ExpenditureViewSet, basename='expenditures')
-router.register(r'transfers', views.TransferViewSet, basename='transfers')
-router.register(r'budgets', views.BudgetViewSet, basename='budgets')
-router.register(r'auto-payments', views.AutoPaymentViewSet, basename='auto-payments')
+router.register(r'receipts', document_views.ReceiptViewSet, basename='receipts')
+router.register(r'expenditures', document_views.ExpenditureViewSet, basename='expenditures')
+router.register(r'transfers', document_views.TransferViewSet, basename='transfers')
+router.register(r'budgets', document_views.BudgetViewSet, basename='budgets')
+router.register(r'auto-payments', document_views.AutoPaymentViewSet, basename='auto-payments')
 
 # Регистры (только для чтения)
 router.register(r'flow-of-funds', register_views.FlowOfFundsViewSet, basename='flow-of-funds')

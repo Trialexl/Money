@@ -201,13 +201,15 @@ Acceptance criteria:
 
 Проблема: `money/views.py`, `money/ai_service.py`, frontend `reports/page.tsx` и `investments/page.tsx` стали слишком большими. Это повышает риск регрессий.
 
-Статус: в работе. Backend-срез начат: dashboard вынесен в `money/dashboard_views.py`, отчеты в `money/report_views.py`, read-only viewsets регистров вынесены в `money/register_views.py`, графики планирования в `money/graphic_views.py`, 1C outbox в `money/sync_views.py`, технический health endpoint в `money/technical_views.py`, API routes сохранены.
+Статус: в работе. Backend-срез начат: общие view mixins вынесены в `money/common_views.py`, финансовые документы в `money/document_views.py`, dashboard вынесен в `money/dashboard_views.py`, отчеты в `money/report_views.py`, read-only viewsets регистров вынесены в `money/register_views.py`, графики планирования в `money/graphic_views.py`, 1C outbox в `money/sync_views.py`, технический health endpoint в `money/technical_views.py`, API routes сохранены.
 
 Задачи:
 
 - вынести money API viewsets по доменным файлам: documents, reports, dashboard, ai, sync;
 - вынести dashboard viewset в отдельный backend-модуль;
 - вынести report viewset в отдельный backend-модуль;
+- вынести общие backend view mixins/pagination в отдельный модуль;
+- вынести viewsets финансовых документов в отдельный backend-модуль;
 - вынести регистровые viewsets в отдельный backend-модуль;
 - вынести графики планирования и 1C outbox в отдельные backend-модули;
 - вынести технические endpoints в отдельный backend-модуль;
