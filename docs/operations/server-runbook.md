@@ -233,16 +233,18 @@ tail -100 backups/logs/backup-events.log
 
 ## 5. Регламентные задания
 
-Редактировать cron:
+Регламентные задания Money запускаются из `root crontab`. Это дает cron прямой доступ к Docker без интерактивного ввода пароля.
+
+Открыть root cron:
 
 ```bash
-crontab -e
+sudo crontab -e
 ```
 
-Посмотреть текущий cron:
+Посмотреть root cron:
 
 ```bash
-crontab -l
+sudo crontab -l
 ```
 
 Рекомендуемый набор:
@@ -251,13 +253,20 @@ crontab -l
 SHELL=/bin/bash
 APP_DIR=/opt/money
 API_BASE=https://trialexl.freemyip.com
-API_TOKEN=replace-with-api-token
 
 # Единая точка регламентных заданий backend.
-*/5 * * * * cd "$APP_DIR" && sudo docker compose exec -T backend python manage.py run_scheduled_jobs >/tmp/money-scheduled-jobs.log 2>&1
+*/5 * * * * cd "$APP_DIR" && /usr/bin/docker compose exec -T backend python manage.py run_scheduled_jobs >/tmp/money-scheduled-jobs.log 2>&1
 
 # Базовый healthcheck приложения с опциональным webhook-уведомлением.
 */5 * * * * cd "$APP_DIR" && HEALTH_URL="$API_BASE/api/v1/health/" ./health-check.sh >/tmp/money-health-cron.log 2>&1
+```
+
+Пользовательский cron должен содержать только личные задачи пользователя. Регламентные задания Money хранятся в `root crontab`.
+
+Проверить пользовательский cron:
+
+```bash
+crontab -l
 ```
 
 Внутри `run_scheduled_jobs` backend сам хранит расписание, `last_run`, `status`, `duration`, `error` и историю запусков в admin-разделе `Регламентные задания`.
@@ -265,16 +274,16 @@ API_TOKEN=replace-with-api-token
 Проверить список jobs:
 
 ```bash
-sudo docker compose exec backend python manage.py run_scheduled_jobs --list
+cd /opt/money
+sudo docker compose exec -T backend python manage.py run_scheduled_jobs --list
 ```
 
 Запустить конкретную job вручную:
 
 ```bash
-sudo docker compose exec backend python manage.py run_scheduled_jobs --job investment.fx_refresh
+cd /opt/money
+sudo docker compose exec -T backend python manage.py run_scheduled_jobs --job investment.fx_refresh
 ```
-
-Старые cron+cURL строки для `fx-rates/refresh`, `prices/refresh`, `market-health`, `backup` и `restore-check` после обновления нужно удалить, чтобы задания не запускались дважды.
 
 ## 6. Диагностика health и логов
 

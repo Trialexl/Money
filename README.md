@@ -58,7 +58,7 @@ docker compose exec backend python manage.py run_scheduled_jobs --list
 docker compose exec backend python manage.py run_scheduled_jobs
 ```
 
-Cron должен вызывать только `run_scheduled_jobs`; FX, prices, market-health, backup и restore-check хранят статус запусков в admin-разделе `Регламентные задания`.
+Cron на сервере настраивается через `sudo crontab -e` и вызывает backend-команду `run_scheduled_jobs`; FX, prices, market-health, backup и restore-check хранят статус запусков в admin-разделе `Регламентные задания`.
 
 ## Обновление сервера
 
