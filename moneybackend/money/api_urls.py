@@ -1,5 +1,5 @@
 from django.urls import path, include
-from . import graphic_views, register_views, sync_views, technical_views, views
+from . import dashboard_views, graphic_views, register_views, report_views, sync_views, technical_views, views
 from rest_framework import routers
 
 
@@ -10,8 +10,8 @@ router = routers.DefaultRouter()
 router.register(r'cash-flow-items', views.CashFlowItemViewSet, basename='cash-flow-items')
 router.register(r'wallets', views.WalletViewSet, basename='wallets')
 router.register(r'projects', views.ProjectViewSet, basename='projects')
-router.register(r'dashboard', views.DashboardViewSet, basename='dashboard')
-router.register(r'reports', views.ReportViewSet, basename='reports')
+router.register(r'dashboard', dashboard_views.DashboardViewSet, basename='dashboard')
+router.register(r'reports', report_views.ReportViewSet, basename='reports')
 router.register(r'technical-health', technical_views.TechnicalHealthViewSet, basename='technical-health')
 
 # Финансовые операции
