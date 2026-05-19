@@ -9,9 +9,23 @@ def run_selected_jobs(modeladmin, request, queryset):
     for job in queryset:
         try:
             run = execute_job(job.job_key, triggered_by=ScheduledJobRun.TRIGGER_MANUAL, force=True)
-            messages.info(request, f'{job.job_key}: {run.status}')
+            messages.info(request, f'{job.job_key}: {run.status}; {_result_summary(run.result)}')
         except Exception as exc:
             messages.error(request, f'{job.job_key}: {exc}')
+
+
+def _result_summary(result):
+    if not isinstance(result, dict) or not result:
+        return 'result=-'
+    keys = ('created', 'updated', 'failed')
+    parts = [f'{key}={result[key]}' for key in keys if key in result]
+    if parts:
+        return ', '.join(parts)
+    if 'status' in result:
+        return f'status={result["status"]}'
+    if 'error' in result:
+        return f'error={result["error"]}'
+    return 'result=ok'
 
 
 @admin.register(ScheduledJobState)
@@ -25,6 +39,7 @@ class ScheduledJobStateAdmin(admin.ModelAdmin):
         'last_started_at',
         'last_finished_at',
         'last_duration_ms',
+        'last_result_summary',
     ]
     list_filter = ['enabled', 'last_status']
     search_fields = ['job_key', 'title', 'description']
@@ -69,6 +84,10 @@ class ScheduledJobStateAdmin(admin.ModelAdmin):
         }),
     )
     actions = [run_selected_jobs]
+
+    @admin.display(description='Результат')
+    def last_result_summary(self, obj):
+        return _result_summary(obj.last_result)
 
 
 @admin.register(ScheduledJobRun)

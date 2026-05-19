@@ -458,23 +458,6 @@ export default function InvestmentsPage() {
     onSuccess: handleSaved,
     onError: (error) => setDialogError(getApiErrorMessage(error)),
   })
-  const refreshFxRatesMutation = useMutation({
-    mutationFn: InvestmentService.refreshFxRates,
-    onSuccess: () => void invalidateInvestmentQueries(),
-  })
-  const backfillFxRatesMutation = useMutation({
-    mutationFn: () => InvestmentService.backfillFxRates({ date_from: yearDateRange().dateFrom, date_to: todayInputDate() }),
-    onSuccess: () => void invalidateInvestmentQueries(),
-  })
-  const refreshPricesMutation = useMutation({
-    mutationFn: InvestmentService.refreshPrices,
-    onSuccess: () => void invalidateInvestmentQueries(),
-  })
-  const backfillPricesMutation = useMutation({
-    mutationFn: () => InvestmentService.backfillPrices({ date_from: yearDateRange().dateFrom, date_to: todayInputDate() }),
-    onSuccess: () => void invalidateInvestmentQueries(),
-  })
-
   const isLoading =
     overviewQuery.isLoading ||
     portfoliosQuery.isLoading ||
@@ -759,46 +742,6 @@ export default function InvestmentsPage() {
         ) : (
           <span className="text-sm text-muted-foreground">Базовая учетная валюта: USD.</span>
         )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={refreshFxRatesMutation.isPending}
-          onClick={() => refreshFxRatesMutation.mutate()}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          {refreshFxRatesMutation.isPending ? "Обновляем..." : "Курсы CBR"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={backfillFxRatesMutation.isPending}
-          onClick={() => backfillFxRatesMutation.mutate()}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          {backfillFxRatesMutation.isPending ? "Заполняем..." : "Курсы с начала года"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={refreshPricesMutation.isPending || activeInstruments.length === 0}
-          onClick={() => refreshPricesMutation.mutate()}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          {refreshPricesMutation.isPending ? "Обновляем..." : "Цены инструментов"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={backfillPricesMutation.isPending || activeInstruments.length === 0}
-          onClick={() => backfillPricesMutation.mutate()}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          {backfillPricesMutation.isPending ? "Заполняем..." : "Цены с начала года"}
-        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
