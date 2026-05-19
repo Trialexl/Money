@@ -112,3 +112,27 @@ class ScheduledJobsTests(TestCase):
         call_command('run_scheduled_jobs', '--list', stdout=command_output)
 
         self.assertTrue(any('investment.fx_refresh' in line for line in output))
+
+    def test_market_refresh_job_marks_all_failed_result_as_error(self):
+        from . import scheduler
+        original_refresh = scheduler.refresh_fx_rate_snapshots
+        scheduler.refresh_fx_rate_snapshots = lambda: {'created': 0, 'updated': 0, 'failed': 2, 'results': []}
+        try:
+            result = scheduler.job_refresh_fx_rates()
+        finally:
+            scheduler.refresh_fx_rate_snapshots = original_refresh
+
+        self.assertEqual(result.status, ScheduledJobState.STATUS_ERROR)
+        self.assertEqual(result.payload['failed'], 2)
+
+    def test_market_refresh_job_marks_partial_failed_result_as_warning(self):
+        from . import scheduler
+        original_refresh = scheduler.refresh_price_snapshots
+        scheduler.refresh_price_snapshots = lambda: {'created': 1, 'updated': 0, 'failed': 1, 'results': []}
+        try:
+            result = scheduler.job_refresh_prices()
+        finally:
+            scheduler.refresh_price_snapshots = original_refresh
+
+        self.assertEqual(result.status, ScheduledJobState.STATUS_WARNING)
+        self.assertEqual(result.payload['created'], 1)

@@ -22,7 +22,9 @@ class Command(BaseCommand):
                     f'{state.job_key}\t'
                     f'enabled={state.enabled}\t'
                     f'status={state.last_status}\t'
+                    f'last={state.last_finished_at}\t'
                     f'next={state.next_run_at}\t'
+                    f'{self._result_summary(state.last_result)}\t'
                     f'title={state.title}'
                 )
             return
@@ -71,3 +73,14 @@ class Command(BaseCommand):
 
         definitions = get_job_definitions()
         self.stdout.write(self.style.SUCCESS(f'Scheduled jobs checked: {len(definitions)} definitions.'))
+
+    def _result_summary(self, result):
+        if not isinstance(result, dict) or not result:
+            return 'result=-'
+        keys = ('created', 'updated', 'failed')
+        parts = [f'{key}={result[key]}' for key in keys if key in result]
+        if parts:
+            return f'result={",".join(parts)}'
+        if 'error' in result:
+            return f'result=error:{result["error"]}'
+        return 'result=ok'

@@ -292,11 +292,21 @@ def _notify_job_failure(job_key: str, error_message: str) -> None:
 
 
 def job_refresh_fx_rates():
-    return refresh_fx_rate_snapshots()
+    return _market_refresh_job_result(refresh_fx_rate_snapshots())
 
 
 def job_refresh_prices():
-    return refresh_price_snapshots()
+    return _market_refresh_job_result(refresh_price_snapshots())
+
+
+def _market_refresh_job_result(result):
+    failed = int(result.get('failed') or 0)
+    changed = int(result.get('created') or 0) + int(result.get('updated') or 0)
+    if failed and not changed:
+        return JobResult(payload=result, status=ScheduledJobState.STATUS_ERROR)
+    if failed:
+        return JobResult(payload=result, status=ScheduledJobState.STATUS_WARNING)
+    return JobResult(payload=result, status=ScheduledJobState.STATUS_SUCCESS)
 
 
 def job_market_health():
