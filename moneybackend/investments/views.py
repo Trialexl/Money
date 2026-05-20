@@ -94,6 +94,7 @@ operation_list_parameters = [
 
 overview_parameters = [
     OpenApiParameter('portfolio', OpenApiTypes.UUID, OpenApiParameter.QUERY, description='UUID портфеля. Если не передан, берется портфель по умолчанию.'),
+    OpenApiParameter('display_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Валюта отображения USD/EUR/RUB. По умолчанию USD.'),
 ]
 
 market_health_parameters = [
@@ -549,7 +550,10 @@ class InvestmentPortfolioViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['get'])
     def overview(self, request, pk=None):
-        return Response(serialize_portfolio_overview(self.get_object()))
+        display_currency = (request.query_params.get('display_currency') or 'USD').strip().upper()
+        if display_currency not in SUPPORTED_CURRENCIES:
+            return Response({'display_currency': 'Поддерживаются значения USD, EUR или RUB.'}, status=400)
+        return Response(serialize_portfolio_overview(self.get_object(), display_currency=display_currency))
 
     @extend_schema(
         parameters=[
@@ -933,6 +937,9 @@ class InvestmentOverviewViewSet(viewsets.ViewSet):
     )
     def list(self, request):
         portfolio_id = request.query_params.get('portfolio')
+        display_currency = (request.query_params.get('display_currency') or 'USD').strip().upper()
+        if display_currency not in SUPPORTED_CURRENCIES:
+            return Response({'display_currency': 'Поддерживаются значения USD, EUR или RUB.'}, status=400)
         queryset = InvestmentPortfolio.objects.select_related('user', 'project')
         if request.user.is_staff:
             portfolio = queryset.filter(pk=portfolio_id).first() if portfolio_id else queryset.order_by('-is_default', 'name').first()
@@ -951,9 +958,20 @@ class InvestmentOverviewViewSet(viewsets.ViewSet):
                 'valuation_complete': True,
                 'bought_usd': '0.00',
                 'sold_usd': '0.00',
+                'display_currency': display_currency,
+                'fx_rate_to_display': '1.00000000' if display_currency == 'USD' else None,
+                'fx_rate_at': None,
+                'display_valuation_complete': display_currency == 'USD',
+                'cost_basis_display': '0.00' if display_currency == 'USD' else None,
+                'current_value_display': '0.00' if display_currency == 'USD' else None,
+                'realized_pl_display': '0.00' if display_currency == 'USD' else None,
+                'unrealized_pl_display': '0.00' if display_currency == 'USD' else None,
+                'total_pl_display': '0.00' if display_currency == 'USD' else None,
+                'bought_display': '0.00' if display_currency == 'USD' else None,
+                'sold_display': '0.00' if display_currency == 'USD' else None,
                 'positions': [],
             })
-        return Response(serialize_portfolio_overview(portfolio))
+        return Response(serialize_portfolio_overview(portfolio, display_currency=display_currency))
 
 
 class InvestmentMarketDataHealthViewSet(viewsets.ViewSet):

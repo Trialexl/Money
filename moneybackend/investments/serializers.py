@@ -13,7 +13,12 @@ from .models import (
     InvestmentTargetAllocation,
     SUPPORTED_CURRENCIES,
 )
-from .services import calculate_instrument_quantity, calculate_portfolio_totals, calculate_positions
+from .services import (
+    apply_portfolio_display_currency,
+    calculate_instrument_quantity,
+    calculate_portfolio_totals,
+    calculate_positions,
+)
 
 
 def _serialize_decimal(value):
@@ -365,6 +370,19 @@ class InvestmentPositionSerializer(serializers.Serializer):
     return_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     bought_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    display_currency = serializers.CharField(required=False)
+    fx_rate_to_display = serializers.DecimalField(max_digits=18, decimal_places=8, allow_null=True, required=False)
+    fx_rate_at = serializers.DateTimeField(allow_null=True, required=False)
+    display_valuation_complete = serializers.BooleanField(required=False)
+    cost_basis_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    average_buy_price_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    latest_price_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    current_value_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    realized_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    unrealized_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    total_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    bought_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    sold_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
     allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     target_allocation_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
     tolerance_percent = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
@@ -387,6 +405,17 @@ class InvestmentPortfolioOverviewSerializer(serializers.Serializer):
     valuation_complete = serializers.BooleanField()
     bought_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
     sold_usd = serializers.DecimalField(max_digits=18, decimal_places=2)
+    display_currency = serializers.CharField(required=False)
+    fx_rate_to_display = serializers.DecimalField(max_digits=18, decimal_places=8, allow_null=True, required=False)
+    fx_rate_at = serializers.DateTimeField(allow_null=True, required=False)
+    display_valuation_complete = serializers.BooleanField(required=False)
+    cost_basis_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    current_value_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    realized_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    unrealized_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    total_pl_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    bought_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
+    sold_display = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
     largest_asset = InvestmentPositionSerializer(allow_null=True)
     latest_price_at = serializers.DateTimeField(allow_null=True)
     positions = InvestmentPositionSerializer(many=True)
@@ -446,9 +475,9 @@ class InvestmentRebalanceStatusSerializer(serializers.Serializer):
     disclaimer = serializers.CharField()
 
 
-def serialize_portfolio_overview(portfolio):
+def serialize_portfolio_overview(portfolio, *, display_currency='USD'):
     totals = calculate_portfolio_totals(portfolio)
     return {
         'portfolio': InvestmentPortfolioSerializer(portfolio).data,
-        **totals,
+        **apply_portfolio_display_currency(portfolio, totals, display_currency=display_currency),
     }

@@ -287,7 +287,7 @@ export default function InvestmentReportsPage() {
 
   const overviewQuery = useQuery({
     queryKey: ["investment-overview"],
-    queryFn: InvestmentService.getOverview,
+    queryFn: () => InvestmentService.getOverview(),
   })
   const portfoliosQuery = useQuery({
     queryKey: ["investment-portfolios"],

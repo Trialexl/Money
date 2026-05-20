@@ -1038,6 +1038,140 @@ def calculate_rebalance_status(portfolio):
     }
 
 
+def apply_portfolio_display_currency(portfolio, totals, display_currency='USD', *, cutoff=None, fx_max_age_days=None):
+    currency = (display_currency or 'USD').strip().upper()
+    cutoff = cutoff or timezone.now()
+    display_point = {
+        'cost_basis_usd': totals['cost_basis_usd'],
+        'current_value_usd': totals['current_value_usd'],
+        'realized_pl_usd': totals['realized_pl_usd'],
+        'unrealized_pl_usd': totals['unrealized_pl_usd'],
+        'total_pl_usd': totals['total_pl_usd'],
+        'bought_usd': totals['bought_usd'],
+        'sold_usd': totals['sold_usd'],
+        'valuation_complete': totals['valuation_complete'],
+    }
+    _apply_display_currency(
+        display_point,
+        cutoff,
+        currency,
+        portfolio=portfolio,
+        fx_max_age_days=fx_max_age_days,
+    )
+    display_totals = {
+        key: value
+        for key, value in display_point.items()
+        if key.endswith('_display') or key in (
+            'display_currency',
+            'fx_rate_to_display',
+            'fx_rate_at',
+            'display_valuation_complete',
+        )
+    }
+    display_positions = [
+        _display_position(
+            portfolio,
+            position,
+            cutoff,
+            currency,
+            fx_max_age_days=fx_max_age_days,
+        )
+        for position in totals['positions']
+    ]
+    return {
+        **totals,
+        **display_totals,
+        'positions': display_positions,
+    }
+
+
+def _display_position(portfolio, position, cutoff, display_currency, *, fx_max_age_days=None):
+    currency = (display_currency or 'USD').strip().upper()
+    result = dict(position)
+    result['display_currency'] = currency
+
+    fx_snapshot, fx_rate = _latest_fx_rate_snapshot('USD', currency, as_of=cutoff, max_age_days=fx_max_age_days)
+    result['fx_rate_to_display'] = fx_rate
+    result['fx_rate_at'] = fx_snapshot.captured_at if fx_snapshot is not None else None
+    result['display_valuation_complete'] = fx_rate is not None
+
+    display_fields = (
+        'cost_basis_display',
+        'average_buy_price_display',
+        'latest_price_display',
+        'current_value_display',
+        'realized_pl_display',
+        'unrealized_pl_display',
+        'total_pl_display',
+        'bought_display',
+        'sold_display',
+    )
+    if fx_rate is None:
+        for field in display_fields:
+            result[field] = None
+        return result
+
+    if currency == 'USD':
+        result['cost_basis_display'] = position['cost_basis_usd']
+        result['average_buy_price_display'] = position['average_buy_price_usd']
+        result['latest_price_display'] = position['latest_price_usd']
+        result['current_value_display'] = position['current_value_usd']
+        result['realized_pl_display'] = position['realized_pl_usd']
+        result['unrealized_pl_display'] = position['unrealized_pl_usd']
+        result['total_pl_display'] = position['total_pl_usd']
+        result['bought_display'] = position['bought_usd']
+        result['sold_display'] = position['sold_usd']
+        return result
+
+    historical_totals = _historical_display_totals_for_cutoff(
+        portfolio,
+        cutoff,
+        currency,
+        instrument_id=position['instrument_id'],
+        fx_max_age_days=fx_max_age_days,
+    )
+    result['latest_price_display'] = (
+        _money(position['latest_price_usd'] * fx_rate)
+        if position['latest_price_usd'] is not None
+        else None
+    )
+    result['current_value_display'] = (
+        _money(position['current_value_usd'] * fx_rate)
+        if position['current_value_usd'] is not None
+        else None
+    )
+    if not historical_totals['complete']:
+        result['display_valuation_complete'] = False
+        for field in ('cost_basis_display', 'average_buy_price_display', 'realized_pl_display', 'unrealized_pl_display', 'total_pl_display', 'bought_display', 'sold_display'):
+            result[field] = None
+        return result
+
+    result['cost_basis_display'] = historical_totals['cost_basis']
+    result['average_buy_price_display'] = (
+        _money(result['cost_basis_display'] / position['quantity'])
+        if position['quantity'] != ZERO_AMOUNT
+        else ZERO_AMOUNT
+    )
+    result['realized_pl_display'] = historical_totals['realized_pl']
+    result['bought_display'] = historical_totals['bought']
+    result['sold_display'] = historical_totals['sold']
+    result['unrealized_pl_display'] = (
+        _money(result['current_value_display'] - result['cost_basis_display'])
+        if result['current_value_display'] is not None
+        else None
+    )
+    result['total_pl_display'] = (
+        _money(result['realized_pl_display'] + result['unrealized_pl_display'])
+        if result['unrealized_pl_display'] is not None
+        else result['realized_pl_display']
+    )
+    result['display_valuation_complete'] = bool(
+        result['display_valuation_complete']
+        and not (position['current_value_usd'] is None and position['quantity'] != ZERO_AMOUNT)
+    )
+    return result
+
+
 def _performance_totals_for_cutoff(
     portfolio,
     cutoff,
@@ -1222,9 +1356,14 @@ def _apply_display_currency(point, cutoff, display_currency, *, fx_max_age_days=
         point['realized_pl_display'] = historical_totals['realized_pl']
         point['bought_display'] = historical_totals['bought']
         point['sold_display'] = historical_totals['sold']
+        if not point['valuation_complete']:
+            point['display_valuation_complete'] = False
+            point['unrealized_pl_display'] = None
+            point['total_pl_display'] = None
+            return
         point['unrealized_pl_display'] = _money(point['current_value_display'] - point['cost_basis_display'])
         point['total_pl_display'] = _money(point['realized_pl_display'] + point['unrealized_pl_display'])
-        point['display_valuation_complete'] = bool(point['valuation_complete'])
+        point['display_valuation_complete'] = True
         return
 
     for field in PERFORMANCE_MONEY_FIELDS:

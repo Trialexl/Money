@@ -546,6 +546,49 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(performance['points'][0]['period_start'], '2026-01-01')
         self.assertEqual(performance['points'][0]['period_end'], '2026-01-31')
 
+    def test_portfolio_performance_uses_purchase_date_fx_for_display_cost_basis(self):
+        for day, rate in ((10, Decimal('90.00000000')), (20, Decimal('100.00000000')), (31, Decimal('110.00000000'))):
+            FxRateSnapshot.objects.create(
+                captured_at=self._dt(2026, 1, day),
+                base_currency='USD',
+                quote_currency='RUB',
+                rate=rate,
+                source='test-fx',
+            )
+        for day in (10, 20):
+            InvestmentOperation.objects.create(
+                portfolio=self.portfolio,
+                account=self.account,
+                instrument=self.instrument,
+                operation_type=InvestmentOperation.TYPE_BUY,
+                quantity=Decimal('1.0'),
+                price_usd=Decimal('100.00'),
+                amount_usd=Decimal('100.00'),
+                date=self._dt(2026, 1, day),
+            )
+        InstrumentPriceSnapshot.objects.create(
+            instrument=self.instrument,
+            price=Decimal('150.00'),
+            price_currency='USD',
+            fx_rate_to_usd=Decimal('1'),
+            price_usd=Decimal('150.00'),
+            captured_at=self._dt(2026, 1, 31),
+        )
+
+        performance = calculate_portfolio_performance(
+            self.portfolio,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 1, 31),
+            group_by='month',
+            display_currency='RUB',
+        )
+
+        point = performance['points'][0]
+        self.assertEqual(point['cost_basis_usd'], Decimal('200.00'))
+        self.assertEqual(point['cost_basis_display'], Decimal('19000.00'))
+        self.assertEqual(point['current_value_display'], Decimal('33000.00'))
+        self.assertEqual(point['unrealized_pl_display'], Decimal('14000.00'))
+
     def test_portfolio_performance_skips_month_without_exact_price(self):
         InvestmentOperation.objects.create(
             portfolio=self.portfolio,

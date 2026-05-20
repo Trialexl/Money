@@ -111,6 +111,19 @@ export interface InvestmentPosition {
   return_percent?: number | null
   bought_usd: number
   sold_usd: number
+  display_currency?: string
+  fx_rate_to_display?: number | null
+  fx_rate_at?: string | null
+  display_valuation_complete?: boolean
+  cost_basis_display?: number | null
+  average_buy_price_display?: number | null
+  latest_price_display?: number | null
+  current_value_display?: number | null
+  realized_pl_display?: number | null
+  unrealized_pl_display?: number | null
+  total_pl_display?: number | null
+  bought_display?: number | null
+  sold_display?: number | null
   allocation_percent?: number | null
   target_allocation_percent?: number | null
   tolerance_percent?: number | null
@@ -133,6 +146,17 @@ export interface InvestmentOverview {
   valuation_complete: boolean
   bought_usd: number
   sold_usd: number
+  display_currency?: string
+  fx_rate_to_display?: number | null
+  fx_rate_at?: string | null
+  display_valuation_complete?: boolean
+  cost_basis_display?: number | null
+  current_value_display?: number | null
+  realized_pl_display?: number | null
+  unrealized_pl_display?: number | null
+  total_pl_display?: number | null
+  bought_display?: number | null
+  sold_display?: number | null
   largest_asset?: InvestmentPosition | null
   latest_price_at?: string | null
   positions: InvestmentPosition[]
@@ -348,6 +372,19 @@ function mapPosition(raw: any): InvestmentPosition {
     return_percent: fromApiNullableAmount(raw.return_percent),
     bought_usd: fromApiAmount(raw.bought_usd),
     sold_usd: fromApiAmount(raw.sold_usd),
+    display_currency: raw.display_currency ?? undefined,
+    fx_rate_to_display: fromApiNullableAmount(raw.fx_rate_to_display),
+    fx_rate_at: fromApiDateTime(raw.fx_rate_at) ?? null,
+    display_valuation_complete: raw.display_valuation_complete ?? undefined,
+    cost_basis_display: fromApiNullableAmount(raw.cost_basis_display),
+    average_buy_price_display: fromApiNullableAmount(raw.average_buy_price_display),
+    latest_price_display: fromApiNullableAmount(raw.latest_price_display),
+    current_value_display: fromApiNullableAmount(raw.current_value_display),
+    realized_pl_display: fromApiNullableAmount(raw.realized_pl_display),
+    unrealized_pl_display: fromApiNullableAmount(raw.unrealized_pl_display),
+    total_pl_display: fromApiNullableAmount(raw.total_pl_display),
+    bought_display: fromApiNullableAmount(raw.bought_display),
+    sold_display: fromApiNullableAmount(raw.sold_display),
     allocation_percent: fromApiNullableAmount(raw.allocation_percent),
     target_allocation_percent: fromApiNullableAmount(raw.target_allocation_percent),
     tolerance_percent: fromApiNullableAmount(raw.tolerance_percent),
@@ -385,6 +422,17 @@ function mapOverview(raw: any): InvestmentOverview {
     valuation_complete: raw.valuation_complete !== false,
     bought_usd: fromApiAmount(raw.bought_usd),
     sold_usd: fromApiAmount(raw.sold_usd),
+    display_currency: raw.display_currency ?? undefined,
+    fx_rate_to_display: fromApiNullableAmount(raw.fx_rate_to_display),
+    fx_rate_at: fromApiDateTime(raw.fx_rate_at) ?? null,
+    display_valuation_complete: raw.display_valuation_complete ?? undefined,
+    cost_basis_display: fromApiNullableAmount(raw.cost_basis_display),
+    current_value_display: fromApiNullableAmount(raw.current_value_display),
+    realized_pl_display: fromApiNullableAmount(raw.realized_pl_display),
+    unrealized_pl_display: fromApiNullableAmount(raw.unrealized_pl_display),
+    total_pl_display: fromApiNullableAmount(raw.total_pl_display),
+    bought_display: fromApiNullableAmount(raw.bought_display),
+    sold_display: fromApiNullableAmount(raw.sold_display),
     largest_asset: raw.largest_asset ? mapPosition(raw.largest_asset) : null,
     latest_price_at: fromApiDateTime(raw.latest_price_at) ?? null,
     positions: Array.isArray(raw.positions) ? raw.positions.map(mapPosition) : [],
@@ -484,8 +532,8 @@ function toTargetAllocationPayload(payload: InvestmentTargetAllocationPayload | 
 }
 
 export const InvestmentService = {
-  async getOverview() {
-    const response = await api.get("/investment/portfolio-overview/")
+  async getOverview(params?: { display_currency?: string }) {
+    const response = await api.get("/investment/portfolio-overview/", { params })
     return mapOverview(response.data)
   },
 

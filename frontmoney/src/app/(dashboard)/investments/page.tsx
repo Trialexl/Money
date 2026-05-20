@@ -339,8 +339,8 @@ export default function InvestmentsPage() {
   const performancePeriod = useMemo(() => yearDateRange(), [])
 
   const overviewQuery = useQuery({
-    queryKey: ["investment-overview"],
-    queryFn: InvestmentService.getOverview,
+    queryKey: ["investment-overview", displayCurrency],
+    queryFn: () => InvestmentService.getOverview({ display_currency: displayCurrency }),
   })
   const performancePortfolioId = overviewQuery.data?.portfolio?.id
   const performanceQuery = useQuery({
@@ -498,6 +498,8 @@ export default function InvestmentsPage() {
   const canCreateOperation = Boolean(currentPortfolio && activeInstruments.length > 0 && currentPortfolioAccounts.length > 0)
   const fxRates = fxRatesQuery.data ?? []
   const money = (amount: number | null | undefined) => formatMoneyInCurrency(amount, displayCurrency, fxRates)
+  const displayMoney = (amount: number | null | undefined, empty = "нет курса") =>
+    amount === null || amount === undefined ? empty : formatCurrencyValue(amount, displayCurrency)
   const targetAllocations = targetAllocationsQuery.data ?? []
   const rebalanceStatus = rebalanceQuery.data
   const targetAllocationByInstrument = new Map(targetAllocations.map((allocation) => [allocation.instrument, allocation]))
@@ -745,10 +747,10 @@ export default function InvestmentsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Текущая стоимость" value={money(overview.current_value_usd)} hint={overview.valuation_complete ? "По последним ценам" : "Есть позиции без цены"} icon={Coins} variant="compact" />
-        <StatCard label="Себестоимость" value={money(overview.cost_basis_usd)} hint="Остаток позиций, пересчет только для просмотра" icon={Landmark} variant="compact" />
-        <StatCard label="Total P/L" value={money(overview.total_pl_usd)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={overview.total_pl_usd < 0 ? "danger" : "positive"} variant="compact" />
-        <StatCard label="Unrealized P/L" value={money(overview.unrealized_pl_usd)} hint={`Realized: ${money(overview.realized_pl_usd)}`} icon={BarChart3} tone={overview.unrealized_pl_usd < 0 ? "danger" : "positive"} variant="compact" />
+        <StatCard label="Текущая стоимость" value={displayMoney(overview.current_value_display, overview.valuation_complete ? "нет курса" : "нет цены")} hint={overview.valuation_complete ? "По последним ценам" : "Есть позиции без цены"} icon={Coins} variant="compact" />
+        <StatCard label="Себестоимость" value={displayMoney(overview.cost_basis_display)} hint="Остаток позиций, по курсам дат покупки" icon={Landmark} variant="compact" />
+        <StatCard label="Total P/L" value={displayMoney(overview.total_pl_display)} hint={`Доходность: ${formatPercent(overview.return_percent)}`} icon={LineChart} tone={(overview.total_pl_display ?? overview.total_pl_usd) < 0 ? "danger" : "positive"} variant="compact" />
+        <StatCard label="Unrealized P/L" value={displayMoney(overview.unrealized_pl_display)} hint={`Realized: ${displayMoney(overview.realized_pl_display)}`} icon={BarChart3} tone={(overview.unrealized_pl_display ?? overview.unrealized_pl_usd) < 0 ? "danger" : "positive"} variant="compact" />
       </div>
 
       {showInlinePerformanceReports && currentPortfolio ? (
@@ -1157,8 +1159,8 @@ export default function InvestmentsPage() {
                           <div className="text-xs text-muted-foreground">{position.instrument_name}</div>
                         </td>
                         <td className="py-3 pr-4 text-right tabular-nums">{position.quantity}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.cost_basis_usd)}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums">{money(position.average_buy_price_usd)}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">{displayMoney(position.cost_basis_display)}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">{displayMoney(position.average_buy_price_display)}</td>
                         <td className="py-3 pr-4 text-right tabular-nums">
                           {position.latest_price_usd === null || position.latest_price_usd === undefined ? (
                             <Button variant="ghost" size="sm" onClick={() => openDialog({ type: "price", mode: "create", item: instruments.find((item) => item.id === position.instrument_id) })}>
@@ -1166,19 +1168,19 @@ export default function InvestmentsPage() {
                             </Button>
                           ) : (
                             <div>
-                              <div>{money(position.latest_price_usd)}</div>
+                              <div>{displayMoney(position.latest_price_display)}</div>
                               <div className="text-xs text-muted-foreground">{position.latest_price_at ? formatDate(position.latest_price_at) : ""}</div>
                             </div>
                           )}
                         </td>
                         <td className="py-3 pr-4 text-right tabular-nums">
-                          {money(position.current_value_usd)}
+                          {displayMoney(position.current_value_display, position.current_value_usd === null || position.current_value_usd === undefined ? "нет цены" : "нет курса")}
                         </td>
-                        <td className={position.unrealized_pl_usd !== undefined && position.unrealized_pl_usd !== null && position.unrealized_pl_usd < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
-                          {money(position.unrealized_pl_usd)}
+                        <td className={(position.unrealized_pl_display ?? position.unrealized_pl_usd ?? 0) < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
+                          {displayMoney(position.unrealized_pl_display)}
                         </td>
-                        <td className={position.total_pl_usd < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
-                          {money(position.total_pl_usd)}
+                        <td className={(position.total_pl_display ?? position.total_pl_usd) < 0 ? "py-3 pr-4 text-right text-destructive tabular-nums" : "py-3 pr-4 text-right text-emerald-600 tabular-nums"}>
+                          {displayMoney(position.total_pl_display)}
                         </td>
                         <td className="py-3 text-right tabular-nums">
                           {formatPercent(position.return_percent)}
