@@ -693,6 +693,7 @@ def calculate_portfolio_performance(
         snapshot = _fresh_portfolio_snapshot(portfolio, period_end, cutoff)
         if snapshot is not None:
             point = _performance_point_from_snapshot(
+                portfolio,
                 snapshot,
                 label=label,
                 period_start=period_start,
@@ -718,6 +719,7 @@ def calculate_portfolio_performance(
         if scope in {'instrument', 'all'}:
             if snapshot is not None:
                 instrument_rows = _performance_instrument_points_from_snapshot(
+                    portfolio,
                     snapshot,
                     label=label,
                     period_start=period_start,
@@ -808,6 +810,7 @@ def _portfolio_snapshot_is_current(portfolio, snapshot, cutoff):
 
 
 def _performance_point_from_snapshot(
+    portfolio,
     snapshot,
     *,
     label,
@@ -835,12 +838,14 @@ def _performance_point_from_snapshot(
         point,
         _aware_datetime(period_end, end_of_day=True),
         display_currency,
+        portfolio=portfolio,
         fx_max_age_days=fx_max_age_days,
     )
     return point
 
 
 def _performance_instrument_points_from_snapshot(
+    portfolio,
     snapshot,
     *,
     label,
@@ -877,6 +882,8 @@ def _performance_instrument_points_from_snapshot(
             point,
             _aware_datetime(period_end, end_of_day=True),
             display_currency,
+            portfolio=portfolio,
+            instrument_id=position.get('instrument_id'),
             fx_max_age_days=fx_max_age_days,
         )
         rows.append({
@@ -950,7 +957,14 @@ def _performance_instrument_points_for_cutoff(
             'valuation_complete': valuation_complete,
             'missing_reason': None if valuation_complete else 'price_missing',
         }
-        _apply_display_currency(point, cutoff, display_currency, fx_max_age_days=fx_max_age_days)
+        _apply_display_currency(
+            point,
+            cutoff,
+            display_currency,
+            portfolio=portfolio,
+            instrument_id=position['instrument_id'],
+            fx_max_age_days=fx_max_age_days,
+        )
         rows.append({
             'instrument_id': position['instrument_id'],
             'instrument_ticker': position['instrument_ticker'],
@@ -1045,7 +1059,13 @@ def _performance_totals_for_cutoff(
         'sold_usd': totals['sold_usd'],
         'valuation_complete': totals['valuation_complete'],
     }
-    _apply_display_currency(point, cutoff, display_currency, fx_max_age_days=fx_max_age_days)
+    _apply_display_currency(
+        point,
+        cutoff,
+        display_currency,
+        portfolio=portfolio,
+        fx_max_age_days=fx_max_age_days,
+    )
     return point
 
 
@@ -1072,7 +1092,105 @@ def _latest_fx_rate_snapshot(base_currency, quote_currency, *, as_of=None, max_a
     return snapshot, snapshot.rate
 
 
-def _apply_display_currency(point, cutoff, display_currency, *, fx_max_age_days=None):
+def _historical_display_totals_for_cutoff(portfolio, cutoff, display_currency, *, instrument_id=None, fx_max_age_days=None):
+    currency = (display_currency or 'USD').strip().upper()
+    states = {}
+    fx_cache = {}
+    complete = True
+
+    operations = (
+        InvestmentOperation.objects
+        .filter(portfolio=portfolio, deleted=False, posted=True, date__lte=cutoff)
+        .select_related('instrument')
+        .order_by('date', 'created_at', 'id')
+    )
+    if instrument_id is not None:
+        operations = operations.filter(instrument_id=instrument_id)
+
+    def display_rate(operation):
+        nonlocal complete
+        if currency == 'USD':
+            return Decimal('1')
+        operation_date = _date_part(operation.date)
+        if operation_date is None:
+            complete = False
+            return None
+        if operation_date not in fx_cache:
+            _snapshot, rate = _latest_fx_rate_snapshot(
+                'USD',
+                currency,
+                as_of=_aware_datetime(operation_date, end_of_day=True),
+                max_age_days=fx_max_age_days,
+            )
+            fx_cache[operation_date] = rate
+        rate = fx_cache[operation_date]
+        if rate is None:
+            complete = False
+        return rate
+
+    for operation in operations:
+        state = states.setdefault(operation.instrument_id, {
+            'quantity': ZERO_AMOUNT,
+            'cost_basis': ZERO_AMOUNT,
+            'realized_pl': ZERO_AMOUNT,
+            'bought': ZERO_AMOUNT,
+            'sold': ZERO_AMOUNT,
+        })
+        quantity = operation.quantity or ZERO_AMOUNT
+        amount_usd = operation.amount_usd or ZERO_AMOUNT
+        fee_usd = operation.fee_usd or ZERO_AMOUNT
+        rate = display_rate(operation)
+        if rate is None:
+            continue
+
+        if operation.operation_type == InvestmentOperation.TYPE_BUY:
+            cost = (amount_usd + fee_usd) * rate
+            state['quantity'] += quantity
+            state['cost_basis'] += cost
+            state['bought'] += cost
+        elif operation.operation_type == InvestmentOperation.TYPE_SELL:
+            if quantity > state['quantity']:
+                raise ValueError(f'Продажа {operation.instrument.ticker} превышает текущий остаток.')
+            average_price = state['cost_basis'] / state['quantity'] if state['quantity'] != ZERO_AMOUNT else ZERO_AMOUNT
+            sold_cost_basis = average_price * quantity
+            proceeds = (amount_usd - fee_usd) * rate
+            state['quantity'] -= quantity
+            state['cost_basis'] -= sold_cost_basis
+            state['realized_pl'] += proceeds - sold_cost_basis
+            state['sold'] += proceeds
+            if state['quantity'] == ZERO_AMOUNT:
+                state['cost_basis'] = ZERO_AMOUNT
+        elif operation.operation_type == InvestmentOperation.TYPE_CORRECTION:
+            state['quantity'] += quantity
+            state['cost_basis'] += amount_usd * rate
+            if state['quantity'] == ZERO_AMOUNT:
+                state['cost_basis'] = ZERO_AMOUNT
+        elif operation.operation_type == InvestmentOperation.TYPE_DIVIDEND:
+            state['realized_pl'] += (amount_usd - fee_usd) * rate
+        elif operation.operation_type == InvestmentOperation.TYPE_SPLIT:
+            state['quantity'] *= quantity
+            if state['quantity'] == ZERO_AMOUNT:
+                state['cost_basis'] = ZERO_AMOUNT
+        elif operation.operation_type == InvestmentOperation.TYPE_TRANSFER:
+            continue
+
+    totals = defaultdict(lambda: ZERO_AMOUNT)
+    for state in states.values():
+        totals['cost_basis'] += state['cost_basis']
+        totals['realized_pl'] += state['realized_pl']
+        totals['bought'] += state['bought']
+        totals['sold'] += state['sold']
+
+    return {
+        'complete': complete,
+        'cost_basis': _money(totals['cost_basis']),
+        'realized_pl': _money(totals['realized_pl']),
+        'bought': _money(totals['bought']),
+        'sold': _money(totals['sold']),
+    }
+
+
+def _apply_display_currency(point, cutoff, display_currency, *, fx_max_age_days=None, portfolio=None, instrument_id=None):
     currency = (display_currency or 'USD').strip().upper()
     fx_snapshot, fx_rate = _latest_fx_rate_snapshot('USD', currency, as_of=cutoff, max_age_days=fx_max_age_days)
     point['display_currency'] = currency
@@ -1083,6 +1201,30 @@ def _apply_display_currency(point, cutoff, display_currency, *, fx_max_age_days=
         point['valuation_complete'] = False
         for field in PERFORMANCE_MONEY_FIELDS:
             point[f'{field}_display'] = None
+        return
+
+    if portfolio is not None and currency != 'USD':
+        historical_totals = _historical_display_totals_for_cutoff(
+            portfolio,
+            cutoff,
+            currency,
+            instrument_id=instrument_id,
+            fx_max_age_days=fx_max_age_days,
+        )
+        point['current_value_display'] = _money(point['current_value_usd'] * fx_rate)
+        if not historical_totals['complete']:
+            point['display_valuation_complete'] = False
+            for field in ('cost_basis', 'realized_pl', 'unrealized_pl', 'total_pl', 'bought', 'sold'):
+                point[f'{field}_display'] = None
+            return
+
+        point['cost_basis_display'] = historical_totals['cost_basis']
+        point['realized_pl_display'] = historical_totals['realized_pl']
+        point['bought_display'] = historical_totals['bought']
+        point['sold_display'] = historical_totals['sold']
+        point['unrealized_pl_display'] = _money(point['current_value_display'] - point['cost_basis_display'])
+        point['total_pl_display'] = _money(point['realized_pl_display'] + point['unrealized_pl_display'])
+        point['display_valuation_complete'] = bool(point['valuation_complete'])
         return
 
     for field in PERFORMANCE_MONEY_FIELDS:

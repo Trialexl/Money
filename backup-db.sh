@@ -126,7 +126,7 @@ validate_backup_file() {
   local size
 
   case "$file" in
-    *.dump.gz|*.sql.gz) ;;
+    *.dump.gz|*.sql.gz|*.dump.gz.tmp|*.sql.gz.tmp) ;;
     *)
       fail_command "verify" "supported backup files are .dump.gz and .sql.gz" "$file"
       ;;
@@ -142,10 +142,37 @@ validate_backup_file() {
     fail_command "verify" "backup is too small: ${size} bytes, minimum is ${BACKUP_MIN_BYTES}" "$file"
   fi
 
-  if [[ "$file" == *.dump.gz ]]; then
-    gzip -dc "$file" | run_docker compose exec -T db sh -c 'pg_restore --list >/dev/null' \
-      || fail_command "verify" "pg_restore cannot read custom dump" "$file"
+  if [[ "$file" == *.dump.gz || "$file" == *.dump.gz.tmp ]]; then
+    verify_custom_dump "$file"
   fi
+}
+
+copy_dump_to_db_container() {
+  local file="$1"
+  local action="${2:-verify}"
+  local container_file="/tmp/money-backup-$RANDOM-$$.dump"
+
+  gzip -dc "$file" | run_docker compose exec -T db sh -c 'cat > "$1"' sh "$container_file" \
+    || fail_command "$action" "cannot copy custom dump into db container" "$file"
+  printf '%s\n' "$container_file"
+}
+
+remove_db_container_file() {
+  local container_file="$1"
+  run_docker compose exec -T db sh -c 'rm -f "$1"' sh "$container_file" >/dev/null 2>&1 || true
+}
+
+verify_custom_dump() {
+  local file="$1"
+  local container_file
+  container_file="$(copy_dump_to_db_container "$file" "verify")"
+
+  if ! run_docker compose exec -T db sh -c 'pg_restore --list "$1" >/dev/null' sh "$container_file"; then
+    remove_db_container_file "$container_file"
+    fail_command "verify" "pg_restore cannot read custom dump" "$file"
+  fi
+
+  remove_db_container_file "$container_file"
 }
 
 latest_backup() {
@@ -167,8 +194,8 @@ create_backup() {
 
   echo "==> Creating PostgreSQL backup"
   if run_docker compose exec -T db sh -c 'pg_dump --format=custom --no-owner --no-acl -U "$POSTGRES_USER" -d "$POSTGRES_DB"' | gzip -c > "$tmp"; then
+    validate_backup_file "$tmp"
     mv "$tmp" "$target"
-    validate_backup_file "$target"
     echo "Backup created: $target"
     append_journal "backup" "ok" "$target" "created"
     if is_truthy "$BACKUP_UPLOAD_AFTER_CREATE" && has_remote_target; then
@@ -279,8 +306,13 @@ restore_check() {
 
   case "$file" in
     *.dump.gz)
-      gzip -dc "$file" | run_docker compose exec -T db sh -c 'pg_restore --exit-on-error --no-owner --no-acl -U "$POSTGRES_USER" -d "$1"' sh "$temp_db" \
-        || fail_command "restore-check" "pg_restore into temporary database failed" "$file"
+      local container_file
+      container_file="$(copy_dump_to_db_container "$file" "restore-check")"
+      if ! run_docker compose exec -T db sh -c 'pg_restore --exit-on-error --no-owner --no-acl -U "$POSTGRES_USER" -d "$1" "$2"' sh "$temp_db" "$container_file"; then
+        remove_db_container_file "$container_file"
+        fail_command "restore-check" "pg_restore into temporary database failed" "$file"
+      fi
+      remove_db_container_file "$container_file"
       ;;
     *.sql.gz)
       gzip -dc "$file" | run_docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1"' sh "$temp_db" \
@@ -319,8 +351,13 @@ restore_backup() {
   echo "==> Restoring PostgreSQL backup"
   case "$file" in
     *.dump.gz)
-      gzip -dc "$file" | run_docker compose exec -T db sh -c 'pg_restore --clean --if-exists --no-owner --no-acl -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-        || fail_command "restore" "pg_restore into current database failed" "$file"
+      local container_file
+      container_file="$(copy_dump_to_db_container "$file" "restore")"
+      if ! run_docker compose exec -T db sh -c 'pg_restore --clean --if-exists --no-owner --no-acl -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$1"' sh "$container_file"; then
+        remove_db_container_file "$container_file"
+        fail_command "restore" "pg_restore into current database failed" "$file"
+      fi
+      remove_db_container_file "$container_file"
       ;;
     *.sql.gz)
       gzip -dc "$file" | run_docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \

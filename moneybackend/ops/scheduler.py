@@ -25,6 +25,7 @@ from investments.services import (
 from lk.admin_backup import create_database_backup, list_backup_files, restore_check_backup
 
 from .models import ScheduledJobRun, ScheduledJobState
+from .telegram_reports import send_portfolio_report_to_telegram
 
 
 class JobTimeoutError(TimeoutError):
@@ -320,6 +321,18 @@ def job_rebuild_today_snapshots():
     return rebuild_portfolio_snapshots(date_from=today, date_to=today, price_max_age_days=0)
 
 
+def job_send_telegram_portfolio_report():
+    result = send_portfolio_report_to_telegram()
+    failed = int(result.get('failed') or 0)
+    sent = int(result.get('sent') or 0)
+    skipped = int(result.get('skipped') or 0)
+    if failed and not sent:
+        return JobResult(payload=result, status=ScheduledJobState.STATUS_ERROR)
+    if failed or skipped:
+        return JobResult(payload=result, status=ScheduledJobState.STATUS_WARNING)
+    return JobResult(payload=result, status=ScheduledJobState.STATUS_SUCCESS)
+
+
 def job_create_backup():
     backup = create_database_backup()
     return {
@@ -431,6 +444,16 @@ def get_job_definitions():
             task=job_rebuild_today_snapshots,
             run_at_time=time(8, 15),
             timeout_seconds=600,
+            max_retries=1,
+            retry_delay_seconds=60,
+        ),
+        ScheduledJobDefinition(
+            key='investment.telegram_portfolio_report',
+            title='Telegram-отчет по финпортфелю',
+            description='Отправить короткий отчет по default-портфелю всем привязанным Telegram-пользователям.',
+            task=job_send_telegram_portfolio_report,
+            run_at_time=time(8, 30),
+            timeout_seconds=180,
             max_retries=1,
             retry_delay_seconds=60,
         ),

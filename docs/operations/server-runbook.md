@@ -288,6 +288,23 @@ cd /opt/money
 sudo docker compose exec -T backend python manage.py run_scheduled_jobs --job investment.fx_refresh
 ```
 
+Основные инвестиционные jobs:
+
+```bash
+investment.fx_refresh                  # FX-курсы USD/EUR/RUB
+investment.price_refresh               # цены финансовых инструментов
+investment.market_health               # контроль свежести рыночных данных
+investment.snapshots_today             # снимки портфелей за сегодня
+investment.telegram_portfolio_report   # короткий Telegram-отчет по default-портфелям
+```
+
+Telegram-отчет использует `AI_TELEGRAM_BOT_TOKEN` и отправляется только пользователям с привязанным Telegram и созданным инвестиционным портфелем. Ручной запуск:
+
+```bash
+cd /opt/money
+sudo docker compose exec -T backend python manage.py run_scheduled_jobs --job investment.telegram_portfolio_report
+```
+
 ## 6. Диагностика health и логов
 
 Проверить health всех контейнеров:
