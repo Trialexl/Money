@@ -32,6 +32,7 @@ INTENT_CREATE_TRANSFER = 'create_transfer'
 INTENT_GET_WALLET_BALANCE = 'get_wallet_balance'
 INTENT_GET_ALL_WALLET_BALANCES = 'get_all_wallet_balances'
 INTENT_GET_MONTH_EXPENSES_BY_ITEM = 'get_month_expenses_by_item'
+INTENT_GET_MONTH_BUDGET_BY_ITEM = 'get_month_budget_by_item'
 INTENT_GET_PORTFOLIO_OVERVIEW = 'get_portfolio_overview'
 INTENT_GET_INSTRUMENT_POSITION = 'get_instrument_position'
 INTENT_GET_REBALANCE_STATUS = 'get_rebalance_status'
@@ -51,6 +52,7 @@ SUPPORTED_INTENTS = {
     INTENT_GET_WALLET_BALANCE,
     INTENT_GET_ALL_WALLET_BALANCES,
     INTENT_GET_MONTH_EXPENSES_BY_ITEM,
+    INTENT_GET_MONTH_BUDGET_BY_ITEM,
     INTENT_GET_PORTFOLIO_OVERVIEW,
     INTENT_GET_INSTRUMENT_POSITION,
     INTENT_GET_REBALANCE_STATUS,
@@ -401,6 +403,39 @@ def _detect_month_expenses_by_item_intent(text):
         }
 
     return None
+
+
+def _detect_month_budget_by_item_intent(text):
+    normalized = _normalize_text(text)
+    if not normalized or 'бюджет' not in normalized:
+        return None
+
+    if any(token in normalized for token in ('отклонен', 'перерасход', 'потрачено', 'потратил')):
+        return None
+
+    has_expense_word = any(
+        token in normalized
+        for token in (
+            'расходы',
+            'траты',
+            'затраты',
+            'списания',
+        )
+    )
+    starts_with_budget = normalized.startswith('бюджет')
+    if has_expense_word and not starts_with_budget:
+        return None
+
+    period_range = _detect_month_expenses_period_range(text)
+    period_month = period_range.get('period_month') if period_range else None
+    return {
+        'intent': INTENT_GET_MONTH_BUDGET_BY_ITEM,
+        'confidence': 0.98,
+        'period_month': period_month,
+        'period_month_from': period_range.get('period_month_from') if period_range else None,
+        'period_month_to': period_range.get('period_month_to') if period_range else None,
+        'comment': text,
+    }
 
 
 def _match_investment_instrument_by_hint(hint):
@@ -1148,7 +1183,7 @@ class OpenRouterIntentProvider:
             'Верни только JSON без пояснений. '
             'Определи intent из списка: '
             'create_receipt, create_expenditure, create_transfer, '
-            'get_wallet_balance, get_all_wallet_balances, get_month_expenses_by_item, '
+            'get_wallet_balance, get_all_wallet_balances, get_month_expenses_by_item, get_month_budget_by_item, '
             'get_portfolio_overview, get_instrument_position, get_rebalance_status, '
             'create_investment_buy, create_investment_sell, help_capabilities, unknown. '
             'Если передано изображение, считай, что это банковский скриншот операции или истории операций, '
@@ -1178,6 +1213,8 @@ class OpenRouterIntentProvider:
             'верни intent=help_capabilities. '
             'Если пользователь спрашивает расходы, траты или списания текущего месяца по статьям/категориям '
             'или просит отклонение от бюджета, верни intent=get_month_expenses_by_item. '
+            'Если пользователь просит бюджет расходов на месяц, например "бюджет июнь", '
+            'верни intent=get_month_budget_by_item. '
             'Для такого отчета можешь вернуть period_month="YYYY-MM" или диапазон '
             'period_month_from="YYYY-MM", period_month_to="YYYY-MM". '
             'Если пользователь пишет перевод/перевести/перевел/первод и сумму, верни create_transfer; '
@@ -1399,6 +1436,10 @@ class RuleBasedIntentProvider:
         meta_intent = _detect_assistant_meta_intent(text)
         if meta_intent is not None:
             return meta_intent
+
+        month_budget_intent = _detect_month_budget_by_item_intent(text)
+        if month_budget_intent is not None:
+            return month_budget_intent
 
         month_expenses_intent = _detect_month_expenses_by_item_intent(text)
         if month_expenses_intent is not None:
@@ -1661,6 +1702,50 @@ def _month_expenses_by_item(*, at_time=None, month_start=None):
     }
 
 
+def _month_budget_by_item(*, at_time=None, month_start=None):
+    selected_at = timezone.localtime(at_time or timezone.now())
+    current_month_start, _ = _current_month_bounds(at_time=selected_at)
+    if month_start is None:
+        month_start = current_month_start
+    else:
+        month_start = timezone.localtime(month_start)
+        month_start = month_start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    next_month_start = _next_month_start(month_start)
+
+    budget_totals = (
+        BudgetExpense.objects
+        .filter(
+            period__gte=month_start,
+            period__lt=next_month_start,
+            project__isnull=True,
+            cash_flow_item__isnull=False,
+            type_of_document=BUDGET_DOCUMENT_TYPE,
+        )
+        .values('cash_flow_item_id', 'cash_flow_item__name')
+        .annotate(planned=Sum('amount'))
+    )
+
+    rows = []
+    total_budget = ZERO_AMOUNT
+    for row in budget_totals:
+        planned = (row['planned'] or ZERO_AMOUNT).quantize(Decimal('0.01'))
+        total_budget += planned
+        rows.append({
+            'cash_flow_item_id': str(row['cash_flow_item_id']),
+            'cash_flow_item_name': row['cash_flow_item__name'] or 'Без статьи',
+            'budget': _serialize_decimal(planned),
+        })
+
+    rows.sort(key=lambda item: (-Decimal(item['budget']), item['cash_flow_item_name']))
+    return {
+        'period_start': month_start.isoformat(),
+        'period_end': next_month_start.isoformat(),
+        'period_label': _format_month_label(month_start),
+        'items': rows,
+        'total_budget': _serialize_decimal(total_budget),
+    }
+
+
 def _iter_month_starts(month_start, month_end):
     current = month_start
     while current <= month_end:
@@ -1733,6 +1818,57 @@ def _month_expenses_by_item_range(*, at_time=None, month_start=None, month_end=N
         'total_budget_usage_percent': total_budget_usage_percent,
         'total_overrun': _serialize_decimal(max(total_deviation, ZERO_AMOUNT)) if total_deviation is not None else None,
         'total_remaining': _serialize_decimal(max(total_budget - total_actual, ZERO_AMOUNT)) if total_deviation is not None else None,
+    }
+
+
+def _month_budget_by_item_range(*, at_time=None, month_start=None, month_end=None):
+    selected_at = timezone.localtime(at_time or timezone.now())
+    month_start = _normalize_month_start(month_start, at_time=selected_at)
+    month_end = _normalize_month_start(month_end, at_time=selected_at) if month_end is not None else month_start
+    if month_end < month_start:
+        month_end = month_start
+
+    months = [
+        _month_budget_by_item(at_time=selected_at, month_start=current_month)
+        for current_month in _iter_month_starts(month_start, month_end)
+    ]
+    if len(months) == 1:
+        summary = dict(months[0])
+        summary['months'] = [dict(months[0])]
+        summary['period_month_from'] = month_start.strftime('%Y-%m')
+        summary['period_month_to'] = month_end.strftime('%Y-%m')
+        return summary
+
+    total_budget = sum((_parse_amount(month.get('total_budget')) or ZERO_AMOUNT) for month in months).quantize(Decimal('0.01'))
+    rows_by_item = {}
+    for month in months:
+        for row in month.get('items') or []:
+            item_id = row['cash_flow_item_id']
+            item = rows_by_item.setdefault(item_id, {
+                'cash_flow_item_id': item_id,
+                'cash_flow_item_name': row['cash_flow_item_name'],
+                'budget': ZERO_AMOUNT,
+            })
+            item['budget'] += _parse_amount(row.get('budget')) or ZERO_AMOUNT
+
+    rows = []
+    for row in rows_by_item.values():
+        rows.append({
+            'cash_flow_item_id': row['cash_flow_item_id'],
+            'cash_flow_item_name': row['cash_flow_item_name'],
+            'budget': _serialize_decimal(row['budget']),
+        })
+    rows.sort(key=lambda item: (-Decimal(item['budget']), item['cash_flow_item_name']))
+
+    return {
+        'period_start': months[0]['period_start'],
+        'period_end': months[-1]['period_end'],
+        'period_month_from': month_start.strftime('%Y-%m'),
+        'period_month_to': month_end.strftime('%Y-%m'),
+        'period_label': _format_month_range_label(month_start, month_end),
+        'items': rows,
+        'months': months,
+        'total_budget': _serialize_decimal(total_budget),
     }
 
 
@@ -1898,6 +2034,7 @@ class AiOperationService:
             '- создавать приход, расход и перевод по тексту;',
             '- показывать остаток по одному кошельку или по всем кошелькам;',
             '- показывать расходы текущего месяца по статьям и отклонение от бюджета;',
+            '- показывать бюджет расходов на месяц по статьям;',
             '- показывать инвестиционный портфель, позицию по инструменту и ребалансировку;',
             '- разбирать банковские скриншоты и предлагать документ;',
             '- принимать голосовые сообщения в Telegram и распознавать их как обычный текст;',
@@ -1909,6 +2046,7 @@ class AiOperationService:
             'остатки по кошелькам',
             'расходы по статьям',
             'расходы апрель май',
+            'бюджет июнь',
             'портфель',
             'сколько btc',
             'ребалансировка портфеля',
@@ -3003,6 +3141,8 @@ class AiOperationService:
         if not image_bytes:
             parsed = self.detect_meta_intent(text)
         if parsed is None and not image_bytes:
+            parsed = _detect_month_budget_by_item_intent(text)
+        if parsed is None and not image_bytes:
             parsed = _detect_month_expenses_by_item_intent(text)
         if parsed is None and not image_bytes and _is_transfer_command(text) and _extract_amount_from_text(text) is not None:
             parsed = RuleBasedIntentProvider().parse(text=text, context=context)
@@ -3154,6 +3294,26 @@ class AiOperationService:
                 'reply_text': self._build_month_expenses_by_item_reply(summary),
                 'reply_parse_mode': 'HTML',
                 'expense_summary': summary,
+                'parsed': normalized,
+            }
+
+        if intent == INTENT_GET_MONTH_BUDGET_BY_ITEM:
+            selected_at = timezone.now()
+            month_start = _parse_period_month(normalized.get('period_month_from') or normalized.get('period_month'))
+            month_end = _parse_period_month(normalized.get('period_month_to') or normalized.get('period_month'))
+            summary = _month_budget_by_item_range(
+                at_time=selected_at,
+                month_start=month_start,
+                month_end=month_end,
+            )
+            return {
+                'status': 'info',
+                'intent': intent,
+                'provider': provider_name,
+                'confidence': normalized['confidence'],
+                'reply_text': self._build_month_budget_by_item_reply(summary),
+                'reply_parse_mode': 'HTML',
+                'budget_summary': summary,
                 'parsed': normalized,
             }
 
@@ -4075,6 +4235,45 @@ class AiOperationService:
         total_usage_percent = summary.get('total_budget_usage_percent') or ''
         table_lines.append(
             f'Σ  {"Итого":<18} {_format_compact_money_whole(summary["total_actual"]):>10} {total_usage_percent:>4}'
+        )
+        lines.append(f'<pre>{html.escape(chr(10).join(table_lines))}</pre>')
+        return '\n'.join(lines)
+
+    def _build_month_budget_by_item_reply(self, summary):
+        rows = summary.get('items') or []
+        if not rows:
+            return f'Бюджет расходов за {summary.get("period_label", "текущий месяц")} не найден.'
+
+        lines = [f'📊 Бюджет {html.escape(summary["period_label"])}']
+        months = summary.get('months') or []
+        table_lines = ['Период/статья      План']
+        if len(months) > 1:
+            for month in months:
+                month_rows = month.get('items') or []
+                month_label = (month.get('period_label') or '')[:18]
+                table_lines.append(
+                    f'{month_label:<18} {_format_compact_money_whole(month["total_budget"]):>10}'
+                )
+                visible_month_rows = month_rows[:10]
+                for row in visible_month_rows:
+                    item_name = (row.get('cash_flow_item_name') or 'Без статьи')[:16]
+                    table_lines.append(
+                        f'  {item_name:<16} {_format_compact_money_whole(row["budget"]):>10}'
+                    )
+                if len(month_rows) > len(visible_month_rows):
+                    table_lines.append(f'  +{len(month_rows) - len(visible_month_rows)} статей')
+        else:
+            visible_rows = rows[:15]
+            for index, row in enumerate(visible_rows, start=1):
+                item_name = (row.get('cash_flow_item_name') or 'Без статьи')[:18]
+                table_lines.append(
+                    f'{index:<2} {item_name:<18} {_format_compact_money_whole(row["budget"]):>10}'
+                )
+            if len(rows) > len(visible_rows):
+                table_lines.append(f'+{len(rows) - len(visible_rows)} статей')
+
+        table_lines.append(
+            f'Σ  {"Итого":<18} {_format_compact_money_whole(summary["total_budget"]):>10}'
         )
         lines.append(f'<pre>{html.escape(chr(10).join(table_lines))}</pre>')
         return '\n'.join(lines)

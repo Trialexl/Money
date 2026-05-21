@@ -731,6 +731,50 @@ class InvestmentModuleIsolationTests(TestCase):
         snapshots = InvestmentPortfolioSnapshot.objects.filter(portfolio=self.portfolio).order_by('snapshot_date')
         self.assertEqual([snapshot.snapshot_date for snapshot in snapshots], [date(2026, 1, 1), date(2026, 1, 2)])
 
+    def test_operation_api_display_amounts_use_operation_date_fx(self):
+        FxRateSnapshot.objects.create(
+            captured_at=self._dt(2026, 1, 1),
+            base_currency='USD',
+            quote_currency='RUB',
+            rate=Decimal('70.00000000'),
+            source='test-fx',
+        )
+        FxRateSnapshot.objects.create(
+            captured_at=self._dt(2026, 2, 3),
+            base_currency='USD',
+            quote_currency='RUB',
+            rate=Decimal('80.00000000'),
+            source='test-fx',
+        )
+        FxRateSnapshot.objects.create(
+            captured_at=self._dt(2026, 2, 4),
+            base_currency='USD',
+            quote_currency='RUB',
+            rate=Decimal('100.00000000'),
+            source='test-fx',
+        )
+        operation = InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('2.0000000000'),
+            price_usd=Decimal('50.00000000'),
+            amount_usd=Decimal('100.00'),
+            fee_usd=Decimal('1.00'),
+            date=self._dt(2026, 2, 3),
+        )
+
+        response = self.client.get('/api/v1/investment/operations/', {'display_currency': 'RUB'})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        row = next(item for item in response.data if item['id'] == str(operation.id))
+        self.assertEqual(row['display_currency'], 'RUB')
+        self.assertEqual(row['fx_rate_to_display'], Decimal('80.00000000'))
+        self.assertEqual(row['price_display'], Decimal('4000.00'))
+        self.assertEqual(row['amount_display'], Decimal('8000.00'))
+        self.assertEqual(row['fee_display'], Decimal('80.00'))
+
     def test_price_api_rebuilds_related_portfolio_snapshots_after_create(self):
         InvestmentOperation.objects.create(
             portfolio=self.portfolio,

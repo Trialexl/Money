@@ -52,6 +52,7 @@ type OperationChartMarker = {
   type: "buy" | "sell"
   count: number
   amountUsd: number
+  amountDisplay: number | null
   quantity: number
   tickers: string[]
 }
@@ -145,15 +146,19 @@ function getDisplayRate(currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
   return fxRates.find((rate) => rate.base_currency === "USD" && rate.quote_currency === currency)?.rate ?? null
 }
 
-function convertUsdAmount(amount: number | null | undefined, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
+function convertUsdAmountAtDate(amount: number | null | undefined, date: string, currency: DisplayCurrency, fxRates: FxRateSnapshot[]) {
   if (amount === null || amount === undefined) {
     return null
   }
-  const rate = getDisplayRate(currency, fxRates)
-  if (!rate) {
-    return null
+  if (currency === "USD") {
+    return amount
   }
-  return currency === "USD" ? amount : amount * rate
+  const cutoff = getDateKey(date)
+  const rate = fxRates
+    .filter((item) => item.base_currency === "USD" && item.quote_currency === currency)
+    .filter((item) => getDateKey(item.captured_at) <= cutoff)
+    .sort((left, right) => right.captured_at.localeCompare(left.captured_at))[0]
+  return rate ? amount * rate.rate : null
 }
 
 function formatCurrencyValue(amount: number, currency: DisplayCurrency) {
@@ -228,11 +233,17 @@ function buildOperationMarkers(
         type,
         count: 0,
         amountUsd: 0,
+        amountDisplay: 0,
         quantity: 0,
         tickers: [],
       }
       marker.count += 1
       marker.amountUsd += operation.amount_usd
+      if (operation.amount_display === null || operation.amount_display === undefined) {
+        marker.amountDisplay = null
+      } else if (marker.amountDisplay !== null) {
+        marker.amountDisplay += operation.amount_display
+      }
       marker.quantity += operation.quantity
       if (operation.instrument_ticker && !marker.tickers.includes(operation.instrument_ticker)) {
         marker.tickers.push(operation.instrument_ticker)
@@ -322,12 +333,13 @@ export default function InvestmentReportsPage() {
   })
 
   const operationsQuery = useQuery({
-    queryKey: ["investment-report-operations", activePortfolioId, dateFrom, dateTo],
+    queryKey: ["investment-report-operations", activePortfolioId, dateFrom, dateTo, displayCurrency],
     queryFn: () =>
       InvestmentService.getOperations({
         portfolio: activePortfolioId!,
         date_from: dateFrom,
         date_to: dateTo,
+        display_currency: displayCurrency,
       }),
     enabled: Boolean(activePortfolioId),
   })
@@ -340,6 +352,16 @@ export default function InvestmentReportsPage() {
     queryKey: ["investment-fx-rates-period", dateFrom, dateTo],
     queryFn: () => InvestmentService.getFxRates({ base_currency: "USD", date_from: dateFrom, date_to: dateTo }),
   })
+  const conversionFxRatesQuery = useQuery({
+    queryKey: ["investment-fx-rates-conversion", dateTo, displayCurrency],
+    queryFn: () =>
+      InvestmentService.getFxRates({
+        base_currency: "USD",
+        quote_currency: displayCurrency === "USD" ? undefined : displayCurrency,
+        date_to: dateTo,
+      }),
+    enabled: displayCurrency !== "USD",
+  })
 
   const isLoading = overviewQuery.isLoading || portfoliosQuery.isLoading || instrumentsQuery.isLoading
   const isError = overviewQuery.isError || portfoliosQuery.isError || instrumentsQuery.isError
@@ -349,6 +371,8 @@ export default function InvestmentReportsPage() {
   const instrumentById = new Map(instruments.map((instrument) => [instrument.id, instrument]))
   const currentPortfolio = overviewQuery.data?.portfolio ?? portfoliosQuery.data?.find((portfolio) => portfolio.is_default) ?? portfoliosQuery.data?.[0] ?? null
   const fxRates = fxRatesQuery.data ?? []
+  const periodFxRates = periodFxRatesQuery.data ?? []
+  const conversionFxRates = conversionFxRatesQuery.data ?? []
   const operations = operationsQuery.data ?? []
   const performance = performanceQuery.data
   const performancePoints = performance?.points ?? []
@@ -429,8 +453,11 @@ export default function InvestmentReportsPage() {
     }
     const periodKey = getPeriodKey(snapshot.captured_at, groupBy)
     const x = formatShortPeriodLabel(periodKey, groupBy)
-    const convertedPrice = convertUsdAmount(snapshot.price_usd, displayCurrency, fxRates)
-    const priceValue = convertedPrice ?? snapshot.price_usd
+    const convertedPrice = convertUsdAmountAtDate(snapshot.price_usd, snapshot.captured_at, displayCurrency, conversionFxRates)
+    if (convertedPrice === null) {
+      return
+    }
+    const priceValue = convertedPrice
     latestPriceByInstrument.set(snapshot.instrument, priceValue)
     const map = priceSnapshotsByInstrument.get(snapshot.instrument) ?? new Map<string, ChartPoint>()
     map.set(periodKey, {
@@ -470,7 +497,7 @@ export default function InvestmentReportsPage() {
 
   const fxRatesByPair = new Map<string, Map<string, ChartPoint>>()
   const latestFxRateByPair = new Map<string, number>()
-  ;(periodFxRatesQuery.data ?? [])
+  periodFxRates
     .filter((rate) => rate.base_currency !== rate.quote_currency)
     .sort((left, right) => left.captured_at.localeCompare(right.captured_at))
     .forEach((rate) => {
@@ -653,13 +680,12 @@ export default function InvestmentReportsPage() {
         const color = isBuy ? "#10b981" : "#ef4444"
         const yOffset = isBuy ? -16 : 16
         const y = Math.min(Math.max(baseY + yOffset, 10), Math.max(Number(innerHeight) - 10, 10))
-        const markerAmount = convertUsdAmount(marker.amountUsd, displayCurrency, fxRates)
         const title = [
           isBuy ? "Покупка" : "Продажа",
           marker.x,
           marker.tickers.join(", "),
           `${marker.count} сделк.`,
-          markerAmount === null ? "нет курса" : formatCurrencyValue(markerAmount, displayCurrency),
+          marker.amountDisplay === null ? "нет курса" : formatCurrencyValue(marker.amountDisplay, displayCurrency),
         ].filter(Boolean).join(" · ")
         return (
           <g key={`${marker.key}-${index}`} transform={`translate(${x}, ${y})`}>

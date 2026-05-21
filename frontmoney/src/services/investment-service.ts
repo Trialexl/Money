@@ -51,6 +51,12 @@ export interface InvestmentOperation {
   price_usd?: number
   amount_usd: number
   fee_usd: number
+  display_currency?: string
+  fx_rate_to_display?: number | null
+  fx_rate_at?: string | null
+  price_display?: number | null
+  amount_display?: number | null
+  fee_display?: number | null
   comment?: string
   deleted: boolean
   posted: boolean
@@ -304,6 +310,12 @@ function mapOperation(raw: any): InvestmentOperation {
     price_usd: raw.price_usd === null || raw.price_usd === undefined ? undefined : fromApiAmount(raw.price_usd),
     amount_usd: fromApiAmount(raw.amount_usd),
     fee_usd: fromApiAmount(raw.fee_usd),
+    display_currency: raw.display_currency ?? undefined,
+    fx_rate_to_display: fromApiNullableAmount(raw.fx_rate_to_display),
+    fx_rate_at: fromApiDateTime(raw.fx_rate_at) ?? null,
+    price_display: fromApiNullableAmount(raw.price_display),
+    amount_display: fromApiNullableAmount(raw.amount_display),
+    fee_display: fromApiNullableAmount(raw.fee_display),
     comment: raw.comment ?? undefined,
     deleted: !!raw.deleted,
     posted: !!raw.posted,
@@ -585,6 +597,7 @@ export const InvestmentService = {
     instrument?: string
     account?: string
     operation_type?: InvestmentOperationType
+    display_currency?: string
   }) {
     const response = await api.get("/investment/operations/", { params })
     const data = Array.isArray(response.data?.results) ? response.data.results : response.data

@@ -1226,6 +1226,40 @@ def _latest_fx_rate_snapshot(base_currency, quote_currency, *, as_of=None, max_a
     return snapshot, snapshot.rate
 
 
+def display_money_for_date(amount, value_date, display_currency, *, fx_max_age_days=None):
+    currency = (display_currency or 'USD').strip().upper()
+    amount = amount or ZERO_AMOUNT
+    if currency == 'USD':
+        return {
+            'display_currency': currency,
+            'fx_rate_to_display': Decimal('1'),
+            'fx_rate_at': None,
+            'amount_display': _money(amount),
+        }
+
+    cutoff_date = _date_part(value_date)
+    if cutoff_date is None:
+        return {
+            'display_currency': currency,
+            'fx_rate_to_display': None,
+            'fx_rate_at': None,
+            'amount_display': None,
+        }
+    cutoff = _aware_datetime(cutoff_date, end_of_day=True)
+    fx_snapshot, fx_rate = _latest_fx_rate_snapshot(
+        'USD',
+        currency,
+        as_of=cutoff,
+        max_age_days=fx_max_age_days,
+    )
+    return {
+        'display_currency': currency,
+        'fx_rate_to_display': fx_rate,
+        'fx_rate_at': fx_snapshot.captured_at if fx_snapshot is not None else None,
+        'amount_display': _money(amount * fx_rate) if fx_rate is not None else None,
+    }
+
+
 def _historical_display_totals_for_cutoff(portfolio, cutoff, display_currency, *, instrument_id=None, fx_max_age_days=None):
     currency = (display_currency or 'USD').strip().upper()
     states = {}

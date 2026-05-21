@@ -89,6 +89,7 @@ operation_list_parameters = [
     OpenApiParameter('operation_type', OpenApiTypes.STR, OpenApiParameter.QUERY, description='buy, sell, transfer_instrument или correction.'),
     OpenApiParameter('date_from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата операции с YYYY-MM-DD.'),
     OpenApiParameter('date_to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Дата операции по YYYY-MM-DD включительно.'),
+    OpenApiParameter('display_currency', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Валюта отображения USD/EUR/RUB. Display-суммы считаются по курсу даты операции.'),
     OpenApiParameter('deleted', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description='Если не передан, по умолчанию скрывает удаленные операции.'),
 ]
 

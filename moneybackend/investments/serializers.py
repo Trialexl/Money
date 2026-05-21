@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -18,6 +19,7 @@ from .services import (
     calculate_instrument_quantity,
     calculate_portfolio_totals,
     calculate_positions,
+    display_money_for_date,
 )
 
 
@@ -252,6 +254,12 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
     account_to_name = serializers.CharField(source='account_to.name', read_only=True)
     instrument_ticker = serializers.CharField(source='instrument.ticker', read_only=True)
     instrument_name = serializers.CharField(source='instrument.name', read_only=True)
+    display_currency = serializers.SerializerMethodField()
+    fx_rate_to_display = serializers.SerializerMethodField()
+    fx_rate_at = serializers.SerializerMethodField()
+    price_display = serializers.SerializerMethodField()
+    amount_display = serializers.SerializerMethodField()
+    fee_display = serializers.SerializerMethodField()
 
     class Meta:
         model = InvestmentOperation
@@ -273,6 +281,12 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
             'price_usd',
             'amount_usd',
             'fee_usd',
+            'display_currency',
+            'fx_rate_to_display',
+            'fx_rate_at',
+            'price_display',
+            'amount_display',
+            'fee_display',
             'comment',
             'deleted',
             'posted',
@@ -287,12 +301,64 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
             'account_to_name',
             'instrument_ticker',
             'instrument_name',
+            'display_currency',
+            'fx_rate_to_display',
+            'fx_rate_at',
+            'price_display',
+            'amount_display',
+            'fee_display',
             'created_at',
             'updated_at',
         ]
         extra_kwargs = {
             'portfolio': {'required': False},
         }
+
+    def _display_currency(self):
+        request = self.context.get('request')
+        value = request.query_params.get('display_currency') if request is not None else None
+        return _normalize_currency(value or 'USD')
+
+    def _display_values(self, obj):
+        cache_name = '_operation_display_cache'
+        if not hasattr(self, cache_name):
+            setattr(self, cache_name, {})
+        cache = getattr(self, cache_name)
+        currency = self._display_currency()
+        cache_key = (obj.pk, currency)
+        if cache_key not in cache:
+            amount_info = display_money_for_date(obj.amount_usd, obj.date, currency)
+            price_info = display_money_for_date(obj.price_usd, obj.date, currency) if obj.price_usd is not None else {
+                'amount_display': None,
+            }
+            fee_info = display_money_for_date(obj.fee_usd, obj.date, currency)
+            cache[cache_key] = {
+                'display_currency': amount_info['display_currency'],
+                'fx_rate_to_display': amount_info['fx_rate_to_display'],
+                'fx_rate_at': amount_info['fx_rate_at'],
+                'price_display': price_info['amount_display'],
+                'amount_display': amount_info['amount_display'],
+                'fee_display': fee_info['amount_display'],
+            }
+        return cache[cache_key]
+
+    def get_display_currency(self, obj) -> str:
+        return self._display_values(obj)['display_currency']
+
+    def get_fx_rate_to_display(self, obj) -> Decimal | None:
+        return self._display_values(obj)['fx_rate_to_display']
+
+    def get_fx_rate_at(self, obj) -> datetime | None:
+        return self._display_values(obj)['fx_rate_at']
+
+    def get_price_display(self, obj) -> Decimal | None:
+        return self._display_values(obj)['price_display']
+
+    def get_amount_display(self, obj) -> Decimal | None:
+        return self._display_values(obj)['amount_display']
+
+    def get_fee_display(self, obj) -> Decimal | None:
+        return self._display_values(obj)['fee_display']
 
     def validate(self, attrs):
         request = self.context.get('request')

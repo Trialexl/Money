@@ -214,6 +214,7 @@ type OperationChartMarker = {
   type: "buy" | "sell"
   count: number
   amountUsd: number
+  amountDisplay: number | null
   quantity: number
   tickers: string[]
 }
@@ -250,11 +251,17 @@ function buildOperationMarkers(
         type,
         count: 0,
         amountUsd: 0,
+        amountDisplay: 0,
         quantity: 0,
         tickers: [],
       }
       marker.count += 1
       marker.amountUsd += operation.amount_usd
+      if (operation.amount_display === null || operation.amount_display === undefined) {
+        marker.amountDisplay = null
+      } else if (marker.amountDisplay !== null) {
+        marker.amountDisplay += operation.amount_display
+      }
       marker.quantity += operation.quantity
       if (operation.instrument_ticker && !marker.tickers.includes(operation.instrument_ticker)) {
         marker.tickers.push(operation.instrument_ticker)
@@ -377,12 +384,13 @@ export default function InvestmentsPage() {
     portfoliosQuery.data?.find((portfolio) => portfolio.is_default)?.id ??
     portfoliosQuery.data?.[0]?.id
   const performanceOperationsQuery = useQuery({
-    queryKey: ["investment-performance-operations", activePortfolioId, performancePeriod.dateFrom, performancePeriod.dateTo],
+    queryKey: ["investment-performance-operations", activePortfolioId, performancePeriod.dateFrom, performancePeriod.dateTo, displayCurrency],
     queryFn: () =>
       InvestmentService.getOperations({
         portfolio: activePortfolioId!,
         date_from: performancePeriod.dateFrom,
         date_to: performancePeriod.dateTo,
+        display_currency: displayCurrency,
       }),
     enabled: Boolean(activePortfolioId && showInlinePerformanceReports),
   })
@@ -397,13 +405,14 @@ export default function InvestmentsPage() {
     enabled: Boolean(activePortfolioId),
   })
   const operationsQuery = useQuery({
-    queryKey: ["investment-operations", operationDateFrom, operationDateTo, operationInstrument, operationAccount],
+    queryKey: ["investment-operations", operationDateFrom, operationDateTo, operationInstrument, operationAccount, displayCurrency],
     queryFn: () =>
       InvestmentService.getOperations({
         date_from: operationDateFrom || undefined,
         date_to: operationDateTo || undefined,
         instrument: operationInstrument === "all" ? undefined : operationInstrument,
         account: operationAccount === "all" ? undefined : operationAccount,
+        display_currency: displayCurrency,
       }),
   })
 
@@ -576,13 +585,12 @@ export default function InvestmentsPage() {
         const color = isBuy ? "#10b981" : "#ef4444"
         const yOffset = isBuy ? -16 : 16
         const y = Math.min(Math.max(baseY + yOffset, 10), Math.max(Number(innerHeight) - 10, 10))
-        const markerAmount = convertUsdAmount(marker.amountUsd, displayCurrency, fxRates)
         const title = [
           isBuy ? "Покупка" : "Продажа",
           marker.x,
           marker.tickers.join(", "),
           `${marker.count} сделк.`,
-          markerAmount === null ? "нет курса" : formatCurrencyValue(markerAmount, displayCurrency),
+          marker.amountDisplay === null ? "нет курса" : formatCurrencyValue(marker.amountDisplay, displayCurrency),
         ].filter(Boolean).join(" · ")
         return (
           <g key={`${marker.key}-${index}`} transform={`translate(${x}, ${y})`}>
@@ -606,15 +614,27 @@ export default function InvestmentsPage() {
   const operationTotals = operations.reduce(
     (totals, operation) => {
       if (operation.operation_type === "buy") {
-        totals.buy += operation.amount_usd
+        if (operation.amount_display === null || operation.amount_display === undefined) {
+          totals.buyComplete = false
+        } else {
+          totals.buy += operation.amount_display
+        }
       }
       if (operation.operation_type === "sell") {
-        totals.sell += operation.amount_usd
+        if (operation.amount_display === null || operation.amount_display === undefined) {
+          totals.sellComplete = false
+        } else {
+          totals.sell += operation.amount_display
+        }
       }
-      totals.fee += operation.fee_usd
+      if (operation.fee_display === null || operation.fee_display === undefined) {
+        totals.feeComplete = false
+      } else {
+        totals.fee += operation.fee_display
+      }
       return totals
     },
-    { buy: 0, sell: 0, fee: 0 },
+    { buy: 0, buyComplete: true, sell: 0, sellComplete: true, fee: 0, feeComplete: true },
   )
   const exportOperationsCsv = () => {
     const header = ["Дата", "Номер", "Тип", "Инструмент", "Счет", "Количество", "Сумма USD", "Комиссия USD", "Комментарий"]
@@ -1354,7 +1374,7 @@ export default function InvestmentsPage() {
                     <div className="flex items-center gap-1">
                       <div className="mr-2 text-right text-sm tabular-nums">
                         <div>{operation.quantity}</div>
-                        <div className="text-xs text-muted-foreground">{money(operation.amount_usd)}</div>
+                        <div className="text-xs text-muted-foreground">{displayMoney(operation.amount_display)}</div>
                       </div>
                       <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "operation", mode: "edit", item: operation })} aria-label="Редактировать операцию">
                         <PencilLine className="h-4 w-4" />
@@ -1370,15 +1390,15 @@ export default function InvestmentsPage() {
             <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 text-sm sm:grid-cols-3">
               <div className="rounded-2xl bg-background/70 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Покупки</div>
-                <div className="mt-1 font-semibold tabular-nums">{money(operationTotals.buy)}</div>
+                <div className="mt-1 font-semibold tabular-nums">{operationTotals.buyComplete ? formatCurrencyValue(operationTotals.buy, displayCurrency) : "нет курса"}</div>
               </div>
               <div className="rounded-2xl bg-background/70 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Продажи</div>
-                <div className="mt-1 font-semibold tabular-nums">{money(operationTotals.sell)}</div>
+                <div className="mt-1 font-semibold tabular-nums">{operationTotals.sellComplete ? formatCurrencyValue(operationTotals.sell, displayCurrency) : "нет курса"}</div>
               </div>
               <div className="rounded-2xl bg-background/70 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Комиссии</div>
-                <div className="mt-1 font-semibold tabular-nums">{money(operationTotals.fee)}</div>
+                <div className="mt-1 font-semibold tabular-nums">{operationTotals.feeComplete ? formatCurrencyValue(operationTotals.fee, displayCurrency) : "нет курса"}</div>
               </div>
             </div>
           </CardContent>
