@@ -343,28 +343,39 @@ export default function InvestmentsPage() {
   const [operationInstrument, setOperationInstrument] = useState("all")
   const [operationAccount, setOperationAccount] = useState("all")
   const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>("USD")
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState("")
   const performancePeriod = useMemo(() => yearDateRange(), [])
 
-  const overviewQuery = useQuery({
-    queryKey: ["investment-overview", displayCurrency],
-    queryFn: () => InvestmentService.getOverview({ display_currency: displayCurrency }),
+  const portfoliosQuery = useQuery({
+    queryKey: ["investment-portfolios"],
+    queryFn: InvestmentService.getPortfolios,
   })
-  const performancePortfolioId = overviewQuery.data?.portfolio?.id
-  const performanceQuery = useQuery({
-    queryKey: ["investment-performance", performancePortfolioId, performanceGroupBy, performancePeriod.dateFrom, performancePeriod.dateTo, displayCurrency],
+  const portfolios = portfoliosQuery.data ?? []
+  const activePortfolioId =
+    selectedPortfolioId ||
+    portfolios.find((portfolio) => portfolio.is_default)?.id ||
+    portfolios[0]?.id ||
+    ""
+  const overviewQuery = useQuery({
+    queryKey: ["investment-overview", activePortfolioId, displayCurrency],
     queryFn: () =>
-      InvestmentService.getPortfolioPerformance(performancePortfolioId!, {
+      InvestmentService.getOverview({
+        portfolio: activePortfolioId || undefined,
+        display_currency: displayCurrency,
+      }),
+    enabled: !portfoliosQuery.isLoading,
+  })
+  const performanceQuery = useQuery({
+    queryKey: ["investment-performance", activePortfolioId, performanceGroupBy, performancePeriod.dateFrom, performancePeriod.dateTo, displayCurrency],
+    queryFn: () =>
+      InvestmentService.getPortfolioPerformance(activePortfolioId, {
         date_from: performancePeriod.dateFrom,
         date_to: performancePeriod.dateTo,
         group_by: performanceGroupBy,
         display_currency: displayCurrency,
         scope: "all",
       }),
-    enabled: Boolean(performancePortfolioId && showInlinePerformanceReports),
-  })
-  const portfoliosQuery = useQuery({
-    queryKey: ["investment-portfolios"],
-    queryFn: InvestmentService.getPortfolios,
+    enabled: Boolean(activePortfolioId && showInlinePerformanceReports),
   })
   const instrumentsQuery = useQuery({
     queryKey: ["investment-instruments"],
@@ -379,15 +390,11 @@ export default function InvestmentsPage() {
     queryFn: () => InvestmentService.getFxRates({ base_currency: "USD", quote_currency: displayCurrency }),
     enabled: displayCurrency !== "USD",
   })
-  const activePortfolioId =
-    overviewQuery.data?.portfolio?.id ??
-    portfoliosQuery.data?.find((portfolio) => portfolio.is_default)?.id ??
-    portfoliosQuery.data?.[0]?.id
   const performanceOperationsQuery = useQuery({
     queryKey: ["investment-performance-operations", activePortfolioId, performancePeriod.dateFrom, performancePeriod.dateTo, displayCurrency],
     queryFn: () =>
       InvestmentService.getOperations({
-        portfolio: activePortfolioId!,
+        portfolio: activePortfolioId,
         date_from: performancePeriod.dateFrom,
         date_to: performancePeriod.dateTo,
         display_currency: displayCurrency,
@@ -401,20 +408,32 @@ export default function InvestmentsPage() {
   })
   const rebalanceQuery = useQuery({
     queryKey: ["investment-rebalance", activePortfolioId],
-    queryFn: () => InvestmentService.getPortfolioRebalance(activePortfolioId!),
+    queryFn: () => InvestmentService.getPortfolioRebalance(activePortfolioId),
     enabled: Boolean(activePortfolioId),
   })
   const operationsQuery = useQuery({
-    queryKey: ["investment-operations", operationDateFrom, operationDateTo, operationInstrument, operationAccount, displayCurrency],
+    queryKey: ["investment-operations", activePortfolioId, operationDateFrom, operationDateTo, operationInstrument, operationAccount, displayCurrency],
     queryFn: () =>
       InvestmentService.getOperations({
+        portfolio: activePortfolioId,
         date_from: operationDateFrom || undefined,
         date_to: operationDateTo || undefined,
         instrument: operationInstrument === "all" ? undefined : operationInstrument,
         account: operationAccount === "all" ? undefined : operationAccount,
         display_currency: displayCurrency,
       }),
+    enabled: Boolean(activePortfolioId),
   })
+
+  useEffect(() => {
+    if (portfoliosQuery.isLoading || portfolios.length === 0) {
+      return
+    }
+    if (selectedPortfolioId && portfolios.some((portfolio) => portfolio.id === selectedPortfolioId)) {
+      return
+    }
+    setSelectedPortfolioId(portfolios.find((portfolio) => portfolio.is_default)?.id ?? portfolios[0]?.id ?? "")
+  }, [portfolios, portfoliosQuery.isLoading, selectedPortfolioId])
 
   const invalidateInvestmentQueries = () =>
     Promise.all(INVESTMENT_QUERY_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
@@ -428,7 +447,10 @@ export default function InvestmentsPage() {
   const savePortfolioMutation = useMutation({
     mutationFn: ({ id, payload }: { id?: string; payload: InvestmentPortfolioPayload | Partial<InvestmentPortfolioPayload> }) =>
       id ? InvestmentService.updatePortfolio(id, payload) : InvestmentService.createPortfolio(payload as InvestmentPortfolioPayload),
-    onSuccess: handleSaved,
+    onSuccess: (portfolio) => {
+      setSelectedPortfolioId(portfolio.id)
+      handleSaved()
+    },
     onError: (error) => setDialogError(getApiErrorMessage(error)),
   })
 
@@ -496,12 +518,11 @@ export default function InvestmentsPage() {
   }
 
   const overview = overviewQuery.data
-  const portfolios = portfoliosQuery.data ?? []
   const instruments = instrumentsQuery.data ?? []
   const accounts = accountsQuery.data ?? []
   const operations = operationsQuery.data ?? []
   const activeInstruments = instruments.filter((instrument) => instrument.is_active)
-  const currentPortfolio = overview.portfolio ?? portfolios.find((portfolio) => portfolio.is_default) ?? portfolios[0] ?? null
+  const currentPortfolio = overview.portfolio ?? portfolios.find((portfolio) => portfolio.id === activePortfolioId) ?? null
   const currentPortfolioAccounts = currentPortfolio ? accounts.filter((account) => account.portfolio === currentPortfolio.id) : []
   const visibleAccounts = currentPortfolioAccounts.filter((account) => !account.hidden)
   const canCreateOperation = Boolean(currentPortfolio && activeInstruments.length > 0 && currentPortfolioAccounts.length > 0)
@@ -738,6 +759,29 @@ export default function InvestmentsPage() {
       />
 
       <div className="flex flex-wrap items-center gap-2 rounded-[22px] border border-border/70 bg-card/70 px-4 py-3">
+        {portfolios.length > 0 ? (
+          <>
+            <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Портфель</span>
+            <Select
+              value={activePortfolioId}
+              onValueChange={(value) => {
+                setSelectedPortfolioId(value)
+                setOperationAccount("all")
+              }}
+            >
+              <SelectTrigger className="h-10 w-[220px] rounded-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {portfolios.map((portfolio) => (
+                  <SelectItem key={portfolio.id} value={portfolio.id}>
+                    {portfolio.name}{portfolio.is_default ? " · по умолчанию" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        ) : null}
         <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Валюта отображения</span>
         <div className="flex rounded-full border border-border/70 bg-muted/40 p-1">
           {displayCurrencies.map((currency) => (

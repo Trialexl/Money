@@ -544,7 +544,7 @@ function toTargetAllocationPayload(payload: InvestmentTargetAllocationPayload | 
 }
 
 export const InvestmentService = {
-  async getOverview(params?: { display_currency?: string }) {
+  async getOverview(params?: { portfolio?: string; display_currency?: string }) {
     const response = await api.get("/investment/portfolio-overview/", { params })
     return mapOverview(response.data)
   },

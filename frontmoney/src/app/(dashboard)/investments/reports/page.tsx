@@ -5,7 +5,7 @@ import { ResponsiveLine } from "@nivo/line"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, ChevronLeft, ChevronRight, Eye, EyeOff, LineChart, X } from "lucide-react"
 import Link from "next/link"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { EmptyState } from "@/components/shared/empty-state"
 import { FullPageLoader } from "@/components/shared/full-page-loader"
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatDate, formatDateForInput } from "@/lib/formatters"
 import {
   InvestmentService,
@@ -292,17 +293,29 @@ export default function InvestmentReportsPage() {
   const [hiddenInstrumentIds, setHiddenInstrumentIds] = useState<string[]>([])
   const [selectedFxPairId, setSelectedFxPairId] = useState<string | null>(null)
   const [hiddenFxPairIds, setHiddenFxPairIds] = useState<string[]>([])
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState("")
 
   const periodFromMonth = getMonthInputValue(draftDateFrom)
   const periodToMonth = getMonthInputValue(draftDateTo)
 
-  const overviewQuery = useQuery({
-    queryKey: ["investment-overview"],
-    queryFn: () => InvestmentService.getOverview(),
-  })
   const portfoliosQuery = useQuery({
     queryKey: ["investment-portfolios"],
     queryFn: InvestmentService.getPortfolios,
+  })
+  const portfolios = portfoliosQuery.data ?? []
+  const activePortfolioId =
+    selectedPortfolioId ||
+    portfolios.find((portfolio) => portfolio.is_default)?.id ||
+    portfolios[0]?.id ||
+    ""
+  const overviewQuery = useQuery({
+    queryKey: ["investment-overview", activePortfolioId, displayCurrency],
+    queryFn: () =>
+      InvestmentService.getOverview({
+        portfolio: activePortfolioId || undefined,
+        display_currency: displayCurrency,
+      }),
+    enabled: !portfoliosQuery.isLoading,
   })
   const instrumentsQuery = useQuery({
     queryKey: ["investment-instruments"],
@@ -314,15 +327,10 @@ export default function InvestmentReportsPage() {
     enabled: displayCurrency !== "USD",
   })
 
-  const activePortfolioId =
-    overviewQuery.data?.portfolio?.id ??
-    portfoliosQuery.data?.find((portfolio) => portfolio.is_default)?.id ??
-    portfoliosQuery.data?.[0]?.id
-
   const performanceQuery = useQuery({
     queryKey: ["investment-performance", activePortfolioId, groupBy, dateFrom, dateTo, displayCurrency],
     queryFn: () =>
-      InvestmentService.getPortfolioPerformance(activePortfolioId!, {
+      InvestmentService.getPortfolioPerformance(activePortfolioId, {
         date_from: dateFrom,
         date_to: dateTo,
         group_by: groupBy,
@@ -336,7 +344,7 @@ export default function InvestmentReportsPage() {
     queryKey: ["investment-report-operations", activePortfolioId, dateFrom, dateTo, displayCurrency],
     queryFn: () =>
       InvestmentService.getOperations({
-        portfolio: activePortfolioId!,
+        portfolio: activePortfolioId,
         date_from: dateFrom,
         date_to: dateTo,
         display_currency: displayCurrency,
@@ -363,25 +371,43 @@ export default function InvestmentReportsPage() {
     enabled: displayCurrency !== "USD",
   })
 
+  useEffect(() => {
+    if (portfoliosQuery.isLoading || portfolios.length === 0) {
+      return
+    }
+    if (selectedPortfolioId && portfolios.some((portfolio) => portfolio.id === selectedPortfolioId)) {
+      return
+    }
+    setSelectedPortfolioId(portfolios.find((portfolio) => portfolio.is_default)?.id ?? portfolios[0]?.id ?? "")
+  }, [portfolios, portfoliosQuery.isLoading, selectedPortfolioId])
+
   const isLoading = overviewQuery.isLoading || portfoliosQuery.isLoading || instrumentsQuery.isLoading
   const isError = overviewQuery.isError || portfoliosQuery.isError || instrumentsQuery.isError
 
   const instruments = instrumentsQuery.data ?? []
   const activeInstruments = instruments.filter((instrument) => instrument.is_active)
   const instrumentById = new Map(instruments.map((instrument) => [instrument.id, instrument]))
-  const currentPortfolio = overviewQuery.data?.portfolio ?? portfoliosQuery.data?.find((portfolio) => portfolio.is_default) ?? portfoliosQuery.data?.[0] ?? null
+  const currentPortfolio = overviewQuery.data?.portfolio ?? portfolios.find((portfolio) => portfolio.id === activePortfolioId) ?? null
   const fxRates = fxRatesQuery.data ?? []
   const periodFxRates = periodFxRatesQuery.data ?? []
   const conversionFxRates = conversionFxRatesQuery.data ?? []
   const operations = operationsQuery.data ?? []
   const performance = performanceQuery.data
   const performancePoints = performance?.points ?? []
+  const instrumentPlSeries = performance?.instrument_series.filter((series) => series.points.length > 0) ?? []
+  const portfolioInstrumentIds = new Set(
+    [
+      ...instrumentPlSeries.map((series) => series.instrument_id),
+      ...operations.map((operation) => operation.instrument).filter(Boolean),
+    ],
+  )
+  const portfolioInstruments = activeInstruments.filter((instrument) => portfolioInstrumentIds.has(instrument.id))
 
   const instrumentColorById = new Map(
-    activeInstruments.map((instrument, index) => [instrument.id, instrumentChartColors[index % instrumentChartColors.length]]),
+    portfolioInstruments.map((instrument, index) => [instrument.id, instrumentChartColors[index % instrumentChartColors.length]]),
   )
   const visibleInstrumentIds = new Set(
-    activeInstruments
+    portfolioInstruments
       .filter((instrument) => !hiddenInstrumentIds.includes(instrument.id))
       .filter((instrument) => !selectedInstrumentId || instrument.id === selectedInstrumentId)
       .map((instrument) => instrument.id),
@@ -397,7 +423,6 @@ export default function InvestmentReportsPage() {
   const valueOperationMarkers = buildOperationMarkers(valueLineData, operations, groupBy)
   const plOperationMarkers = buildOperationMarkers(plLineData, operations, groupBy)
 
-  const instrumentPlSeries = performance?.instrument_series.filter((series) => series.points.length > 0) ?? []
   const visibleInstrumentPlSeries = instrumentPlSeries.filter((series) => visibleInstrumentIds.has(series.instrument_id))
   const instrumentPlLineData: InstrumentLineSeries[] = visibleInstrumentPlSeries.map((series) => ({
     id: series.instrument_ticker,
@@ -441,7 +466,7 @@ export default function InvestmentReportsPage() {
   )
 
   const priceSnapshots = (pricesQuery.data ?? [])
-    .filter((snapshot) => activeInstruments.some((instrument) => instrument.id === snapshot.instrument))
+    .filter((snapshot) => portfolioInstrumentIds.has(snapshot.instrument))
     .sort((left, right) => left.captured_at.localeCompare(right.captured_at))
 
   const latestPriceByInstrument = new Map<string, number>()
@@ -468,7 +493,7 @@ export default function InvestmentReportsPage() {
     priceSnapshotsByInstrument.set(snapshot.instrument, map)
   })
 
-  const priceLineData: InstrumentLineSeries[] = activeInstruments
+  const priceLineData: InstrumentLineSeries[] = portfolioInstruments
     .filter((instrument) => visibleInstrumentIds.has(instrument.id))
     .map((instrument) => {
       const points = Array.from(priceSnapshotsByInstrument.get(instrument.id)?.entries() ?? [])
@@ -556,7 +581,7 @@ export default function InvestmentReportsPage() {
     }),
   )
 
-  const legendItems: InstrumentLegendItem[] = activeInstruments.map((instrument) => ({
+  const legendItems: InstrumentLegendItem[] = portfolioInstruments.map((instrument) => ({
     id: instrument.id,
     ticker: instrument.ticker,
     name: instrument.name,
@@ -738,6 +763,30 @@ export default function InvestmentReportsPage() {
       />
 
       <div className="flex flex-wrap items-center gap-2 rounded-[22px] border border-border/70 bg-card/70 px-4 py-3">
+        {portfolios.length > 0 ? (
+          <>
+            <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Портфель</span>
+            <Select
+              value={activePortfolioId}
+              onValueChange={(value) => {
+                setSelectedPortfolioId(value)
+                setSelectedInstrumentId(null)
+                setHiddenInstrumentIds([])
+              }}
+            >
+              <SelectTrigger className="h-10 w-[220px] rounded-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {portfolios.map((portfolio) => (
+                  <SelectItem key={portfolio.id} value={portfolio.id}>
+                    {portfolio.name}{portfolio.is_default ? " · по умолчанию" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        ) : null}
         <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Валюта</span>
         <div className="flex rounded-full border border-border/70 bg-muted/40 p-1">
           {displayCurrencies.map((currency) => (
@@ -761,7 +810,6 @@ export default function InvestmentReportsPage() {
             По месяцам
           </Button>
         </div>
-        <Badge variant="outline">{currentPortfolio?.name ?? "портфель не выбран"}</Badge>
         {displayCurrency !== "USD" ? (
           <span className="text-sm text-muted-foreground">
             {fxRatesQuery.isLoading
