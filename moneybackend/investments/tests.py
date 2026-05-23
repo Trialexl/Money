@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ from .models import (
 from .price_providers import (
     CoinGeckoPriceProvider,
     CompositePriceProvider,
+    MoexPriceProvider,
     PriceProviderError,
     PriceQuote,
     StaticPriceProvider,
@@ -1486,16 +1488,87 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         self.assertEqual(quotes[date(2026, 1, 10)].price, Decimal('194.50'))
         self.assertEqual(quotes[date(2026, 1, 11)].price, Decimal('197.10'))
 
+    def test_moex_provider_reads_stock_quote(self):
+        opener = _FakeOpener(json.dumps({
+            'marketdata': {
+                'columns': ['SECID', 'LAST', 'LCURRENTPRICE', 'MARKETPRICE', 'CLOSEPRICE', 'PREVPRICE'],
+                'data': [['SBER', Decimal('312.45'), None, None, None, Decimal('310.00')]],
+            },
+        }, default=str))
+        instrument = SimpleNamespace(id='sber-id', type='stock', provider_symbol='SBER', ticker='SBER', quote_currency='RUB')
+        provider = MoexPriceProvider(base_url='https://moex.example/iss', board='TQBR', opener=opener)
+
+        quote = provider.get_price(instrument)
+
+        self.assertIn('/engines/stock/markets/shares/boards/TQBR/securities/SBER.json?', opener.request_url)
+        self.assertIn('iss.only=marketdata', opener.request_url)
+        self.assertEqual(quote.symbol, 'SBER')
+        self.assertEqual(quote.price, Decimal('312.45'))
+        self.assertEqual(quote.price_currency, 'RUB')
+        self.assertEqual(quote.source, 'moex')
+
+    def test_moex_provider_reads_historical_stock_prices(self):
+        opener = _FakeOpener(json.dumps({
+            'candles': {
+                'columns': ['begin', 'close'],
+                'data': [
+                    ['2026-01-10 00:00:00', Decimal('312.45')],
+                    ['2026-01-11 00:00:00', Decimal('315.10')],
+                ],
+            },
+        }, default=str))
+        instrument = SimpleNamespace(id='sber-id', type='stock', provider_symbol='SBER', ticker='SBER', quote_currency='RUB')
+        provider = MoexPriceProvider(base_url='https://moex.example/iss', board='TQBR', opener=opener)
+
+        quotes = provider.get_historical_prices(instrument, date(2026, 1, 10), date(2026, 1, 11))
+
+        self.assertIn('/engines/stock/markets/shares/boards/TQBR/securities/SBER/candles.json?', opener.request_url)
+        self.assertIn('from=2026-01-10', opener.request_url)
+        self.assertIn('till=2026-01-11', opener.request_url)
+        self.assertIn('interval=24', opener.request_url)
+        self.assertEqual(quotes[date(2026, 1, 10)].price, Decimal('312.45'))
+        self.assertEqual(quotes[date(2026, 1, 11)].price, Decimal('315.10'))
+
+    def test_moex_provider_uses_bond_board_for_bonds(self):
+        opener = _FakeOpener(json.dumps({
+            'marketdata': {
+                'columns': ['SECID', 'LAST', 'LCURRENTPRICE', 'MARKETPRICE', 'CLOSEPRICE', 'PREVPRICE'],
+                'data': [['RU000A000000', Decimal('98.25'), None, None, None, None]],
+            },
+        }, default=str))
+        instrument = SimpleNamespace(id='bond-id', type='bond', provider_symbol='RU000A000000', ticker='OFZ', quote_currency='RUB')
+        provider = MoexPriceProvider(base_url='https://moex.example/iss', opener=opener)
+
+        quote = provider.get_price(instrument)
+
+        self.assertIn('/engines/stock/markets/shares/boards/TQOB/securities/RU000A000000.json?', opener.request_url)
+        self.assertEqual(quote.price, Decimal('98.25'))
+        self.assertEqual(quote.price_currency, 'RUB')
+
     def test_composite_provider_routes_stocks_and_crypto(self):
         crypto_provider = StaticPriceProvider({('BTC', 'USD'): '62000.00'})
         stock_provider = StaticPriceProvider({('AAPL.US', 'USD'): '194.50'})
-        provider = CompositePriceProvider(crypto_provider=crypto_provider, stock_provider=stock_provider)
+        moex_provider = StaticPriceProvider({
+            ('SBER', 'RUB'): '312.45',
+            ('RU000A000000', 'RUB'): '98.25',
+        })
+        provider = CompositePriceProvider(
+            crypto_provider=crypto_provider,
+            stock_provider=stock_provider,
+            moex_provider=moex_provider,
+        )
 
         crypto_quote = provider.get_price(SimpleNamespace(id='btc-id', type='crypto', provider_symbol='BTC', ticker='BTC', quote_currency='USD'))
         stock_quote = provider.get_price(SimpleNamespace(id='aapl-id', type='stock', provider_symbol='AAPL.US', ticker='AAPL', quote_currency='USD'))
+        rub_stock_quote = provider.get_price(SimpleNamespace(id='sber-id', type='stock', provider_symbol='SBER', ticker='SBER', quote_currency='RUB'))
+        bond_quote = provider.get_price(SimpleNamespace(id='bond-id', type='bond', provider_symbol='RU000A000000', ticker='OFZ', quote_currency='RUB'))
 
         self.assertEqual(crypto_quote.price, Decimal('62000.00'))
         self.assertEqual(stock_quote.price, Decimal('194.50'))
+        self.assertEqual(rub_stock_quote.price, Decimal('312.45'))
+        self.assertEqual(rub_stock_quote.price_currency, 'RUB')
+        self.assertEqual(bond_quote.price, Decimal('98.25'))
+        self.assertEqual(bond_quote.price_currency, 'RUB')
 
     def test_provider_factory_defaults_to_composite_provider(self):
         self.assertIsInstance(get_price_provider(), CompositePriceProvider)
@@ -1503,6 +1576,10 @@ class InvestmentPriceProviderTests(SimpleTestCase):
     @override_settings(INVESTMENT_PRICE_PROVIDER='coingecko')
     def test_provider_factory_reads_settings(self):
         self.assertIsInstance(get_price_provider(), CoinGeckoPriceProvider)
+
+    @override_settings(INVESTMENT_PRICE_PROVIDER='moex')
+    def test_provider_factory_can_use_moex(self):
+        self.assertIsInstance(get_price_provider(), MoexPriceProvider)
 
     @override_settings(INVESTMENT_PRICE_PROVIDER='manual')
     def test_provider_factory_can_disable_automatic_provider(self):

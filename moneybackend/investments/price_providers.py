@@ -355,17 +355,176 @@ class StooqPriceProvider(BasePriceProvider):
         return (instrument.provider_symbol or instrument.ticker or '').strip().lower()
 
 
+class MoexPriceProvider(BasePriceProvider):
+    source = 'moex'
+    supports_historical_range = True
+    DEFAULT_BOARDS = {
+        'bond': 'TQOB',
+        'stock': 'TQBR',
+    }
+
+    def __init__(self, *, base_url=None, board=None, timeout=None, opener=None):
+        self.base_url = (base_url or getattr(
+            settings,
+            'INVESTMENT_MOEX_PRICE_PROVIDER_BASE_URL',
+            'https://iss.moex.com/iss',
+        )).rstrip('/')
+        self.board = board.strip().upper() if board else None
+        self.default_board = getattr(settings, 'INVESTMENT_MOEX_BOARD', 'TQBR').strip().upper()
+        self.timeout = timeout if timeout is not None else getattr(settings, 'INVESTMENT_PRICE_PROVIDER_TIMEOUT', 10)
+        self.opener = opener or urlrequest.urlopen
+
+    def get_price(self, instrument):
+        symbol = self._moex_symbol(instrument)
+        if not symbol:
+            raise PriceProviderError('У инструмента MOEX не указан provider_symbol или ticker.')
+        board = self._board_for(instrument)
+        query = urlparse.urlencode({
+            'iss.meta': 'off',
+            'iss.only': 'marketdata',
+            'marketdata.columns': 'SECID,LAST,LCURRENTPRICE,MARKETPRICE,CLOSEPRICE,PREVPRICE',
+        })
+        url = f'{self.base_url}/engines/stock/markets/shares/boards/{board}/securities/{urlparse.quote(symbol)}.json?{query}'
+        payload = self._read_json(url, symbol)
+        marketdata = payload.get('marketdata') if isinstance(payload, dict) else None
+        row = self._first_table_row(marketdata)
+        price = self._first_positive_decimal(
+            row,
+            ('LAST', 'LCURRENTPRICE', 'MARKETPRICE', 'CLOSEPRICE', 'PREVPRICE'),
+            symbol,
+        )
+        return PriceQuote(
+            instrument_id=str(instrument.id) if getattr(instrument, 'id', None) else None,
+            symbol=symbol,
+            price=price,
+            price_currency='RUB',
+            source=self.source,
+        )
+
+    def get_historical_price(self, instrument, on_date):
+        prices = self.get_historical_prices(instrument, on_date, on_date)
+        normalized_date = _normalize_price_date(on_date)
+        try:
+            return prices[normalized_date]
+        except KeyError as exc:
+            raise PriceProviderError(f'MOEX не вернул историческую цену {instrument.ticker} за {normalized_date.isoformat()}.') from exc
+
+    def get_historical_prices(self, instrument, date_from, date_to):
+        symbol = self._moex_symbol(instrument)
+        start_date = _normalize_price_date(date_from)
+        end_date = _normalize_price_date(date_to)
+        if not symbol:
+            raise PriceProviderError('У инструмента MOEX не указан provider_symbol или ticker.')
+        board = self._board_for(instrument)
+        if start_date is None or end_date is None:
+            raise PriceProviderError('Не указан период исторических цен MOEX.')
+        if start_date > end_date:
+            raise PriceProviderError('Дата начала исторических цен больше даты окончания.')
+
+        query = urlparse.urlencode({
+            'from': start_date.isoformat(),
+            'till': end_date.isoformat(),
+            'interval': 24,
+            'iss.meta': 'off',
+            'candles.columns': 'begin,close',
+        })
+        url = f'{self.base_url}/engines/stock/markets/shares/boards/{board}/securities/{urlparse.quote(symbol)}/candles.json?{query}'
+        payload = self._read_json(url, symbol)
+        candles = payload.get('candles') if isinstance(payload, dict) else None
+        rows = self._table_rows(candles)
+        quotes = {}
+        for row in rows:
+            row_date = _parse_moex_datetime_date(row.get('begin'))
+            if row_date is None or row_date < start_date or row_date > end_date:
+                continue
+            price = self._parse_positive_decimal(row.get('close'), symbol)
+            quotes[row_date] = PriceQuote(
+                instrument_id=str(instrument.id) if getattr(instrument, 'id', None) else None,
+                symbol=symbol,
+                price=price,
+                price_currency='RUB',
+                source=self.source,
+            )
+        if not quotes:
+            raise PriceProviderError(f'MOEX не вернул исторические цены {symbol} за период.')
+        return quotes
+
+    def _read_json(self, url, symbol):
+        request = urlrequest.Request(
+            url,
+            headers={'User-Agent': 'MoneyInvestmentMoexPriceProvider/1.0'},
+        )
+        try:
+            with self.opener(request, timeout=self.timeout) as response:
+                return json.loads(response.read().decode('utf-8'))
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise PriceProviderError(f'Не удалось получить цену MOEX {symbol}.') from exc
+
+    def _table_rows(self, table):
+        if not isinstance(table, dict):
+            return []
+        columns = table.get('columns')
+        data = table.get('data')
+        if not isinstance(columns, list) or not isinstance(data, list):
+            return []
+        return [
+            {column: values[index] if index < len(values) else None for index, column in enumerate(columns)}
+            for values in data
+            if isinstance(values, list)
+        ]
+
+    def _first_table_row(self, table):
+        rows = self._table_rows(table)
+        if not rows:
+            raise PriceProviderError('MOEX не вернул строку с ценой.')
+        return rows[0]
+
+    def _first_positive_decimal(self, row, fields, symbol):
+        for field in fields:
+            value = row.get(field)
+            if value in (None, '', 'N/D'):
+                continue
+            try:
+                price = self._parse_positive_decimal(value, symbol)
+            except PriceProviderError:
+                continue
+            return price
+        raise PriceProviderError(f'MOEX не вернул положительную цену {symbol}.')
+
+    def _parse_positive_decimal(self, value, symbol):
+        try:
+            price = Decimal(str(value))
+        except (InvalidOperation, TypeError) as exc:
+            raise PriceProviderError(f'MOEX вернул некорректную цену {symbol}.') from exc
+        if price <= 0:
+            raise PriceProviderError(f'MOEX вернул неположительную цену {symbol}.')
+        return price
+
+    def _moex_symbol(self, instrument):
+        return (instrument.provider_symbol or instrument.ticker or '').strip().upper()
+
+    def _board_for(self, instrument):
+        if self.board:
+            return self.board
+        instrument_type = (getattr(instrument, 'type', '') or '').strip().lower()
+        return self.DEFAULT_BOARDS.get(instrument_type, self.default_board)
+
+
 class CompositePriceProvider(BasePriceProvider):
     source = 'auto'
     supports_historical_range = True
 
-    def __init__(self, *, crypto_provider=None, stock_provider=None):
+    def __init__(self, *, crypto_provider=None, stock_provider=None, moex_provider=None):
         self.crypto_provider = crypto_provider or CoinGeckoPriceProvider()
         self.stock_provider = stock_provider or StooqPriceProvider()
+        self.moex_provider = moex_provider or MoexPriceProvider()
 
     def _provider_for(self, instrument):
         instrument_type = getattr(instrument, 'type', 'crypto')
-        if instrument_type == 'stock':
+        if instrument_type in {'stock', 'bond'}:
+            quote_currency = (getattr(instrument, 'quote_currency', None) or 'USD').strip().upper()
+            if quote_currency == 'RUB' or instrument_type == 'bond':
+                return self.moex_provider
             return self.stock_provider
         return self.crypto_provider
 
@@ -385,6 +544,16 @@ def _parse_stooq_date(value):
         return None
     try:
         return datetime.strptime(value, '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_moex_datetime_date(value):
+    if not value:
+        return None
+    text = str(value).strip()
+    try:
+        return datetime.strptime(text[:10], '%Y-%m-%d').date()
     except (TypeError, ValueError):
         return None
 
@@ -409,6 +578,8 @@ def get_price_provider(name=None):
         return CoinGeckoPriceProvider()
     if provider_name == 'stooq':
         return StooqPriceProvider()
+    if provider_name == 'moex':
+        return MoexPriceProvider()
     if provider_name == 'static':
         return StaticPriceProvider({})
     if provider_name in {'disabled', 'manual'}:

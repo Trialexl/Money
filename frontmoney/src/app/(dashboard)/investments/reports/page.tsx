@@ -18,6 +18,12 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatDate, formatDateForInput } from "@/lib/formatters"
 import {
+  readInvestmentDisplayCurrency,
+  readSelectedInvestmentPortfolioId,
+  writeInvestmentDisplayCurrency,
+  writeSelectedInvestmentPortfolioId,
+} from "@/lib/investment-preferences"
+import {
   InvestmentService,
   type FxRateSnapshot,
   type Instrument,
@@ -288,12 +294,12 @@ export default function InvestmentReportsPage() {
   const [selectedPreset, setSelectedPreset] = useState<RangePreset>("year")
   const [periodDialogOpen, setPeriodDialogOpen] = useState(false)
   const [groupBy, setGroupBy] = useState<GroupBy>("month")
-  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>("USD")
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>(() => readInvestmentDisplayCurrency())
   const [selectedInstrumentId, setSelectedInstrumentId] = useState<string | null>(null)
   const [hiddenInstrumentIds, setHiddenInstrumentIds] = useState<string[]>([])
   const [selectedFxPairId, setSelectedFxPairId] = useState<string | null>(null)
   const [hiddenFxPairIds, setHiddenFxPairIds] = useState<string[]>([])
-  const [selectedPortfolioId, setSelectedPortfolioId] = useState("")
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState(() => readSelectedInvestmentPortfolioId())
 
   const periodFromMonth = getMonthInputValue(draftDateFrom)
   const periodToMonth = getMonthInputValue(draftDateTo)
@@ -380,6 +386,14 @@ export default function InvestmentReportsPage() {
     }
     setSelectedPortfolioId(portfolios.find((portfolio) => portfolio.is_default)?.id ?? portfolios[0]?.id ?? "")
   }, [portfolios, portfoliosQuery.isLoading, selectedPortfolioId])
+
+  useEffect(() => {
+    writeInvestmentDisplayCurrency(displayCurrency)
+  }, [displayCurrency])
+
+  useEffect(() => {
+    writeSelectedInvestmentPortfolioId(selectedPortfolioId)
+  }, [selectedPortfolioId])
 
   const isLoading = overviewQuery.isLoading || portfoliosQuery.isLoading || instrumentsQuery.isLoading
   const isError = overviewQuery.isError || portfoliosQuery.isError || instrumentsQuery.isError

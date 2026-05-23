@@ -1,7 +1,7 @@
 import api from "@/lib/api"
 import { fromApiAmount, fromApiDateTime, toApiAmount, toApiDateTime } from "@/types"
 
-export type InstrumentType = "crypto" | "stock"
+export type InstrumentType = "crypto" | "stock" | "bond"
 export type InvestmentOperationType = "buy" | "sell" | "transfer_instrument" | "correction"
 
 export interface Instrument {

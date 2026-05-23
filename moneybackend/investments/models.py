@@ -33,9 +33,11 @@ COMMON_CRYPTO_PROVIDER_SYMBOLS = {
 class Instrument(models.Model):
     TYPE_CRYPTO = 'crypto'
     TYPE_STOCK = 'stock'
+    TYPE_BOND = 'bond'
     TYPES = [
         (TYPE_CRYPTO, 'Криптовалюта'),
         (TYPE_STOCK, 'Акция'),
+        (TYPE_BOND, 'Облигация'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

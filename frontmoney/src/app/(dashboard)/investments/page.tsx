@@ -21,6 +21,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { formatDate } from "@/lib/formatters"
 import {
+  readInvestmentDisplayCurrency,
+  readSelectedInvestmentPortfolioId,
+  writeInvestmentDisplayCurrency,
+  writeSelectedInvestmentPortfolioId,
+} from "@/lib/investment-preferences"
+import {
   InvestmentService,
   type FxRateSnapshot,
   type Instrument,
@@ -342,8 +348,8 @@ export default function InvestmentsPage() {
   const [operationDateTo, setOperationDateTo] = useState("")
   const [operationInstrument, setOperationInstrument] = useState("all")
   const [operationAccount, setOperationAccount] = useState("all")
-  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>("USD")
-  const [selectedPortfolioId, setSelectedPortfolioId] = useState("")
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>(() => readInvestmentDisplayCurrency())
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState(() => readSelectedInvestmentPortfolioId())
   const performancePeriod = useMemo(() => yearDateRange(), [])
 
   const portfoliosQuery = useQuery({
@@ -434,6 +440,14 @@ export default function InvestmentsPage() {
     }
     setSelectedPortfolioId(portfolios.find((portfolio) => portfolio.is_default)?.id ?? portfolios[0]?.id ?? "")
   }, [portfolios, portfoliosQuery.isLoading, selectedPortfolioId])
+
+  useEffect(() => {
+    writeInvestmentDisplayCurrency(displayCurrency)
+  }, [displayCurrency])
+
+  useEffect(() => {
+    writeSelectedInvestmentPortfolioId(selectedPortfolioId)
+  }, [selectedPortfolioId])
 
   const invalidateInvestmentQueries = () =>
     Promise.all(INVESTMENT_QUERY_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
@@ -1672,6 +1686,7 @@ function InstrumentForm({
           <SelectContent>
             <SelectItem value="crypto">Криптовалюта</SelectItem>
             <SelectItem value="stock">Акция</SelectItem>
+            <SelectItem value="bond">Облигация</SelectItem>
           </SelectContent>
         </Select>
       </FormField>
@@ -1682,7 +1697,7 @@ function InstrumentForm({
         <Input value={name} onChange={(event) => setName(event.target.value)} required placeholder="Bitcoin" />
       </FormField>
       <FormField label="Символ у провайдера">
-        <Input value={providerSymbol} onChange={(event) => setProviderSymbol(event.target.value)} placeholder={type === "crypto" ? "bitcoin" : "AAPL"} />
+        <Input value={providerSymbol} onChange={(event) => setProviderSymbol(event.target.value)} placeholder={type === "crypto" ? "bitcoin" : type === "bond" ? "RU000A..." : "AAPL.US"} />
       </FormField>
       <FormField label="Валюта котировки">
         <CurrencySelect value={quoteCurrency} onChange={setQuoteCurrency} />

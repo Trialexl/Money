@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 instrument_list_parameters = [
-    OpenApiParameter('type', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Тип инструмента: crypto или stock.'),
+    OpenApiParameter('type', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Тип инструмента: crypto, stock или bond.'),
     OpenApiParameter('is_active', OpenApiTypes.BOOL, OpenApiParameter.QUERY, description='Фильтр активности инструмента.'),
     OpenApiParameter('search', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Поиск по тикеру, названию или символу provider.'),
 ]
