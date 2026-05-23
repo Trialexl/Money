@@ -109,6 +109,14 @@ function formatCalculatedAmount(value: number) {
   return Number(value.toFixed(8)).toString()
 }
 
+function formatCalculatedPrice(value: number) {
+  return Number(value.toFixed(8)).toString()
+}
+
+function isUsdCurrency(currency?: string | null) {
+  return (currency || "USD").trim().toUpperCase() === "USD"
+}
+
 function isOperationAmountEditedManually(operation?: InvestmentOperation) {
   if (!operation || (operation.operation_type !== "buy" && operation.operation_type !== "sell")) {
     return false
@@ -1969,7 +1977,15 @@ function OperationForm({
   const [account, setAccount] = useState(operation?.account ?? accounts[0]?.id ?? "")
   const [accountTo, setAccountTo] = useState(operation?.account_to ?? "")
   const [instrument, setInstrument] = useState(operation?.instrument ?? activeInstruments[0]?.id ?? "")
+  const selectedInstrument = activeInstruments.find((item) => item.id === instrument)
+  const quoteCurrency = (selectedInstrument?.quote_currency ?? "USD").toUpperCase()
   const [quantity, setQuantity] = useState(formatInputNumber(operation?.quantity))
+  const [priceQuote, setPriceQuote] = useState("")
+  const [amountQuote, setAmountQuote] = useState("")
+  const [feeQuote, setFeeQuote] = useState("")
+  const [fxRateToUsd, setFxRateToUsd] = useState(isUsdCurrency(selectedInstrument?.quote_currency) ? "1" : "")
+  const [priceQuoteEditedManually, setPriceQuoteEditedManually] = useState(false)
+  const [amountQuoteEditedManually, setAmountQuoteEditedManually] = useState(false)
   const [priceUsd, setPriceUsd] = useState(formatInputNumber(operation?.price_usd))
   const [priceEditedManually, setPriceEditedManually] = useState(Boolean(operation?.price_usd))
   const [amountUsd, setAmountUsd] = useState(formatInputNumber(operation?.amount_usd))
@@ -1980,6 +1996,18 @@ function OperationForm({
   const [comment, setComment] = useState(operation?.comment ?? "")
   const [priceLookupMessage, setPriceLookupMessage] = useState("")
   const needsAmount = operationType === "buy" || operationType === "sell"
+  const usesQuoteCurrency = !isUsdCurrency(quoteCurrency)
+
+  useEffect(() => {
+    if (!selectedInstrument) {
+      return
+    }
+    if (isUsdCurrency(selectedInstrument.quote_currency)) {
+      setFxRateToUsd("1")
+      return
+    }
+    setFxRateToUsd("")
+  }, [selectedInstrument?.id, selectedInstrument?.quote_currency])
 
   useEffect(() => {
     if (!needsAmount || priceEditedManually || !instrument || !date) {
@@ -1994,6 +2022,13 @@ function OperationForm({
         }
         if (lookup.found && lookup.price_usd !== undefined) {
           setPriceUsd(formatInputNumber(lookup.price_usd))
+          if (lookup.price !== undefined && lookup.price_currency === quoteCurrency) {
+            setPriceQuote(formatInputNumber(lookup.price))
+            setPriceQuoteEditedManually(false)
+          }
+          if (lookup.fx_rate_to_usd !== undefined && !isUsdCurrency(quoteCurrency)) {
+            setFxRateToUsd(formatInputNumber(lookup.fx_rate_to_usd))
+          }
           setPriceLookupMessage(
             lookup.is_exact_date
               ? `Цена на ${formatDate(lookup.snapshot_date ?? date)}`
@@ -2011,7 +2046,7 @@ function OperationForm({
     return () => {
       isCurrent = false
     }
-  }, [date, instrument, needsAmount, priceEditedManually])
+  }, [date, instrument, needsAmount, priceEditedManually, quoteCurrency])
 
   useEffect(() => {
     if (!needsAmount || amountEditedManually) {
@@ -2028,6 +2063,73 @@ function OperationForm({
     }
     setAmountUsd(formatCalculatedAmount(calculatedAmount))
   }, [amountEditedManually, needsAmount, priceUsd, quantity])
+
+  useEffect(() => {
+    if (!needsAmount || !usesQuoteCurrency || !fxRateToUsd.trim()) {
+      return
+    }
+    const rate = parseFormNumber(fxRateToUsd)
+    if (!Number.isFinite(rate) || rate <= 0) {
+      return
+    }
+    if (priceQuote.trim() && !priceEditedManually) {
+      const nextPriceUsd = parseFormNumber(priceQuote) * rate
+      if (Number.isFinite(nextPriceUsd) && nextPriceUsd > 0) {
+        setPriceUsd(formatCalculatedPrice(nextPriceUsd))
+      }
+    }
+    if (amountQuote.trim() && !amountEditedManually) {
+      const nextAmountUsd = parseFormNumber(amountQuote) * rate
+      if (Number.isFinite(nextAmountUsd) && nextAmountUsd > 0) {
+        setAmountUsd(formatCalculatedAmount(nextAmountUsd))
+      }
+    }
+    if (feeQuote.trim()) {
+      const nextFeeUsd = parseFormNumber(feeQuote) * rate
+      if (Number.isFinite(nextFeeUsd) && nextFeeUsd >= 0) {
+        setFeeUsd(formatCalculatedAmount(nextFeeUsd))
+      }
+    }
+  }, [amountEditedManually, amountQuote, feeQuote, fxRateToUsd, needsAmount, priceEditedManually, priceQuote, usesQuoteCurrency])
+
+  useEffect(() => {
+    if (!needsAmount || priceQuoteEditedManually || !usesQuoteCurrency) {
+      return
+    }
+    if (!quantity.trim() || !amountQuote.trim()) {
+      return
+    }
+    const nextPrice = parseFormNumber(amountQuote) / parseFormNumber(quantity)
+    if (Number.isFinite(nextPrice) && nextPrice > 0) {
+      setPriceQuote(formatCalculatedPrice(nextPrice))
+    }
+  }, [amountQuote, needsAmount, priceQuoteEditedManually, quantity, usesQuoteCurrency])
+
+  useEffect(() => {
+    if (!needsAmount || amountQuoteEditedManually || !usesQuoteCurrency) {
+      return
+    }
+    if (!quantity.trim() || !priceQuote.trim()) {
+      return
+    }
+    const nextAmount = parseFormNumber(quantity) * parseFormNumber(priceQuote)
+    if (Number.isFinite(nextAmount) && nextAmount > 0) {
+      setAmountQuote(formatCalculatedAmount(nextAmount))
+    }
+  }, [amountQuoteEditedManually, needsAmount, priceQuote, quantity, usesQuoteCurrency])
+
+  useEffect(() => {
+    if (!needsAmount || priceEditedManually) {
+      return
+    }
+    if (!quantity.trim() || !amountUsd.trim()) {
+      return
+    }
+    const nextPrice = parseFormNumber(amountUsd) / parseFormNumber(quantity)
+    if (Number.isFinite(nextPrice) && nextPrice > 0) {
+      setPriceUsd(formatCalculatedPrice(nextPrice))
+    }
+  }, [amountUsd, needsAmount, priceEditedManually, quantity])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -2098,7 +2200,15 @@ function OperationForm({
         </Select>
       </FormField>
       <FormField label="Инструмент">
-        <Select value={instrument} onValueChange={setInstrument}>
+        <Select
+          value={instrument}
+          onValueChange={(value) => {
+            setInstrument(value)
+            setPriceEditedManually(false)
+            setPriceQuoteEditedManually(false)
+            setPriceLookupMessage("")
+          }}
+        >
           <SelectTrigger>
             <SelectValue placeholder="Выбери инструмент" />
           </SelectTrigger>
@@ -2114,6 +2224,42 @@ function OperationForm({
       <FormField label="Количество">
         <Input value={quantity} onChange={(event) => setQuantity(event.target.value)} required inputMode="decimal" placeholder="0.01" />
       </FormField>
+      {usesQuoteCurrency ? (
+        <>
+          <FormField label={`Цена ${quoteCurrency}`}>
+            <Input
+              value={priceQuote}
+              onChange={(event) => {
+                setPriceQuote(event.target.value)
+                setPriceQuoteEditedManually(true)
+                setPriceEditedManually(false)
+              }}
+              required={needsAmount && !priceUsd.trim()}
+              inputMode="decimal"
+              placeholder={`Цена за единицу в ${quoteCurrency}`}
+            />
+          </FormField>
+          <FormField label={`Сумма ${quoteCurrency}`}>
+            <Input
+              value={amountQuote}
+              onChange={(event) => {
+                setAmountQuote(event.target.value)
+                setAmountQuoteEditedManually(true)
+                setAmountEditedManually(false)
+              }}
+              required={needsAmount && !amountUsd.trim()}
+              inputMode="decimal"
+              placeholder="Можно ввести итоговую сумму"
+            />
+          </FormField>
+          <FormField label={`${quoteCurrency} к USD`}>
+            <Input value={fxRateToUsd} onChange={(event) => setFxRateToUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Например: 0.011" />
+          </FormField>
+          <FormField label={`Комиссия ${quoteCurrency}`}>
+            <Input value={feeQuote} onChange={(event) => setFeeQuote(event.target.value)} inputMode="decimal" />
+          </FormField>
+        </>
+      ) : null}
       <FormField label="Цена USD">
         <Input
           value={priceUsd}
@@ -2137,7 +2283,7 @@ function OperationForm({
           }}
           required={needsAmount}
           inputMode="decimal"
-          placeholder="Авто: количество × цена"
+          placeholder="Авто: количество × цена или сумма в валюте"
         />
       </FormField>
       <FormField label="Комиссия USD">
