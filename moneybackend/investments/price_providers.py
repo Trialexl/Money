@@ -506,8 +506,36 @@ class MoexPriceProvider(BasePriceProvider):
     def _board_for(self, instrument):
         if self.board:
             return self.board
+        symbol = self._moex_symbol(instrument)
+        if symbol:
+            try:
+                return self._primary_board_for_symbol(symbol)
+            except PriceProviderError:
+                pass
         instrument_type = (getattr(instrument, 'type', '') or '').strip().lower()
         return self.DEFAULT_BOARDS.get(instrument_type, self.default_board)
+
+    def _primary_board_for_symbol(self, symbol):
+        query = urlparse.urlencode({
+            'iss.meta': 'off',
+            'iss.only': 'boards',
+            'boards.columns': 'boardid,is_traded,is_primary,currencyid,market',
+        })
+        url = f'{self.base_url}/securities/{urlparse.quote(symbol)}.json?{query}'
+        payload = self._read_json(url, symbol)
+        boards = payload.get('boards') if isinstance(payload, dict) else None
+        rows = self._table_rows(boards)
+        if not rows:
+            raise PriceProviderError(f'MOEX не вернул boards для {symbol}.')
+        candidates = [row for row in rows if str(row.get('is_traded')) == '1' and (row.get('market') or '').lower() == 'bonds']
+        if not candidates:
+            candidates = [row for row in rows if str(row.get('is_traded')) == '1']
+        primary = next((row for row in candidates if str(row.get('is_primary')) == '1'), None)
+        selected = primary or candidates[0] if candidates else None
+        board = (selected or {}).get('boardid')
+        if not board:
+            raise PriceProviderError(f'MOEX не вернул primary board для {symbol}.')
+        return str(board).strip().upper()
 
 
 class CompositePriceProvider(BasePriceProvider):

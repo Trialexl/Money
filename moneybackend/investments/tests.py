@@ -1359,11 +1359,14 @@ class _FakeOpener:
         self.payload = payload
         self.request_url = None
         self.timeout = None
+        self.request_urls = []
 
     def __call__(self, request, timeout=None):
         self.request_url = request.full_url
+        self.request_urls.append(request.full_url)
         self.timeout = timeout
-        return _FakeProviderResponse(self.payload)
+        payload = self.payload(request.full_url) if callable(self.payload) else self.payload
+        return _FakeProviderResponse(payload)
 
 
 class InvestmentPriceProviderTests(SimpleTestCase):
@@ -1529,19 +1532,33 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         self.assertEqual(quotes[date(2026, 1, 10)].price, Decimal('312.45'))
         self.assertEqual(quotes[date(2026, 1, 11)].price, Decimal('315.10'))
 
-    def test_moex_provider_uses_bond_board_for_bonds(self):
-        opener = _FakeOpener(json.dumps({
-            'marketdata': {
-                'columns': ['SECID', 'LAST', 'LCURRENTPRICE', 'MARKETPRICE', 'CLOSEPRICE', 'PREVPRICE'],
-                'data': [['RU000A000000', Decimal('98.25'), None, None, None, None]],
-            },
-        }, default=str))
-        instrument = SimpleNamespace(id='bond-id', type='bond', provider_symbol='RU000A000000', ticker='OFZ', quote_currency='RUB')
+    def test_moex_provider_detects_primary_board_for_bonds(self):
+        def payload(url):
+            if '/iss/securities/RU000A10C9Y2.json?' in url:
+                return json.dumps({
+                    'boards': {
+                        'columns': ['boardid', 'is_traded', 'is_primary', 'currencyid', 'market'],
+                        'data': [
+                            ['TQOB', 1, 0, 'RUB', 'bonds'],
+                            ['TQCB', 1, 1, 'RUB', 'bonds'],
+                        ],
+                    },
+                })
+            return json.dumps({
+                'marketdata': {
+                    'columns': ['SECID', 'LAST', 'LCURRENTPRICE', 'MARKETPRICE', 'CLOSEPRICE', 'PREVPRICE'],
+                    'data': [['RU000A10C9Y2', Decimal('98.25'), None, None, None, None]],
+                },
+            }, default=str)
+
+        opener = _FakeOpener(payload)
+        instrument = SimpleNamespace(id='bond-id', type='bond', provider_symbol='RU000A10C9Y2', ticker='НОВАТЭК1Р5', quote_currency='RUB')
         provider = MoexPriceProvider(base_url='https://moex.example/iss', opener=opener)
 
         quote = provider.get_price(instrument)
 
-        self.assertIn('/engines/stock/markets/shares/boards/TQOB/securities/RU000A000000.json?', opener.request_url)
+        self.assertIn('/securities/RU000A10C9Y2.json?', opener.request_urls[0])
+        self.assertIn('/engines/stock/markets/shares/boards/TQCB/securities/RU000A10C9Y2.json?', opener.request_urls[1])
         self.assertEqual(quote.price, Decimal('98.25'))
         self.assertEqual(quote.price_currency, 'RUB')
 
