@@ -2234,7 +2234,6 @@ function OperationForm({
                 setPriceQuoteEditedManually(true)
                 setPriceEditedManually(false)
               }}
-              required={needsAmount && !priceUsd.trim()}
               inputMode="decimal"
               placeholder={`Цена за единицу в ${quoteCurrency}`}
             />
@@ -2247,13 +2246,12 @@ function OperationForm({
                 setAmountQuoteEditedManually(true)
                 setAmountEditedManually(false)
               }}
-              required={needsAmount && !amountUsd.trim()}
               inputMode="decimal"
               placeholder="Можно ввести итоговую сумму"
             />
           </FormField>
           <FormField label={`${quoteCurrency} к USD`}>
-            <Input value={fxRateToUsd} onChange={(event) => setFxRateToUsd(event.target.value)} required={needsAmount} inputMode="decimal" placeholder="Например: 0.011" />
+            <Input value={fxRateToUsd} onChange={(event) => setFxRateToUsd(event.target.value)} inputMode="decimal" placeholder="Например: 0.011" />
           </FormField>
           <FormField label={`Комиссия ${quoteCurrency}`}>
             <Input value={feeQuote} onChange={(event) => setFeeQuote(event.target.value)} inputMode="decimal" />
