@@ -50,6 +50,16 @@ async function refreshAccessToken() {
   return refreshPromise
 }
 
+function isCsrfFailure(error: any): boolean {
+  if (error.response?.status !== 403) {
+    return false
+  }
+
+  const data = error.response.data
+  const message = typeof data === "string" ? data : data?.detail || data?.message || ""
+  return typeof message === "string" && message.toLowerCase().includes("csrf")
+}
+
 api.interceptors.request.use(
   (config) => {
     return config
@@ -65,8 +75,8 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
-    // Handle token expiration or authentication errors
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    // Handle token expiration or stale cookie/session CSRF fallback.
+    if ((error.response?.status === 401 || isCsrfFailure(error)) && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true
       
       try {
