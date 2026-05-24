@@ -595,12 +595,18 @@ class CompositePriceProvider(BasePriceProvider):
 
     def _provider_for(self, instrument):
         instrument_type = getattr(instrument, 'type', 'crypto')
+        if self._looks_like_moex_symbol(instrument):
+            return self.moex_provider
         if instrument_type in {'stock', 'bond'}:
             quote_currency = (getattr(instrument, 'quote_currency', None) or 'USD').strip().upper()
             if quote_currency == 'RUB' or instrument_type == 'bond':
                 return self.moex_provider
             return self.stock_provider
         return self.crypto_provider
+
+    def _looks_like_moex_symbol(self, instrument):
+        symbol = (getattr(instrument, 'provider_symbol', None) or getattr(instrument, 'ticker', '') or '').strip().upper()
+        return symbol.startswith('RU') and len(symbol) == 12
 
     def get_price(self, instrument):
         return self._provider_for(instrument).get_price(instrument)
@@ -649,7 +655,7 @@ def get_price_provider(name=None):
     if provider_name == 'auto':
         return CompositePriceProvider()
     if provider_name == 'coingecko':
-        return CoinGeckoPriceProvider()
+        return CompositePriceProvider(crypto_provider=CoinGeckoPriceProvider())
     if provider_name == 'stooq':
         return StooqPriceProvider()
     if provider_name == 'moex':

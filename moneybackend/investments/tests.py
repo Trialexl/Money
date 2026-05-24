@@ -1583,6 +1583,7 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         stock_quote = provider.get_price(SimpleNamespace(id='aapl-id', type='stock', provider_symbol='AAPL.US', ticker='AAPL', quote_currency='USD'))
         rub_stock_quote = provider.get_price(SimpleNamespace(id='sber-id', type='stock', provider_symbol='SBER', ticker='SBER', quote_currency='RUB'))
         bond_quote = provider.get_price(SimpleNamespace(id='bond-id', type='bond', provider_symbol='RU000A000000', ticker='OFZ', quote_currency='RUB'))
+        moex_isin_quote = provider.get_price(SimpleNamespace(id='moex-id', type='crypto', provider_symbol='RU000A000000', ticker='RU000A000000', quote_currency='RUB'))
 
         self.assertEqual(crypto_quote.price, Decimal('62000.00'))
         self.assertEqual(stock_quote.price, Decimal('194.50'))
@@ -1590,13 +1591,17 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         self.assertEqual(rub_stock_quote.price_currency, 'RUB')
         self.assertEqual(bond_quote.price, Decimal('98.25'))
         self.assertEqual(bond_quote.price_currency, 'RUB')
+        self.assertEqual(moex_isin_quote.price, Decimal('98.25'))
 
     def test_provider_factory_defaults_to_composite_provider(self):
         self.assertIsInstance(get_price_provider(), CompositePriceProvider)
 
     @override_settings(INVESTMENT_PRICE_PROVIDER='coingecko')
-    def test_provider_factory_reads_settings(self):
-        self.assertIsInstance(get_price_provider(), CoinGeckoPriceProvider)
+    def test_provider_factory_keeps_legacy_coingecko_setting_as_composite(self):
+        provider = get_price_provider()
+
+        self.assertIsInstance(provider, CompositePriceProvider)
+        self.assertIsInstance(provider.crypto_provider, CoinGeckoPriceProvider)
 
     @override_settings(INVESTMENT_PRICE_PROVIDER='moex')
     def test_provider_factory_can_use_moex(self):
