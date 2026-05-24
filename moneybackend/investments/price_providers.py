@@ -362,6 +362,10 @@ class MoexPriceProvider(BasePriceProvider):
         'bond': 'TQOB',
         'stock': 'TQBR',
     }
+    DEFAULT_MARKETS = {
+        'bond': 'bonds',
+        'stock': 'shares',
+    }
 
     def __init__(self, *, base_url=None, board=None, timeout=None, opener=None):
         self.base_url = (base_url or getattr(
@@ -378,26 +382,33 @@ class MoexPriceProvider(BasePriceProvider):
         symbol = self._moex_symbol(instrument)
         if not symbol:
             raise PriceProviderError('У инструмента MOEX не указан provider_symbol или ticker.')
-        board = self._board_for(instrument)
+        market, board = self._market_and_board_for(instrument)
         query = urlparse.urlencode({
             'iss.meta': 'off',
-            'iss.only': 'marketdata',
+            'iss.only': 'securities,marketdata',
+            'securities.columns': 'SECID,FACEVALUE,FACEUNIT',
             'marketdata.columns': 'SECID,LAST,LCURRENTPRICE,MARKETPRICE,CLOSEPRICE,PREVPRICE',
         })
-        url = f'{self.base_url}/engines/stock/markets/shares/boards/{board}/securities/{urlparse.quote(symbol)}.json?{query}'
+        url = f'{self.base_url}/engines/stock/markets/{market}/boards/{board}/securities/{urlparse.quote(symbol)}.json?{query}'
         payload = self._read_json(url, symbol)
         marketdata = payload.get('marketdata') if isinstance(payload, dict) else None
         row = self._first_table_row(marketdata)
-        price = self._first_positive_decimal(
+        raw_price = self._first_positive_decimal(
             row,
             ('LAST', 'LCURRENTPRICE', 'MARKETPRICE', 'CLOSEPRICE', 'PREVPRICE'),
             symbol,
+        )
+        price, price_currency = self._normalize_moex_price(
+            instrument,
+            symbol,
+            raw_price,
+            payload.get('securities') if isinstance(payload, dict) else None,
         )
         return PriceQuote(
             instrument_id=str(instrument.id) if getattr(instrument, 'id', None) else None,
             symbol=symbol,
             price=price,
-            price_currency='RUB',
+            price_currency=price_currency,
             source=self.source,
         )
 
@@ -415,7 +426,7 @@ class MoexPriceProvider(BasePriceProvider):
         end_date = _normalize_price_date(date_to)
         if not symbol:
             raise PriceProviderError('У инструмента MOEX не указан provider_symbol или ticker.')
-        board = self._board_for(instrument)
+        market, board = self._market_and_board_for(instrument)
         if start_date is None or end_date is None:
             raise PriceProviderError('Не указан период исторических цен MOEX.')
         if start_date > end_date:
@@ -428,21 +439,28 @@ class MoexPriceProvider(BasePriceProvider):
             'iss.meta': 'off',
             'candles.columns': 'begin,close',
         })
-        url = f'{self.base_url}/engines/stock/markets/shares/boards/{board}/securities/{urlparse.quote(symbol)}/candles.json?{query}'
+        url = f'{self.base_url}/engines/stock/markets/{market}/boards/{board}/securities/{urlparse.quote(symbol)}/candles.json?{query}'
         payload = self._read_json(url, symbol)
         candles = payload.get('candles') if isinstance(payload, dict) else None
         rows = self._table_rows(candles)
+        security_details = self._security_details_for_symbol(symbol) if self._is_bond(instrument) else None
         quotes = {}
         for row in rows:
             row_date = _parse_moex_datetime_date(row.get('begin'))
             if row_date is None or row_date < start_date or row_date > end_date:
                 continue
-            price = self._parse_positive_decimal(row.get('close'), symbol)
+            raw_price = self._parse_positive_decimal(row.get('close'), symbol)
+            price, price_currency = self._normalize_moex_price(
+                instrument,
+                symbol,
+                raw_price,
+                security_details=security_details,
+            )
             quotes[row_date] = PriceQuote(
                 instrument_id=str(instrument.id) if getattr(instrument, 'id', None) else None,
                 symbol=symbol,
                 price=price,
-                price_currency='RUB',
+                price_currency=price_currency,
                 source=self.source,
             )
         if not quotes:
@@ -503,19 +521,20 @@ class MoexPriceProvider(BasePriceProvider):
     def _moex_symbol(self, instrument):
         return (instrument.provider_symbol or instrument.ticker or '').strip().upper()
 
-    def _board_for(self, instrument):
+    def _market_and_board_for(self, instrument):
+        instrument_type = (getattr(instrument, 'type', '') or '').strip().lower()
+        default_market = self.DEFAULT_MARKETS.get(instrument_type, 'shares')
         if self.board:
-            return self.board
+            return default_market, self.board
         symbol = self._moex_symbol(instrument)
         if symbol:
             try:
-                return self._primary_board_for_symbol(symbol)
+                return self._primary_market_and_board_for_symbol(symbol)
             except PriceProviderError:
                 pass
-        instrument_type = (getattr(instrument, 'type', '') or '').strip().lower()
-        return self.DEFAULT_BOARDS.get(instrument_type, self.default_board)
+        return default_market, self.DEFAULT_BOARDS.get(instrument_type, self.default_board)
 
-    def _primary_board_for_symbol(self, symbol):
+    def _primary_market_and_board_for_symbol(self, symbol):
         query = urlparse.urlencode({
             'iss.meta': 'off',
             'iss.only': 'boards',
@@ -535,7 +554,34 @@ class MoexPriceProvider(BasePriceProvider):
         board = (selected or {}).get('boardid')
         if not board:
             raise PriceProviderError(f'MOEX не вернул primary board для {symbol}.')
-        return str(board).strip().upper()
+        market = ((selected or {}).get('market') or 'shares')
+        return str(market).strip().lower(), str(board).strip().upper()
+
+    def _normalize_moex_price(self, instrument, symbol, raw_price, securities_table=None, security_details=None):
+        if not self._is_bond(instrument):
+            return raw_price, 'RUB'
+        details = security_details or self._first_security_details(securities_table) or self._security_details_for_symbol(symbol)
+        facevalue = self._parse_positive_decimal(details.get('FACEVALUE'), symbol)
+        faceunit = (details.get('FACEUNIT') or 'RUB').strip().upper()
+        return (raw_price * facevalue / Decimal('100')), faceunit
+
+    def _security_details_for_symbol(self, symbol):
+        query = urlparse.urlencode({
+            'iss.meta': 'off',
+            'iss.only': 'description',
+        })
+        url = f'{self.base_url}/securities/{urlparse.quote(symbol)}.json?{query}'
+        payload = self._read_json(url, symbol)
+        description = payload.get('description') if isinstance(payload, dict) else None
+        rows = self._table_rows(description)
+        return {str(row.get('name')).upper(): row.get('value') for row in rows if row.get('name')}
+
+    def _first_security_details(self, securities_table):
+        rows = self._table_rows(securities_table)
+        return rows[0] if rows else None
+
+    def _is_bond(self, instrument):
+        return (getattr(instrument, 'type', '') or '').strip().lower() == 'bond'
 
 
 class CompositePriceProvider(BasePriceProvider):

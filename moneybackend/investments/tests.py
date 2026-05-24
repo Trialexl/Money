@@ -1504,7 +1504,7 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         quote = provider.get_price(instrument)
 
         self.assertIn('/engines/stock/markets/shares/boards/TQBR/securities/SBER.json?', opener.request_url)
-        self.assertIn('iss.only=marketdata', opener.request_url)
+        self.assertIn('iss.only=securities%2Cmarketdata', opener.request_url)
         self.assertEqual(quote.symbol, 'SBER')
         self.assertEqual(quote.price, Decimal('312.45'))
         self.assertEqual(quote.price_currency, 'RUB')
@@ -1545,6 +1545,10 @@ class InvestmentPriceProviderTests(SimpleTestCase):
                     },
                 })
             return json.dumps({
+                'securities': {
+                    'columns': ['SECID', 'FACEVALUE', 'FACEUNIT'],
+                    'data': [['RU000A10C9Y2', Decimal('1000'), 'USD']],
+                },
                 'marketdata': {
                     'columns': ['SECID', 'LAST', 'LCURRENTPRICE', 'MARKETPRICE', 'CLOSEPRICE', 'PREVPRICE'],
                     'data': [['RU000A10C9Y2', Decimal('98.25'), None, None, None, None]],
@@ -1558,9 +1562,9 @@ class InvestmentPriceProviderTests(SimpleTestCase):
         quote = provider.get_price(instrument)
 
         self.assertIn('/securities/RU000A10C9Y2.json?', opener.request_urls[0])
-        self.assertIn('/engines/stock/markets/shares/boards/TQCB/securities/RU000A10C9Y2.json?', opener.request_urls[1])
-        self.assertEqual(quote.price, Decimal('98.25'))
-        self.assertEqual(quote.price_currency, 'RUB')
+        self.assertIn('/engines/stock/markets/bonds/boards/TQCB/securities/RU000A10C9Y2.json?', opener.request_urls[1])
+        self.assertEqual(quote.price, Decimal('982.50'))
+        self.assertEqual(quote.price_currency, 'USD')
 
     def test_composite_provider_routes_stocks_and_crypto(self):
         crypto_provider = StaticPriceProvider({('BTC', 'USD'): '62000.00'})
