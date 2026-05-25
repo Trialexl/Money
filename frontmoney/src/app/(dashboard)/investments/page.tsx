@@ -3,7 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { ResponsiveLine } from "@nivo/line"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BarChart3, Coins, Landmark, LineChart, PencilLine, Plus, RefreshCw, Target, Trash2, TrendingUp, X } from "lucide-react"
+import { BarChart3, ChevronDown, Coins, Landmark, LineChart, PencilLine, Plus, RefreshCw, Target, Trash2, TrendingUp, X } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 
@@ -58,6 +58,12 @@ const accountTypeLabels: Record<string, string> = {
   manual: "Ручной счет",
 }
 
+const instrumentTypeLabels: Record<InstrumentType, string> = {
+  crypto: "Крипто",
+  stock: "Акция",
+  bond: "Облигация",
+}
+
 const rebalanceActionLabels: Record<string, string> = {
   buy: "Докупка",
   sell: "Сократить",
@@ -65,6 +71,7 @@ const rebalanceActionLabels: Record<string, string> = {
 }
 
 type DisplayCurrency = "RUB" | "USD" | "EUR"
+type InvestmentSectionId = "rebalance" | "positions" | "operations" | "directories"
 
 const displayCurrencies: DisplayCurrency[] = ["USD", "EUR", "RUB"]
 const currencyOptions = displayCurrencies
@@ -346,12 +353,55 @@ function CurrencySelect({ value, onChange }: { value: string; onChange: (value: 
   )
 }
 
+function CollapsibleSection({
+  title,
+  description,
+  actions,
+  collapsed,
+  onToggle,
+  children,
+  contentClassName,
+}: {
+  title: string
+  description?: string
+  actions?: React.ReactNode
+  collapsed: boolean
+  onToggle: () => void
+  children: React.ReactNode
+  contentClassName?: string
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <CardTitle>{title}</CardTitle>
+          {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {actions}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggle}
+            aria-label={collapsed ? `Показать ${title}` : `Скрыть ${title}`}
+          >
+            <ChevronDown className={collapsed ? "h-4 w-4 -rotate-90 transition-transform" : "h-4 w-4 rotate-0 transition-transform"} />
+          </Button>
+        </div>
+      </CardHeader>
+      {collapsed ? null : <CardContent className={contentClassName}>{children}</CardContent>}
+    </Card>
+  )
+}
+
 export default function InvestmentsPage() {
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<InvestmentDialogState>(null)
   const [dialogError, setDialogError] = useState("")
   const [performanceGroupBy, setPerformanceGroupBy] = useState<"day" | "month">("month")
   const [hiddenPlInstruments, setHiddenPlInstruments] = useState<string[]>([])
+  const [collapsedSections, setCollapsedSections] = useState<InvestmentSectionId[]>([])
   const [operationDateFrom, setOperationDateFrom] = useState("")
   const [operationDateTo, setOperationDateTo] = useState("")
   const [operationInstrument, setOperationInstrument] = useState("all")
@@ -359,6 +409,12 @@ export default function InvestmentsPage() {
   const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>(() => readInvestmentDisplayCurrency())
   const [selectedPortfolioId, setSelectedPortfolioId] = useState(() => readSelectedInvestmentPortfolioId())
   const performancePeriod = useMemo(() => yearDateRange(), [])
+  const isSectionCollapsed = (section: InvestmentSectionId) => collapsedSections.includes(section)
+  const toggleInvestmentSection = (section: InvestmentSectionId) => {
+    setCollapsedSections((current) =>
+      current.includes(section) ? current.filter((item) => item !== section) : [...current, section],
+    )
+  }
 
   const portfoliosQuery = useQuery({
     queryKey: ["investment-portfolios"],
@@ -1061,14 +1117,12 @@ export default function InvestmentsPage() {
       ) : null}
 
       {currentPortfolio ? (
-        <Card>
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle>Ребалансировка</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Целевые доли, отклонения и допуски. Операции здесь не создаются автоматически.
-              </p>
-            </div>
+        <CollapsibleSection
+          title="Ребалансировка"
+          description="Целевые доли, отклонения и допуски. Операции здесь не создаются автоматически."
+          collapsed={isSectionCollapsed("rebalance")}
+          onToggle={() => toggleInvestmentSection("rebalance")}
+          actions={
             <Button
               variant="outline"
               disabled={activeInstruments.length === 0}
@@ -1077,8 +1131,8 @@ export default function InvestmentsPage() {
               <Target className="mr-2 h-4 w-4" />
               Целевая доля
             </Button>
-          </CardHeader>
-          <CardContent>
+          }
+        >
             {rebalanceQuery.isLoading || targetAllocationsQuery.isLoading ? (
               <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">Считаем отклонения...</div>
             ) : rebalanceQuery.isError || targetAllocationsQuery.isError || !rebalanceStatus ? (
@@ -1194,27 +1248,24 @@ export default function InvestmentsPage() {
                 ) : null}
               </div>
             )}
-          </CardContent>
-        </Card>
+        </CollapsibleSection>
       ) : null}
 
       {currentPortfolio ? (
-        <Card>
-          <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle>Позиции</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
-                P0-версия считает количество, себестоимость, среднюю покупку и realized P/L. Текущие курсы и unrealized P/L будут следующим этапом.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
+        <CollapsibleSection
+          title="Позиции"
+          description="Количество, себестоимость, средняя покупка, текущая оценка и P/L по активам."
+          collapsed={isSectionCollapsed("positions")}
+          onToggle={() => toggleInvestmentSection("positions")}
+          actions={
+            <>
               <Badge variant="outline">{currentPortfolio.name}</Badge>
               <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "portfolio", mode: "edit", item: currentPortfolio })} aria-label="Редактировать портфель">
                 <PencilLine className="h-4 w-4" />
               </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
+            </>
+          }
+        >
             {overview.positions.length === 0 ? (
               <EmptyState
                 icon={Coins}
@@ -1277,8 +1328,7 @@ export default function InvestmentsPage() {
                 </table>
               </div>
             )}
-          </CardContent>
-        </Card>
+        </CollapsibleSection>
       ) : (
         <EmptyState
           icon={Landmark}
@@ -1288,12 +1338,14 @@ export default function InvestmentsPage() {
         />
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Справочники</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
+      <div className="flex flex-col gap-4">
+        <div className="order-2">
+          <CollapsibleSection
+            title="Справочники"
+            collapsed={isSectionCollapsed("directories")}
+            onToggle={() => toggleInvestmentSection("directories")}
+            contentClassName="grid gap-3 lg:grid-cols-2"
+          >
             <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-sm font-semibold">
@@ -1309,13 +1361,17 @@ export default function InvestmentsPage() {
                   <p className="text-sm text-muted-foreground">Пока пусто.</p>
                 ) : (
                   instruments.map((instrument) => (
-                    <div key={instrument.id} className="flex items-center justify-between gap-2 rounded-2xl bg-card px-3 py-2 text-sm">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium">{instrument.ticker}</div>
-                        <div className="truncate text-xs text-muted-foreground">{instrument.name}</div>
+                    <div key={instrument.id} className="rounded-2xl bg-card px-3 py-3 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="break-words font-medium leading-snug text-foreground">{instrument.ticker}</div>
+                          <div className="mt-0.5 break-words text-xs leading-snug text-muted-foreground">{instrument.name}</div>
+                        </div>
+                        <Badge className="shrink-0" variant={instrument.is_active ? "default" : "outline"}>
+                          {instrumentTypeLabels[instrument.type] ?? instrument.type}
+                        </Badge>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Badge variant={instrument.is_active ? "default" : "outline"}>{instrument.type}</Badge>
+                      <div className="mt-2 flex items-center justify-end gap-1">
                         <Button variant="ghost" size="icon" onClick={() => openDialog({ type: "price", mode: "create", item: instrument })} aria-label="Добавить цену">
                           <LineChart className="h-4 w-4" />
                         </Button>
@@ -1368,13 +1424,16 @@ export default function InvestmentsPage() {
                 )}
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </CollapsibleSection>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Операции</CardTitle>
-            <div className="flex items-center gap-1">
+        <div className="order-1">
+          <CollapsibleSection
+            title="Операции"
+            collapsed={isSectionCollapsed("operations")}
+            onToggle={() => toggleInvestmentSection("operations")}
+            actions={
+              <>
               <Button variant="outline" size="sm" disabled={operations.length === 0} onClick={exportOperationsCsv}>
                 CSV
               </Button>
@@ -1384,9 +1443,9 @@ export default function InvestmentsPage() {
               <Button variant="outline" size="icon" disabled={!canCreateOperation} onClick={() => openDialog({ type: "operation", mode: "create" })} aria-label="Добавить операцию">
                 <Plus className="h-4 w-4" />
               </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
+              </>
+            }
+          >
             <div className="mb-4 grid gap-3 md:grid-cols-4">
               <FormField label="Дата с">
                 <Input type="date" value={operationDateFrom} onChange={(event) => setOperationDateFrom(event.target.value)} />
@@ -1467,8 +1526,8 @@ export default function InvestmentsPage() {
                 <div className="mt-1 font-semibold tabular-nums">{operationTotals.feeComplete ? formatCurrencyValue(operationTotals.fee, displayCurrency) : "нет курса"}</div>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </CollapsibleSection>
+        </div>
       </div>
 
       <InvestmentCrudDialog
