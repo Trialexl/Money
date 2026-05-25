@@ -812,26 +812,6 @@ export default function InvestmentsPage() {
                 Отчеты
               </Link>
             </Button>
-            <Button variant="outline" onClick={() => openDialog({ type: "portfolio", mode: "create" })}>
-              <Plus className="mr-2 h-4 w-4" />
-              Портфель
-            </Button>
-            <Button variant="outline" onClick={() => openDialog({ type: "instrument", mode: "create" })}>
-              <Plus className="mr-2 h-4 w-4" />
-              Инструмент
-            </Button>
-            <Button variant="outline" disabled={instruments.length === 0} onClick={() => openDialog({ type: "price", mode: "create", item: activeInstruments[0] ?? instruments[0] })}>
-              <Plus className="mr-2 h-4 w-4" />
-              Цена
-            </Button>
-            <Button variant="outline" disabled={!currentPortfolio} onClick={() => openDialog({ type: "account", mode: "create" })}>
-              <Plus className="mr-2 h-4 w-4" />
-              Счет
-            </Button>
-            <Button disabled={!canCreateOperation} onClick={() => openDialog({ type: "operation", mode: "create" })}>
-              <Plus className="mr-2 h-4 w-4" />
-              Операция
-            </Button>
           </>
         }
       />
