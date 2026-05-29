@@ -96,6 +96,8 @@ type WalletFlowItem = {
   income: number
   expense: number
   net: number
+  openingBalance: number
+  endingBalance: number
   color: string
 }
 
@@ -602,8 +604,8 @@ export default function ReportsPage() {
   const cumulativeLineData = [
     { x: "Старт", y: openingWalletTotal },
     ...timelineChartRows.map((row) => {
-    runningNet += row.net
-    return { x: row.chartLabel, y: runningNet }
+      runningNet += row.net
+      return { x: row.chartLabel, y: runningNet }
     }),
   ]
 
@@ -667,6 +669,18 @@ export default function ReportsPage() {
   }))
 
   const walletFlowTotals = new Map<string, Omit<WalletFlowItem, "color">>()
+  cashFlow.wallet_opening_balances.forEach((wallet) => {
+    const walletId = wallet.wallet_id || wallet.wallet_name || "unknown"
+    walletFlowTotals.set(walletId, {
+      id: walletId,
+      name: wallet.wallet_name || "Без кошелька",
+      income: 0,
+      expense: 0,
+      net: 0,
+      openingBalance: wallet.opening_balance,
+      endingBalance: wallet.opening_balance,
+    })
+  })
   cashFlow.details.forEach((detail) => {
     const walletId = detail.wallet_id || detail.wallet_name || "unknown"
     const walletName = detail.wallet_name || "Без кошелька"
@@ -676,10 +690,13 @@ export default function ReportsPage() {
       income: 0,
       expense: 0,
       net: 0,
+      openingBalance: 0,
+      endingBalance: 0,
     }
     row.income += detail.income
     row.expense += detail.expense
     row.net = row.income - row.expense
+    row.endingBalance = row.openingBalance + row.net
     walletFlowTotals.set(walletId, row)
   })
   const walletFlowLegendItems: WalletFlowItem[] = Array.from(walletFlowTotals.values())
@@ -689,27 +706,31 @@ export default function ReportsPage() {
       color: REPORT_ITEM_COLORS[index % REPORT_ITEM_COLORS.length],
     }))
   const walletFlowColorByName = new Map(walletFlowLegendItems.map((wallet) => [wallet.name, wallet.color]))
-  const walletFlowPeriodKeys = Array.from(new Set(
-    cashFlow.details.map((detail) => timelineMode === "daily" ? getDateKey(detail.period) : getMonthKey(detail.period))
-  )).filter(Boolean).sort()
   const visibleWalletFlowLegendItems = walletFlowLegendItems
     .filter((wallet) => !hiddenWalletKeySet.has(wallet.id))
     .filter((wallet) => (activeSelectedWalletKey ? wallet.id === activeSelectedWalletKey : true))
-  const walletFlowLineData = visibleWalletFlowLegendItems.map((wallet) => ({
-    id: wallet.name,
-    data: walletFlowPeriodKeys.map((periodKey) => {
-      const periodDetails = cashFlow.details.filter((detail) => {
-        const detailWalletKey = detail.wallet_id || detail.wallet_name || "unknown"
-        const detailPeriodKey = timelineMode === "daily" ? getDateKey(detail.period) : getMonthKey(detail.period)
-        return detailWalletKey === wallet.id && detailPeriodKey === periodKey
-      })
-      const net = periodDetails.reduce((sum, detail) => sum + detail.income - detail.expense, 0)
-      return {
-        x: timelineMode === "daily" ? formatShortDateLabel(periodKey) : formatShortMonthLabel(periodKey),
-        y: net,
-      }
-    }),
-  }))
+  const walletFlowLineData = visibleWalletFlowLegendItems.map((wallet) => {
+    let runningWalletBalance = wallet.openingBalance
+    return {
+      id: wallet.name,
+      data: [
+        { x: "Старт", y: runningWalletBalance },
+        ...timelineChartRows.map((periodRow) => {
+          const periodDetails = cashFlow.details.filter((detail) => {
+            const detailWalletKey = detail.wallet_id || detail.wallet_name || "unknown"
+            const detailPeriodKey = timelineMode === "daily" ? getDateKey(detail.period) : getMonthKey(detail.period)
+            return detailWalletKey === wallet.id && detailPeriodKey === periodRow.key
+          })
+          const periodNet = periodDetails.reduce((sum, detail) => sum + detail.income - detail.expense, 0)
+          runningWalletBalance += periodNet
+          return {
+            x: periodRow.chartLabel,
+            y: runningWalletBalance,
+          }
+        }),
+      ],
+    }
+  })
 
   const categoryTotals = new Map<string, CategoryRow>()
   cashFlow.details.forEach((detail: CashFlowReportDetail) => {
@@ -1494,9 +1515,9 @@ export default function ReportsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Финпоток по кошелькам</CardTitle>
+              <CardTitle>Кумулятивный поток по кошелькам</CardTitle>
               <CardDescription>
-                Net-поток за период по каждому кошельку. Легенда использует общий отбор кошельков в отчете.
+                Та же динамика, что в потоке денег, но отдельной линией по каждому кошельку.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1537,7 +1558,7 @@ export default function ReportsPage() {
                   <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold tracking-[-0.02em]">Легенда финпотока</div>
+                        <div className="text-sm font-semibold tracking-[-0.02em]">Легенда кошельков</div>
                         <div className="mt-1 text-xs text-muted-foreground">Название — отбор. Глаз — исключить.</div>
                       </div>
                       {selectedWalletName || hiddenWalletCount > 0 ? (
@@ -1580,9 +1601,9 @@ export default function ReportsPage() {
                                 </span>
                               </div>
                               <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                                <span>Приход {formatCurrency(wallet.income)}</span>
+                                <span>Поток {formatCurrency(wallet.net)}</span>
                                 <span className={wallet.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}>
-                                  {formatCurrency(wallet.net)}
+                                  {formatCurrency(wallet.endingBalance)}
                                 </span>
                               </div>
                             </button>

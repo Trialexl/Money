@@ -95,10 +95,20 @@ class ReportViewSet(viewsets.ViewSet):
             base_queryset = base_queryset.filter(cash_flow_item_id=cash_flow_item_id)
 
         opening_balance = ZERO_AMOUNT
+        wallet_opening_balances = []
         if date_from is not None:
-            opening_balance = _money(
-                base_queryset.filter(period__lt=date_from).aggregate(total=Sum('amount'))['total']
-            )
+            opening_queryset = base_queryset.filter(period__lt=date_from)
+            opening_balance = _money(opening_queryset.aggregate(total=Sum('amount'))['total'])
+            wallet_opening_balances = [
+                {
+                    'wallet_id': _serialize_uuid(row['wallet_id']),
+                    'wallet_name': row['wallet__name'],
+                    'opening_balance': _money_str(row['opening_balance']),
+                }
+                for row in opening_queryset.values('wallet_id', 'wallet__name').annotate(
+                    opening_balance=Sum('amount')
+                ).order_by('wallet__name')
+            ]
 
         queryset = _apply_period_filters(base_queryset, date_from=date_from, date_to=date_to)
 
@@ -143,6 +153,7 @@ class ReportViewSet(viewsets.ViewSet):
                 'expense': _money_str(expense_total),
             },
             'opening_balance': _money_str(opening_balance),
+            'wallet_opening_balances': wallet_opening_balances,
             'months': month_rows,
             'details': detail_rows,
         })

@@ -2737,6 +2737,16 @@ class ReportEndpointsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['opening_balance'], '380.00')
+        self.assertEqual(
+            response.data['wallet_opening_balances'],
+            [
+                {
+                    'wallet_id': str(self.wallet_main.id),
+                    'wallet_name': 'Основной кошелек',
+                    'opening_balance': '380.00',
+                }
+            ],
+        )
 
     def test_flow_of_funds_summary_omits_transfers_from_analytics(self):
         response = self.client.get(
