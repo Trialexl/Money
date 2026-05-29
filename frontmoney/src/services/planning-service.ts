@@ -161,6 +161,49 @@ export const PlanningService = {
     })
   },
 
+  buildFixedPartRows: ({
+    totalAmount,
+    partAmount,
+    startDate,
+  }: {
+    totalAmount: number
+    partAmount: number
+    startDate: string
+  }) => {
+    if (!startDate || Number.isNaN(totalAmount) || totalAmount <= 0 || Number.isNaN(partAmount) || partAmount <= 0) {
+      return [] as PlanningGraphicDraft[]
+    }
+
+    const start = new Date(`${startDate}T12:00:00`)
+    if (Number.isNaN(start.getTime())) {
+      return [] as PlanningGraphicDraft[]
+    }
+
+    const totalCents = Math.round(totalAmount * 100)
+    const partCents = Math.round(partAmount * 100)
+    if (partCents <= 0) {
+      return [] as PlanningGraphicDraft[]
+    }
+
+    const rows: PlanningGraphicDraft[] = []
+    let remainingCents = totalCents
+    let index = 0
+
+    while (remainingCents > 0 && index < 240) {
+      const date = addMonths(start, index)
+      const rowCents = Math.min(partCents, remainingCents)
+      rows.push({
+        id: `draft-fixed-part-${index}-${date.getTime()}`,
+        date_start: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
+        amount: rowCents / 100,
+      })
+      remainingCents -= rowCents
+      index += 1
+    }
+
+    return rows
+  },
+
   getDraftRows: (storageKey: string) => {
     if (typeof window === "undefined") {
       return [] as PlanningGraphicDraft[]

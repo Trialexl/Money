@@ -84,6 +84,7 @@ export function PlanningGraphicsPanel({
   const [distributionTotalAmount, setDistributionTotalAmount] = useState(formatAmountInput(distributionSource?.totalAmount))
   const [distributionMonthCount, setDistributionMonthCount] = useState(formatMonthCountInput(distributionSource?.monthCount))
   const [distributionMonthlyAmount, setDistributionMonthlyAmount] = useState(formatAmountInput(distributionSource?.monthlyAmount))
+  const [distributionMode, setDistributionMode] = useState<"even" | "fixed-part">("even")
   const [rows, setRows] = useState<PlanningGraphicDraft[]>(draftRows ?? [])
   const [rowsReady, setRowsReady] = useState(!documentId)
   const [rowsTouched, setRowsTouched] = useState(false)
@@ -220,6 +221,10 @@ export function PlanningGraphicsPanel({
   const handleDistributionMonthlyAmountChange = (value: string) => {
     setDistributionMonthlyAmount(value)
 
+    if (distributionMode === "fixed-part") {
+      return
+    }
+
     const parsedMonthlyAmount = parseAmountExpression(value)
     const parsedMonths = Number.parseInt(distributionMonthCount, 10)
     if (parsedMonthlyAmount !== null && parsedMonthlyAmount > 0 && Number.isFinite(parsedMonths) && parsedMonths > 0) {
@@ -260,25 +265,41 @@ export function PlanningGraphicsPanel({
     }
 
     const builtRows =
-      parsedMonthlyAmount !== null && parsedMonthlyAmount > 0
-        ? PlanningService.buildMonthlyRows({
-            monthlyAmount: parsedMonthlyAmount,
-            startDate: distributionStartDate,
-            monthCount: parsedMonths,
-          })
-        : PlanningService.buildDistributedRows({
+      distributionMode === "fixed-part"
+        ? PlanningService.buildFixedPartRows({
             totalAmount: parsedTotalAmount ?? 0,
+            partAmount: parsedMonthlyAmount ?? 0,
             startDate: distributionStartDate,
-            monthCount: parsedMonths,
           })
+        : parsedMonthlyAmount !== null && parsedMonthlyAmount > 0
+          ? PlanningService.buildMonthlyRows({
+              monthlyAmount: parsedMonthlyAmount,
+              startDate: distributionStartDate,
+              monthCount: parsedMonths,
+            })
+          : PlanningService.buildDistributedRows({
+              totalAmount: parsedTotalAmount ?? 0,
+              startDate: distributionStartDate,
+              monthCount: parsedMonths,
+            })
 
     if (builtRows.length === 0) {
-      setValidationError("Укажи дату начала, число месяцев и сумму: ежемесячную или итоговую в документе.")
+      setValidationError(
+        distributionMode === "fixed-part"
+          ? "Укажи дату начала, общую сумму и положительную сумму части."
+          : "Укажи дату начала, число месяцев и сумму: ежемесячную или итоговую в документе."
+      )
       return
     }
 
     commitRows(builtRows)
-    if (parsedMonthlyAmount !== null && parsedMonthlyAmount > 0) {
+    if (distributionMode === "fixed-part") {
+      const nextTotalAmount = Math.round((parsedTotalAmount ?? 0) * 100) / 100
+      setDistributionMonthCount(String(builtRows.length))
+      setDistributionTotalAmount(formatAmountInput(nextTotalAmount))
+      onTotalAmountChange?.(nextTotalAmount)
+      onMonthCountChange?.(builtRows.length)
+    } else if (parsedMonthlyAmount !== null && parsedMonthlyAmount > 0) {
       const nextTotalAmount = Math.round(parsedMonthlyAmount * parsedMonths * 100) / 100
       setDistributionTotalAmount(formatAmountInput(nextTotalAmount))
       onMonthlyAmountChange?.(parsedMonthlyAmount)
@@ -328,6 +349,24 @@ export function PlanningGraphicsPanel({
             <Sparkles className="h-4 w-4 text-primary" />
             Автозаполнение графика
           </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={distributionMode === "even" ? "default" : "outline"}
+              onClick={() => setDistributionMode("even")}
+            >
+              По периодам
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={distributionMode === "fixed-part" ? "default" : "outline"}
+              onClick={() => setDistributionMode("fixed-part")}
+            >
+              Частями
+            </Button>
+          </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_150px_150px_120px_auto] xl:items-end">
             <div className="space-y-2">
               <Label htmlFor={`${kind}-distribution-date`}>Дата начала</Label>
@@ -351,7 +390,7 @@ export function PlanningGraphicsPanel({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`${kind}-distribution-monthly`}>Сумма в месяц</Label>
+              <Label htmlFor={`${kind}-distribution-monthly`}>{distributionMode === "fixed-part" ? "Сумма части" : "Сумма в месяц"}</Label>
               <Input
                 id={`${kind}-distribution-monthly`}
                 type="text"
@@ -363,7 +402,7 @@ export function PlanningGraphicsPanel({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`${kind}-distribution-months`}>Месяцев</Label>
+              <Label htmlFor={`${kind}-distribution-months`}>{distributionMode === "fixed-part" ? "Частей" : "Месяцев"}</Label>
               <Input
                 id={`${kind}-distribution-months`}
                 type="number"
@@ -371,6 +410,7 @@ export function PlanningGraphicsPanel({
                 step="1"
                 value={distributionMonthCount}
                 onChange={(event) => handleDistributionMonthCountChange(event.target.value)}
+                disabled={distributionMode === "fixed-part"}
               />
             </div>
             <Button type="button" variant="outline" onClick={handleAutoFill} disabled={!canAutoFill} className="md:col-span-2 xl:col-span-1">
@@ -379,7 +419,9 @@ export function PlanningGraphicsPanel({
             </Button>
           </div>
           <div className="text-xs leading-5 text-muted-foreground">
-            Если сумма в месяц заполнена, график строится по ней. Если пустая — общая сумма распределяется по месяцам.
+            {distributionMode === "fixed-part"
+              ? "В режиме частями создаются равные строки по сумме части, последняя строка получает остаток."
+              : "Если сумма в месяц заполнена, график строится по ней. Если пустая — общая сумма распределяется по месяцам."}
           </div>
         </div>
 

@@ -90,6 +90,15 @@ type WalletRow = {
   share: number
 }
 
+type WalletFlowItem = {
+  id: string
+  name: string
+  income: number
+  expense: number
+  net: number
+  color: string
+}
+
 type CategoryRow = {
   id: string
   name: string
@@ -655,6 +664,51 @@ export default function ReportsPage() {
     balance: wallet.balance,
     share: wallet.share,
     hidden: wallet.hidden ? "Да" : "Нет",
+  }))
+
+  const walletFlowTotals = new Map<string, Omit<WalletFlowItem, "color">>()
+  cashFlow.details.forEach((detail) => {
+    const walletId = detail.wallet_id || detail.wallet_name || "unknown"
+    const walletName = detail.wallet_name || "Без кошелька"
+    const row = walletFlowTotals.get(walletId) || {
+      id: walletId,
+      name: walletName,
+      income: 0,
+      expense: 0,
+      net: 0,
+    }
+    row.income += detail.income
+    row.expense += detail.expense
+    row.net = row.income - row.expense
+    walletFlowTotals.set(walletId, row)
+  })
+  const walletFlowLegendItems: WalletFlowItem[] = Array.from(walletFlowTotals.values())
+    .sort((left, right) => Math.abs(right.net) + right.income + right.expense - (Math.abs(left.net) + left.income + left.expense))
+    .map((wallet, index) => ({
+      ...wallet,
+      color: REPORT_ITEM_COLORS[index % REPORT_ITEM_COLORS.length],
+    }))
+  const walletFlowColorByName = new Map(walletFlowLegendItems.map((wallet) => [wallet.name, wallet.color]))
+  const walletFlowPeriodKeys = Array.from(new Set(
+    cashFlow.details.map((detail) => timelineMode === "daily" ? getDateKey(detail.period) : getMonthKey(detail.period))
+  )).filter(Boolean).sort()
+  const visibleWalletFlowLegendItems = walletFlowLegendItems
+    .filter((wallet) => !hiddenWalletKeySet.has(wallet.id))
+    .filter((wallet) => (activeSelectedWalletKey ? wallet.id === activeSelectedWalletKey : true))
+  const walletFlowLineData = visibleWalletFlowLegendItems.map((wallet) => ({
+    id: wallet.name,
+    data: walletFlowPeriodKeys.map((periodKey) => {
+      const periodDetails = cashFlow.details.filter((detail) => {
+        const detailWalletKey = detail.wallet_id || detail.wallet_name || "unknown"
+        const detailPeriodKey = timelineMode === "daily" ? getDateKey(detail.period) : getMonthKey(detail.period)
+        return detailWalletKey === wallet.id && detailPeriodKey === periodKey
+      })
+      const net = periodDetails.reduce((sum, detail) => sum + detail.income - detail.expense, 0)
+      return {
+        x: timelineMode === "daily" ? formatShortDateLabel(periodKey) : formatShortMonthLabel(periodKey),
+        y: net,
+      }
+    }),
   }))
 
   const categoryTotals = new Map<string, CategoryRow>()
@@ -1437,6 +1491,124 @@ export default function ReportsPage() {
             <StatCard label="Положительные балансы" value={formatCurrency(positiveWalletBalance)} hint="Включенные кошельки с положительным остатком" icon={TrendingUp} tone="positive" />
             <StatCard label="Отрицательные балансы" value={formatCurrency(negativeWalletBalance)} hint="Включенные кошельки в минусе или долге" icon={TrendingDown} tone="danger" />
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Финпоток по кошелькам</CardTitle>
+              <CardDescription>
+                Net-поток за период по каждому кошельку. Легенда использует общий отбор кошельков в отчете.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {walletFlowLegendItems.length === 0 ? (
+                <div className="py-16 text-center text-sm text-muted-foreground">
+                  За выбранный период нет движений по кошелькам.
+                </div>
+              ) : (
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className="h-[360px] min-w-0 rounded-[22px] border border-border/70 bg-background/70 p-3">
+                    {walletFlowLineData.length === 0 ? (
+                      <div className="flex h-full items-center justify-center text-center text-sm text-muted-foreground">
+                        Все кошельки скрыты или выбранный кошелек исключен из отчета.
+                      </div>
+                    ) : (
+                      <ResponsiveLine
+                        data={walletFlowLineData}
+                        margin={{ top: 22, right: 20, bottom: 56, left: 64 }}
+                        xScale={{ type: "point" }}
+                        yScale={{ type: "linear", stacked: false }}
+                        axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -25 }}
+                        axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatCompactCurrency(Number(value)) }}
+                        enableGridX={false}
+                        curve="monotoneX"
+                        pointSize={7}
+                        pointBorderWidth={2}
+                        pointBorderColor={{ from: "serieColor" }}
+                        colors={(series) => walletFlowColorByName.get(String(series.id)) ?? REPORT_ITEM_COLORS[0]}
+                        useMesh
+                        tooltip={({ point }) => (
+                          <div className="rounded border bg-background px-2 py-1 text-xs shadow-sm">
+                            {String(point.seriesId)} · {String(point.data.x)}: {formatCurrency(Number(point.data.y))}
+                          </div>
+                        )}
+                      />
+                    )}
+                  </div>
+                  <div className="rounded-[22px] border border-border/70 bg-background/70 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold tracking-[-0.02em]">Легенда финпотока</div>
+                        <div className="mt-1 text-xs text-muted-foreground">Название — отбор. Глаз — исключить.</div>
+                      </div>
+                      {selectedWalletName || hiddenWalletCount > 0 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedWalletKey(null)
+                            setHiddenWalletKeys({})
+                          }}
+                        >
+                          Сбросить
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="mt-4 max-h-[300px] space-y-2 overflow-y-auto pr-1">
+                      {walletFlowLegendItems.map((wallet) => {
+                        const isSelected = activeSelectedWalletKey === wallet.id
+                        const isHidden = hiddenWalletKeySet.has(wallet.id)
+                        return (
+                          <div
+                            key={wallet.id}
+                            className={`flex items-stretch gap-2 rounded-2xl border px-3 py-2 transition ${
+                              isSelected
+                                ? "border-primary bg-primary/10"
+                                : isHidden
+                                  ? "border-border/40 bg-muted/30 opacity-60"
+                                  : "border-border/60 bg-card/50 hover:border-primary/50 hover:bg-muted/50"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 text-left"
+                              onClick={() => setSelectedWalletKey((current) => (current === wallet.id ? null : wallet.id))}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: wallet.color }} />
+                                <span className={`min-w-0 flex-1 truncate text-sm font-medium ${isHidden ? "line-through" : ""}`}>
+                                  {wallet.name}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                                <span>Приход {formatCurrency(wallet.income)}</span>
+                                <span className={wallet.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}>
+                                  {formatCurrency(wallet.net)}
+                                </span>
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition hover:border-primary/60 hover:text-primary"
+                              aria-label={isHidden ? "Вернуть кошелек в отчет" : "Исключить кошелек из отчета"}
+                              title={isHidden ? "Вернуть кошелек" : "Исключить кошелек"}
+                              onClick={() => {
+                                if (!isHidden && isSelected) {
+                                  setSelectedWalletKey(null)
+                                }
+                                toggleHiddenWallet(wallet.id)
+                              }}
+                            >
+                              {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {allWalletRows.length === 0 ? (
             renderNoData("Нет данных по кошелькам", "В системе пока нет кошельков с доступными балансами.")
