@@ -460,11 +460,19 @@ class CashFlowWalletOpeningBalanceSerializer(serializers.Serializer):
     opening_balance = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
+class CashFlowWalletBalanceMovementSerializer(serializers.Serializer):
+    period = serializers.DateField()
+    wallet_id = serializers.UUIDField(allow_null=True)
+    wallet_name = serializers.CharField(allow_blank=True, allow_null=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
 class CashFlowReportResponseSerializer(serializers.Serializer):
     filters = serializers.DictField()
     totals = CashFlowReportTotalsSerializer()
     opening_balance = serializers.DecimalField(max_digits=12, decimal_places=2)
     wallet_opening_balances = CashFlowWalletOpeningBalanceSerializer(many=True)
+    wallet_balance_movements = CashFlowWalletBalanceMovementSerializer(many=True)
     months = CashFlowReportMonthSerializer(many=True)
     details = CashFlowReportDetailSerializer(many=True)
 

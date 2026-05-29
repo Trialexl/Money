@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db.models import Q, Sum
-from django.db.models.functions import TruncMonth
+from django.db.models.functions import TruncDate, TruncMonth
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, viewsets
@@ -94,18 +94,23 @@ class ReportViewSet(viewsets.ViewSet):
         if cash_flow_item_id:
             base_queryset = base_queryset.filter(cash_flow_item_id=cash_flow_item_id)
 
+        wallet_balance_queryset = FlowOfFunds.objects.select_related('wallet').filter(wallet__isnull=False)
+        if wallet_id:
+            wallet_balance_queryset = wallet_balance_queryset.filter(wallet_id=wallet_id)
+
         opening_balance = ZERO_AMOUNT
         wallet_opening_balances = []
         if date_from is not None:
             opening_queryset = base_queryset.filter(period__lt=date_from)
             opening_balance = _money(opening_queryset.aggregate(total=Sum('amount'))['total'])
+            wallet_opening_queryset = wallet_balance_queryset.filter(period__lt=date_from)
             wallet_opening_balances = [
                 {
                     'wallet_id': _serialize_uuid(row['wallet_id']),
                     'wallet_name': row['wallet__name'],
                     'opening_balance': _money_str(row['opening_balance']),
                 }
-                for row in opening_queryset.values('wallet_id', 'wallet__name').annotate(
+                for row in wallet_opening_queryset.values('wallet_id', 'wallet__name').annotate(
                     opening_balance=Sum('amount')
                 ).order_by('wallet__name')
             ]
@@ -139,6 +144,20 @@ class ReportViewSet(viewsets.ViewSet):
             for row in queryset.order_by('period', 'id')
         ]
 
+        wallet_balance_movement_rows = [
+            {
+                'period': row['period_date'],
+                'wallet_id': _serialize_uuid(row['wallet_id']),
+                'wallet_name': row['wallet__name'],
+                'amount': _money_str(row['amount']),
+            }
+            for row in _apply_period_filters(wallet_balance_queryset, date_from=date_from, date_to=date_to)
+            .annotate(period_date=TruncDate('period'))
+            .values('period_date', 'wallet_id', 'wallet__name')
+            .annotate(amount=Sum('amount'))
+            .order_by('period_date', 'wallet__name')
+        ]
+
         income_total = _money(
             queryset.aggregate(total=Sum('amount', filter=Q(amount__gt=0)))['total']
         )
@@ -154,6 +173,7 @@ class ReportViewSet(viewsets.ViewSet):
             },
             'opening_balance': _money_str(opening_balance),
             'wallet_opening_balances': wallet_opening_balances,
+            'wallet_balance_movements': wallet_balance_movement_rows,
             'months': month_rows,
             'details': detail_rows,
         })

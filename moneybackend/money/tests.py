@@ -2703,6 +2703,19 @@ class ReportEndpointsTests(TestCase):
             [row['document_type'] for row in response.data['details']],
             ['Receipt', 'Expenditure'],
         )
+        wallet_balance_movements = {
+            (row['period'].isoformat(), row['wallet_name']): row['amount']
+            for row in response.data['wallet_balance_movements']
+        }
+        self.assertEqual(
+            wallet_balance_movements,
+            {
+                ('2024-03-01', 'Основной кошелек'): '1000.00',
+                ('2024-03-02', 'Основной кошелек'): '-300.00',
+                ('2024-03-03', 'Основной кошелек'): '-150.00',
+                ('2024-03-03', 'Резервный кошелек'): '150.00',
+            },
+        )
 
     def test_cash_flow_report_opening_balance_uses_same_analytics_rules(self):
         hidden_wallet = Wallet.objects.create(name='Скрытый переводный')
@@ -2737,13 +2750,18 @@ class ReportEndpointsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['opening_balance'], '380.00')
-        self.assertEqual(
+        self.assertCountEqual(
             response.data['wallet_opening_balances'],
             [
                 {
+                    'wallet_id': str(hidden_wallet.id),
+                    'wallet_name': 'Скрытый переводный',
+                    'opening_balance': '-10000.00',
+                },
+                {
                     'wallet_id': str(self.wallet_main.id),
                     'wallet_name': 'Основной кошелек',
-                    'opening_balance': '380.00',
+                    'opening_balance': '10380.00',
                 }
             ],
         )

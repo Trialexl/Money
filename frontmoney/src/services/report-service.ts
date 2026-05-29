@@ -41,6 +41,13 @@ export interface CashFlowWalletOpeningBalance {
   opening_balance: number
 }
 
+export interface CashFlowWalletBalanceMovement {
+  period: string
+  wallet_id?: string | null
+  wallet_name?: string | null
+  amount: number
+}
+
 export interface CashFlowReportResponse {
   filters: Record<string, unknown>
   totals: {
@@ -49,6 +56,7 @@ export interface CashFlowReportResponse {
   }
   opening_balance: number
   wallet_opening_balances: CashFlowWalletOpeningBalance[]
+  wallet_balance_movements: CashFlowWalletBalanceMovement[]
   months: CashFlowReportMonth[]
   details: CashFlowReportDetail[]
 }
@@ -120,6 +128,14 @@ function mapCashFlowReport(raw: any): CashFlowReportResponse {
           wallet_id: row?.wallet_id ?? null,
           wallet_name: row?.wallet_name ?? null,
           opening_balance: fromApiAmount(row?.opening_balance),
+        }))
+      : [],
+    wallet_balance_movements: Array.isArray(raw?.wallet_balance_movements)
+      ? raw.wallet_balance_movements.map((row: any) => ({
+          period: fromApiDateTime(row?.period) ?? (typeof row?.period === "string" ? row.period : ""),
+          wallet_id: row?.wallet_id ?? null,
+          wallet_name: row?.wallet_name ?? null,
+          amount: fromApiAmount(row?.amount),
         }))
       : [],
     months: Array.isArray(raw?.months)

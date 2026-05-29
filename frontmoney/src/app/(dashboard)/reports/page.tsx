@@ -207,6 +207,44 @@ function formatShortDateLabel(value: string) {
   return `${day}.${String(month).padStart(2, "0")}`
 }
 
+function buildDateKeysBetween(startValue: string, endValue: string) {
+  const startKey = getDateKey(startValue)
+  const endKey = getDateKey(endValue)
+  const [startYear, startMonth, startDay] = startKey.split("-").map(Number)
+  const [endYear, endMonth, endDay] = endKey.split("-").map(Number)
+
+  if (!startYear || !startMonth || !startDay || !endYear || !endMonth || !endDay) {
+    return []
+  }
+
+  const cursor = new Date(Date.UTC(startYear, startMonth - 1, startDay))
+  const end = new Date(Date.UTC(endYear, endMonth - 1, endDay))
+  const keys: string[] = []
+
+  while (cursor <= end && keys.length < 3660) {
+    keys.push(cursor.toISOString().slice(0, 10))
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+
+  return keys
+}
+
+function selectChartTicks(values: string[], maxTicks = 12) {
+  if (values.length <= maxTicks) {
+    return values
+  }
+
+  const step = Math.ceil(values.length / maxTicks)
+  const ticks = values.filter((_, index) => index % step === 0)
+  const lastValue = values[values.length - 1]
+
+  if (ticks[ticks.length - 1] !== lastValue) {
+    ticks.push(lastValue)
+  }
+
+  return ticks
+}
+
 function formatCompactCurrency(value: number) {
   const absoluteValue = Math.abs(value)
 
@@ -669,6 +707,7 @@ export default function ReportsPage() {
   }))
 
   const walletFlowTotals = new Map<string, Omit<WalletFlowItem, "color">>()
+  const walletFlowDailyAmounts = new Map<string, Map<string, number>>()
   cashFlow.wallet_opening_balances.forEach((wallet) => {
     const walletId = wallet.wallet_id || wallet.wallet_name || "unknown"
     walletFlowTotals.set(walletId, {
@@ -681,9 +720,10 @@ export default function ReportsPage() {
       endingBalance: wallet.opening_balance,
     })
   })
-  cashFlow.details.forEach((detail) => {
-    const walletId = detail.wallet_id || detail.wallet_name || "unknown"
-    const walletName = detail.wallet_name || "Без кошелька"
+  cashFlow.wallet_balance_movements.forEach((movement) => {
+    const walletId = movement.wallet_id || movement.wallet_name || "unknown"
+    const walletName = movement.wallet_name || "Без кошелька"
+    const dateKey = getDateKey(movement.period)
     const row = walletFlowTotals.get(walletId) || {
       id: walletId,
       name: walletName,
@@ -693,11 +733,17 @@ export default function ReportsPage() {
       openingBalance: 0,
       endingBalance: 0,
     }
-    row.income += detail.income
-    row.expense += detail.expense
+    row.income += movement.amount > 0 ? movement.amount : 0
+    row.expense += movement.amount < 0 ? Math.abs(movement.amount) : 0
     row.net = row.income - row.expense
     row.endingBalance = row.openingBalance + row.net
     walletFlowTotals.set(walletId, row)
+
+    if (dateKey) {
+      const dateAmounts = walletFlowDailyAmounts.get(walletId) || new Map<string, number>()
+      dateAmounts.set(dateKey, (dateAmounts.get(dateKey) || 0) + movement.amount)
+      walletFlowDailyAmounts.set(walletId, dateAmounts)
+    }
   })
   const walletFlowLegendItems: WalletFlowItem[] = Array.from(walletFlowTotals.values())
     .sort((left, right) => Math.abs(right.net) + right.income + right.expense - (Math.abs(left.net) + left.income + left.expense))
@@ -706,29 +752,23 @@ export default function ReportsPage() {
       color: REPORT_ITEM_COLORS[index % REPORT_ITEM_COLORS.length],
     }))
   const walletFlowColorByName = new Map(walletFlowLegendItems.map((wallet) => [wallet.name, wallet.color]))
+  const walletBalanceDateKeys = buildDateKeysBetween(dateFrom, dateTo)
+  const walletBalanceTickValues = selectChartTicks(walletBalanceDateKeys)
   const visibleWalletFlowLegendItems = walletFlowLegendItems
     .filter((wallet) => !hiddenWalletKeySet.has(wallet.id))
     .filter((wallet) => (activeSelectedWalletKey ? wallet.id === activeSelectedWalletKey : true))
   const walletFlowLineData = visibleWalletFlowLegendItems.map((wallet) => {
     let runningWalletBalance = wallet.openingBalance
+    const dateAmounts = walletFlowDailyAmounts.get(wallet.id) || new Map<string, number>()
     return {
       id: wallet.name,
-      data: [
-        { x: "Старт", y: runningWalletBalance },
-        ...timelineChartRows.map((periodRow) => {
-          const periodDetails = cashFlow.details.filter((detail) => {
-            const detailWalletKey = detail.wallet_id || detail.wallet_name || "unknown"
-            const detailPeriodKey = timelineMode === "daily" ? getDateKey(detail.period) : getMonthKey(detail.period)
-            return detailWalletKey === wallet.id && detailPeriodKey === periodRow.key
-          })
-          const periodNet = periodDetails.reduce((sum, detail) => sum + detail.income - detail.expense, 0)
-          runningWalletBalance += periodNet
-          return {
-            x: periodRow.chartLabel,
-            y: runningWalletBalance,
-          }
-        }),
-      ],
+      data: walletBalanceDateKeys.map((dateKey) => {
+        runningWalletBalance += dateAmounts.get(dateKey) || 0
+        return {
+          x: dateKey,
+          y: runningWalletBalance,
+        }
+      }),
     }
   })
 
@@ -1515,15 +1555,15 @@ export default function ReportsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Кумулятивный поток по кошелькам</CardTitle>
+              <CardTitle>Остатки по кошелькам по дням</CardTitle>
               <CardDescription>
-                Та же динамика, что в потоке денег, но отдельной линией по каждому кошельку.
+                Остаток каждого кошелька на каждую дату периода, с учетом переводов между кошельками.
               </CardDescription>
             </CardHeader>
             <CardContent>
               {walletFlowLegendItems.length === 0 ? (
                 <div className="py-16 text-center text-sm text-muted-foreground">
-                  За выбранный период нет движений по кошелькам.
+                  За выбранный период нет данных по остаткам кошельков.
                 </div>
               ) : (
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -1538,18 +1578,24 @@ export default function ReportsPage() {
                         margin={{ top: 22, right: 20, bottom: 56, left: 64 }}
                         xScale={{ type: "point" }}
                         yScale={{ type: "linear", stacked: false }}
-                        axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -25 }}
+                        axisBottom={{
+                          tickSize: 0,
+                          tickPadding: 10,
+                          tickRotation: -25,
+                          tickValues: walletBalanceTickValues,
+                          format: (value) => formatShortDateLabel(String(value)),
+                        }}
                         axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatCompactCurrency(Number(value)) }}
                         enableGridX={false}
                         curve="monotoneX"
-                        pointSize={7}
+                        pointSize={walletBalanceDateKeys.length > 62 ? 0 : 7}
                         pointBorderWidth={2}
                         pointBorderColor={{ from: "serieColor" }}
                         colors={(series) => walletFlowColorByName.get(String(series.id)) ?? REPORT_ITEM_COLORS[0]}
                         useMesh
                         tooltip={({ point }) => (
                           <div className="rounded border bg-background px-2 py-1 text-xs shadow-sm">
-                            {String(point.seriesId)} · {String(point.data.x)}: {formatCurrency(Number(point.data.y))}
+                            {String(point.seriesId)} · {formatDate(String(point.data.x))}: {formatCurrency(Number(point.data.y))}
                           </div>
                         )}
                       />
@@ -1601,7 +1647,7 @@ export default function ReportsPage() {
                                 </span>
                               </div>
                               <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                                <span>Поток {formatCurrency(wallet.net)}</span>
+                                <span>Изменение {formatCurrency(wallet.net)}</span>
                                 <span className={wallet.net >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}>
                                   {formatCurrency(wallet.endingBalance)}
                                 </span>
