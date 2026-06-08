@@ -162,6 +162,22 @@ remove_db_container_file() {
   run_docker compose exec -T db sh -c 'rm -f "$1"' sh "$container_file" >/dev/null 2>&1 || true
 }
 
+reset_public_schema() {
+  local database="${1:-}"
+  local action="$2"
+  local file="$3"
+
+  # createdb/initdb creates public automatically, while custom dumps may contain CREATE SCHEMA public.
+  run_docker compose exec -T db sh -c '
+    database="$1"
+    if [ -z "$database" ]; then
+      database="$POSTGRES_DB"
+    fi
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$database" -c "DROP SCHEMA IF EXISTS public CASCADE;" >/dev/null
+  ' sh "$database" \
+    || fail_command "$action" "cannot reset public schema before restore" "$file"
+}
+
 verify_custom_dump() {
   local file="$1"
   local container_file
@@ -308,6 +324,7 @@ restore_check() {
     *.dump.gz)
       local container_file
       container_file="$(copy_dump_to_db_container "$file" "restore-check")"
+      reset_public_schema "$temp_db" "restore-check" "$file"
       if ! run_docker compose exec -T db sh -c 'pg_restore --exit-on-error --no-owner --no-acl -U "$POSTGRES_USER" -d "$1" "$2"' sh "$temp_db" "$container_file"; then
         remove_db_container_file "$container_file"
         fail_command "restore-check" "pg_restore into temporary database failed" "$file"
@@ -353,7 +370,8 @@ restore_backup() {
     *.dump.gz)
       local container_file
       container_file="$(copy_dump_to_db_container "$file" "restore")"
-      if ! run_docker compose exec -T db sh -c 'pg_restore --clean --if-exists --no-owner --no-acl -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$1"' sh "$container_file"; then
+      reset_public_schema "" "restore" "$file"
+      if ! run_docker compose exec -T db sh -c 'pg_restore --exit-on-error --clean --if-exists --no-owner --no-acl -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$1"' sh "$container_file"; then
         remove_db_container_file "$container_file"
         fail_command "restore" "pg_restore into current database failed" "$file"
       fi
