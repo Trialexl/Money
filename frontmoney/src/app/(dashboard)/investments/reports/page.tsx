@@ -39,6 +39,8 @@ type GroupBy = "day" | "month"
 type ChartPoint = {
   x: string
   y: number
+  label?: string
+  seriesLabel?: string
   date?: string
   actualValue?: number | null
   realized?: number | null
@@ -128,6 +130,31 @@ function getPeriodKey(value: string, groupBy: GroupBy) {
   return groupBy === "month" ? dateKey.slice(0, 7) : dateKey
 }
 
+function getPeriodChartKey(value: string, groupBy: GroupBy) {
+  const periodKey = getPeriodKey(value, groupBy)
+  return groupBy === "month" ? `${periodKey}-01` : periodKey
+}
+
+function parseChartDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number)
+  if (!year || !month || !day) {
+    return null
+  }
+  return new Date(year, month - 1, day)
+}
+
+function formatDateTick(value: unknown, groupBy: GroupBy) {
+  if (value instanceof Date) {
+    const dateKey = formatDateForInput(value)
+    return formatShortPeriodLabel(groupBy === "month" ? dateKey.slice(0, 7) : dateKey, groupBy)
+  }
+  const stringValue = String(value)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stringValue)) {
+    return formatShortPeriodLabel(groupBy === "month" ? stringValue.slice(0, 7) : stringValue, groupBy)
+  }
+  return stringValue
+}
+
 function formatShortPeriodLabel(value: string, groupBy: GroupBy) {
   if (!value) {
     return ""
@@ -191,6 +218,44 @@ function getChartTickValues(data: ChartPoint[]) {
   return data
     .filter((_, index) => index === 0 || index === data.length - 1 || index % step === 0)
     .map((point) => point.x)
+}
+
+function getTimeChartTickValues(data: ChartPoint[]) {
+  return getChartTickValues(data)
+    .map(parseChartDate)
+    .filter((date): date is Date => date !== null)
+}
+
+function getDaysBetween(left: string, right: string) {
+  const leftDate = parseChartDate(left)
+  const rightDate = parseChartDate(right)
+  if (!leftDate || !rightDate) {
+    return 0
+  }
+  return Math.round((rightDate.getTime() - leftDate.getTime()) / 86_400_000)
+}
+
+function splitChartSeriesOnDateGaps(points: ChartPoint[], groupBy: GroupBy) {
+  const maxGapDays = groupBy === "month" ? 45 : 4
+  const segments: ChartPoint[][] = []
+  let current: ChartPoint[] = []
+
+  points.forEach((point) => {
+    const previous = current[current.length - 1]
+    if (previous && getDaysBetween(previous.x, point.x) > maxGapDays) {
+      if (current.length > 0) {
+        segments.push(current)
+      }
+      current = []
+    }
+    current.push(point)
+  })
+
+  if (current.length > 0) {
+    segments.push(current)
+  }
+
+  return segments
 }
 
 function getChartYDomain(data: ChartPoint[], includeZero = false) {
@@ -542,11 +607,12 @@ export default function InvestmentReportsPage() {
     .forEach((rate) => {
       const pairId = `${rate.base_currency}/${rate.quote_currency}`
       const periodKey = getPeriodKey(rate.captured_at, groupBy)
-      const x = formatShortPeriodLabel(periodKey, groupBy)
+      const chartKey = getPeriodChartKey(rate.captured_at, groupBy)
       latestFxRateByPair.set(pairId, rate.rate)
       const map = fxRatesByPair.get(pairId) ?? new Map<string, ChartPoint>()
       map.set(periodKey, {
-        x,
+        x: chartKey,
+        label: formatShortPeriodLabel(periodKey, groupBy),
         y: rate.rate,
         date: rate.captured_at,
       })
@@ -561,7 +627,7 @@ export default function InvestmentReportsPage() {
   )
   const fxRateLineData = fxPairIds
     .filter((pairId) => visibleFxPairIds.has(pairId))
-    .map((pairId) => {
+    .flatMap((pairId) => {
       const points = Array.from(fxRatesByPair.get(pairId)?.entries() ?? [])
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([, point]) => point)
@@ -569,17 +635,21 @@ export default function InvestmentReportsPage() {
       const normalizedPoints = baseRate
         ? points.map((point) => ({
             ...point,
+            seriesLabel: pairId,
             actualValue: point.y,
             y: (point.y / baseRate) * 100,
           }))
         : []
-      return {
-        id: pairId,
-        data: normalizedPoints,
-      }
+      return splitChartSeriesOnDateGaps(normalizedPoints, groupBy).map((segment, index) => ({
+        id: index === 0 ? pairId : `${pairId}:${index + 1}`,
+        data: segment,
+      }))
     })
     .filter((series) => series.data.length > 0)
-  const fxRateTicks = getChartTickValues(fxRateLineData[0]?.data ?? [])
+  const fxRateTickPoints = Array.from(new Set(fxRateLineData.flatMap((series) => series.data.map((point) => point.x))))
+    .sort((left, right) => left.localeCompare(right))
+    .map((x) => ({ x, y: 0 }))
+  const fxRateTicks = getTimeChartTickValues(fxRateTickPoints)
   const fxRateDomain = getChartYDomain(fxRateLineData.flatMap((series) => series.data))
   const fxLegendItems: FxLegendItem[] = fxPairIds.map((pairId) => ({
     id: pairId,
@@ -1043,9 +1113,12 @@ export default function InvestmentReportsPage() {
                 ticks={fxRateTicks}
                 domain={fxRateDomain}
                 pointSize={fxRateLineData.flatMap((series) => series.data).length > 80 ? 0 : 5}
-                colorById={(id) => fxColorByPair.get(String(id)) ?? fxChartColors[0]}
+                colorById={(id) => fxColorByPair.get(String(id).split(":")[0]) ?? fxChartColors[0]}
                 displayCurrency={displayCurrency}
                 operationLayer={renderEmptyLayer}
+                xScale={{ type: "time", format: "%Y-%m-%d", precision: "day", useUTC: false }}
+                curve="linear"
+                formatXAxisValue={(value) => formatDateTick(value, groupBy)}
                 formatYAxisValue={(value) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)}
                 formatTooltipValue={(point) => {
                   const indexValue = Number(point.y)
@@ -1264,18 +1337,24 @@ function LineChartPanel({
   colorById,
   displayCurrency,
   operationLayer,
+  xScale,
+  curve = "monotoneX",
+  formatXAxisValue,
   formatYAxisValue,
   formatTooltipValue,
 }: {
   title: string
   data: Array<{ id: string; data: ChartPoint[] }>
-  ticks: string[]
+  ticks: Array<string | Date>
   domain: { min: number; max: number }
   pointSize: number
   colors?: string[]
   colorById?: (id: string) => string
   displayCurrency: DisplayCurrency
   operationLayer: any
+  xScale?: any
+  curve?: "linear" | "monotoneX"
+  formatXAxisValue?: (value: unknown) => string
   formatYAxisValue?: (value: number) => string
   formatTooltipValue?: (point: ChartPoint) => string
 }) {
@@ -1286,12 +1365,18 @@ function LineChartPanel({
         <ResponsiveLine
           data={data}
           margin={{ top: 22, right: 18, bottom: 50, left: 64 }}
-          xScale={{ type: "point" }}
+          xScale={xScale ?? { type: "point" }}
           yScale={{ type: "linear", stacked: false, min: domain.min, max: domain.max }}
-          axisBottom={{ tickSize: 0, tickPadding: 10, tickRotation: -25, tickValues: ticks }}
+          axisBottom={{
+            tickSize: 0,
+            tickPadding: 10,
+            tickRotation: -25,
+            tickValues: ticks,
+            format: formatXAxisValue,
+          }}
           axisLeft={{ tickSize: 0, tickPadding: 8, format: (value) => formatYAxisValue ? formatYAxisValue(Number(value)) : formatCompactChartValue(Number(value)) }}
           enableGridX={false}
-          curve="monotoneX"
+          curve={curve}
           pointSize={pointSize}
           pointBorderWidth={2}
           pointBorderColor={{ from: "serieColor" }}
@@ -1304,10 +1389,12 @@ function LineChartPanel({
               unrealized?: number | null
               total?: number | null
             }
+            const pointLabel = dataPoint.label ?? (formatXAxisValue ? formatXAxisValue(point.data.x) : String(point.data.x))
+            const seriesLabel = dataPoint.seriesLabel ?? String(point.seriesId).split(":")[0]
             return (
               <div className="rounded border bg-background px-2 py-1 text-xs shadow-sm">
                 <div className="font-semibold">
-                  {String(point.seriesId)} · {String(point.data.x)}
+                  {seriesLabel} · {pointLabel}
                 </div>
                 <div>
                   {formatTooltipValue
