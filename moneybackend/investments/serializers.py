@@ -406,11 +406,13 @@ class InvestmentOperationSerializer(serializers.ModelSerializer):
         operation_type = attrs.get('operation_type') or getattr(self.instance, 'operation_type', None)
         instrument = attrs.get('instrument') or getattr(self.instance, 'instrument', None)
         quantity = attrs.get('quantity') if 'quantity' in attrs else getattr(self.instance, 'quantity', None)
+        operation_date = attrs.get('date') if 'date' in attrs else getattr(self.instance, 'date', None)
         if operation_type == InvestmentOperation.TYPE_SELL and instrument is not None and quantity is not None:
             available_quantity = calculate_instrument_quantity(
                 portfolio,
                 instrument,
                 exclude_operation=self.instance,
+                as_of=operation_date,
             )
             if quantity > available_quantity:
                 raise serializers.ValidationError({

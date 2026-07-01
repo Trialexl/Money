@@ -284,7 +284,7 @@ def calculate_positions(
     return sorted(result, key=lambda row: row['instrument_ticker'])
 
 
-def calculate_instrument_quantity(portfolio, instrument, *, exclude_operation=None):
+def calculate_instrument_quantity(portfolio, instrument, *, exclude_operation=None, as_of=None):
     quantity = ZERO_AMOUNT
     queryset = InvestmentOperation.objects.filter(
         portfolio=portfolio,
@@ -292,6 +292,8 @@ def calculate_instrument_quantity(portfolio, instrument, *, exclude_operation=No
         deleted=False,
         posted=True,
     ).order_by('date', 'created_at', 'id')
+    if as_of is not None:
+        queryset = queryset.filter(date__lte=as_of)
     if exclude_operation is not None and exclude_operation.pk:
         queryset = queryset.exclude(pk=exclude_operation.pk)
 

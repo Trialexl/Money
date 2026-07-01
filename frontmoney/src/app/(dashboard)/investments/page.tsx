@@ -120,6 +120,10 @@ function formatCalculatedPrice(value: number) {
   return Number(value.toFixed(8)).toString()
 }
 
+function keepInputValueIfSame(current: string, next: string) {
+  return current === next ? current : next
+}
+
 function isUsdCurrency(currency?: string | null) {
   return (currency || "USD").trim().toUpperCase() === "USD"
 }
@@ -2060,13 +2064,13 @@ function OperationForm({
           return
         }
         if (lookup.found && lookup.price_usd !== undefined) {
-          setPriceUsd(formatInputNumber(lookup.price_usd))
+          setPriceUsd((current) => keepInputValueIfSame(current, formatInputNumber(lookup.price_usd)))
           if (lookup.price !== undefined && lookup.price_currency === quoteCurrency) {
-            setPriceQuote(formatInputNumber(lookup.price))
+            setPriceQuote((current) => keepInputValueIfSame(current, formatInputNumber(lookup.price)))
             setPriceQuoteEditedManually(false)
           }
           if (lookup.fx_rate_to_usd !== undefined && !isUsdCurrency(quoteCurrency)) {
-            setFxRateToUsd(formatInputNumber(lookup.fx_rate_to_usd))
+            setFxRateToUsd((current) => keepInputValueIfSame(current, formatInputNumber(lookup.fx_rate_to_usd)))
           }
           setPriceLookupMessage(
             lookup.is_exact_date
@@ -2092,15 +2096,15 @@ function OperationForm({
       return
     }
     if (!quantity.trim() || !priceUsd.trim()) {
-      setAmountUsd("")
+      setAmountUsd((current) => keepInputValueIfSame(current, ""))
       return
     }
     const calculatedAmount = parseFormNumber(quantity) * parseFormNumber(priceUsd)
     if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) {
-      setAmountUsd("")
+      setAmountUsd((current) => keepInputValueIfSame(current, ""))
       return
     }
-    setAmountUsd(formatCalculatedAmount(calculatedAmount))
+    setAmountUsd((current) => keepInputValueIfSame(current, formatCalculatedAmount(calculatedAmount)))
   }, [amountEditedManually, needsAmount, priceUsd, quantity])
 
   useEffect(() => {
@@ -2114,25 +2118,25 @@ function OperationForm({
     if (priceQuote.trim() && !priceEditedManually) {
       const nextPriceUsd = parseFormNumber(priceQuote) * rate
       if (Number.isFinite(nextPriceUsd) && nextPriceUsd > 0) {
-        setPriceUsd(formatCalculatedPrice(nextPriceUsd))
+        setPriceUsd((current) => keepInputValueIfSame(current, formatCalculatedPrice(nextPriceUsd)))
       }
     }
     if (amountQuote.trim() && !amountEditedManually) {
       const nextAmountUsd = parseFormNumber(amountQuote) * rate
       if (Number.isFinite(nextAmountUsd) && nextAmountUsd > 0) {
-        setAmountUsd(formatCalculatedAmount(nextAmountUsd))
+        setAmountUsd((current) => keepInputValueIfSame(current, formatCalculatedAmount(nextAmountUsd)))
       }
     }
     if (feeQuote.trim()) {
       const nextFeeUsd = parseFormNumber(feeQuote) * rate
       if (Number.isFinite(nextFeeUsd) && nextFeeUsd >= 0) {
-        setFeeUsd(formatCalculatedAmount(nextFeeUsd))
+        setFeeUsd((current) => keepInputValueIfSame(current, formatCalculatedAmount(nextFeeUsd)))
       }
     }
   }, [amountEditedManually, amountQuote, feeQuote, fxRateToUsd, needsAmount, priceEditedManually, priceQuote, usesQuoteCurrency])
 
   useEffect(() => {
-    if (!needsAmount || priceQuoteEditedManually || !usesQuoteCurrency) {
+    if (!needsAmount || !amountQuoteEditedManually || priceQuoteEditedManually || !usesQuoteCurrency) {
       return
     }
     if (!quantity.trim() || !amountQuote.trim()) {
@@ -2140,9 +2144,9 @@ function OperationForm({
     }
     const nextPrice = parseFormNumber(amountQuote) / parseFormNumber(quantity)
     if (Number.isFinite(nextPrice) && nextPrice > 0) {
-      setPriceQuote(formatCalculatedPrice(nextPrice))
+      setPriceQuote((current) => keepInputValueIfSame(current, formatCalculatedPrice(nextPrice)))
     }
-  }, [amountQuote, needsAmount, priceQuoteEditedManually, quantity, usesQuoteCurrency])
+  }, [amountQuote, amountQuoteEditedManually, needsAmount, priceQuoteEditedManually, quantity, usesQuoteCurrency])
 
   useEffect(() => {
     if (!needsAmount || amountQuoteEditedManually || !usesQuoteCurrency) {
@@ -2153,12 +2157,12 @@ function OperationForm({
     }
     const nextAmount = parseFormNumber(quantity) * parseFormNumber(priceQuote)
     if (Number.isFinite(nextAmount) && nextAmount > 0) {
-      setAmountQuote(formatCalculatedAmount(nextAmount))
+      setAmountQuote((current) => keepInputValueIfSame(current, formatCalculatedAmount(nextAmount)))
     }
   }, [amountQuoteEditedManually, needsAmount, priceQuote, quantity, usesQuoteCurrency])
 
   useEffect(() => {
-    if (!needsAmount || priceEditedManually) {
+    if (!needsAmount || !amountEditedManually || priceEditedManually) {
       return
     }
     if (!quantity.trim() || !amountUsd.trim()) {
@@ -2166,9 +2170,9 @@ function OperationForm({
     }
     const nextPrice = parseFormNumber(amountUsd) / parseFormNumber(quantity)
     if (Number.isFinite(nextPrice) && nextPrice > 0) {
-      setPriceUsd(formatCalculatedPrice(nextPrice))
+      setPriceUsd((current) => keepInputValueIfSame(current, formatCalculatedPrice(nextPrice)))
     }
-  }, [amountUsd, needsAmount, priceEditedManually, quantity])
+  }, [amountEditedManually, amountUsd, needsAmount, priceEditedManually, quantity])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

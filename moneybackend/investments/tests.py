@@ -960,6 +960,32 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('quantity', response.data)
 
+    def test_backdated_sell_cannot_use_future_buys(self):
+        InvestmentOperation.objects.create(
+            portfolio=self.portfolio,
+            account=self.account,
+            instrument=self.instrument,
+            operation_type=InvestmentOperation.TYPE_BUY,
+            quantity=Decimal('1.0000000000'),
+            price_usd=Decimal('100.00000000'),
+            amount_usd=Decimal('100.00'),
+            date=self._dt(2026, 6, 10),
+        )
+
+        response = self.client.post('/api/v1/investment/operations/', {
+            'portfolio': str(self.portfolio.id),
+            'account': str(self.account.id),
+            'instrument': str(self.instrument.id),
+            'operation_type': InvestmentOperation.TYPE_SELL,
+            'quantity': '1.0000000000',
+            'price_usd': '100.00000000',
+            'amount_usd': '100.00',
+            'date': self._dt(2026, 6, 5).isoformat(),
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('quantity', response.data)
+
     def test_operation_api_uses_usd_fields_only(self):
         response = self.client.post('/api/v1/investment/operations/', {
             'portfolio': str(self.portfolio.id),
