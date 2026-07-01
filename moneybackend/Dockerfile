@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bookworm
+FROM python:3.10-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -16,6 +16,7 @@ RUN set -eux; \
         break; \
         echo "apt install failed on attempt ${attempt}, retrying..."; \
         rm -rf /var/lib/apt/lists/*; \
+        if [ "$attempt" = "3" ]; then exit 1; fi; \
         sleep 5; \
     done
 
