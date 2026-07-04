@@ -353,6 +353,7 @@ class InvestmentModuleIsolationTests(TestCase):
         self.assertIn('target_percent', overflow_response.data)
 
     def test_rebalance_endpoint_returns_current_deviation_without_creating_operations(self):
+        eth = Instrument.objects.create(type=Instrument.TYPE_CRYPTO, ticker='ETH', name='Ethereum')
         InvestmentOperation.objects.create(
             portfolio=self.portfolio,
             account=self.account,
@@ -377,13 +378,28 @@ class InvestmentModuleIsolationTests(TestCase):
             target_percent=Decimal('50.00'),
             tolerance_percent=Decimal('5.00'),
         )
+        InvestmentTargetAllocation.objects.create(
+            portfolio=self.portfolio,
+            instrument=eth,
+            target_percent=Decimal('50.00'),
+            tolerance_percent=Decimal('5.00'),
+        )
 
         response = self.client.get(f'/api/v1/investment/portfolios/{self.portfolio.id}/rebalance/')
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data['positions'][0]['target_allocation_percent'], Decimal('50.00'))
-        self.assertEqual(response.data['positions'][0]['allocation_deviation_percent'], Decimal('50.00'))
-        self.assertEqual(response.data['positions'][0]['rebalance_action'], 'sell')
+        positions = {row['instrument_ticker']: row for row in response.data['positions']}
+        self.assertEqual(positions['BTC']['target_allocation_percent'], Decimal('50.00'))
+        self.assertEqual(positions['BTC']['allocation_deviation_percent'], Decimal('50.00'))
+        self.assertEqual(positions['BTC']['rebalance_action'], 'sell')
+        self.assertEqual(positions['BTC']['rebalance_amount_usd'], Decimal('50.00'))
+        self.assertEqual(positions['BTC']['rebalance_to_threshold_action'], 'sell')
+        self.assertEqual(positions['BTC']['rebalance_to_threshold_amount_usd'], Decimal('45.00'))
+        self.assertEqual(positions['ETH']['allocation_deviation_percent'], Decimal('-50.00'))
+        self.assertEqual(positions['ETH']['rebalance_action'], 'buy')
+        self.assertEqual(positions['ETH']['rebalance_amount_usd'], Decimal('50.00'))
+        self.assertEqual(positions['ETH']['rebalance_to_threshold_action'], 'buy')
+        self.assertEqual(positions['ETH']['rebalance_to_threshold_amount_usd'], Decimal('45.00'))
         self.assertIn('не является инвестиционной рекомендацией', response.data['disclaimer'])
 
     def test_ai_service_returns_portfolio_overview(self):

@@ -138,6 +138,8 @@ export interface InvestmentPosition {
   allocation_deviation_usd?: number | null
   rebalance_action?: "buy" | "sell" | "hold" | null
   rebalance_amount_usd?: number | null
+  rebalance_to_threshold_action?: "buy" | "sell" | "hold" | null
+  rebalance_to_threshold_amount_usd?: number | null
   is_within_tolerance?: boolean | null
 }
 
@@ -405,6 +407,8 @@ function mapPosition(raw: any): InvestmentPosition {
     allocation_deviation_usd: fromApiNullableAmount(raw.allocation_deviation_usd),
     rebalance_action: raw.rebalance_action ?? null,
     rebalance_amount_usd: fromApiNullableAmount(raw.rebalance_amount_usd),
+    rebalance_to_threshold_action: raw.rebalance_to_threshold_action ?? null,
+    rebalance_to_threshold_amount_usd: fromApiNullableAmount(raw.rebalance_to_threshold_amount_usd),
     is_within_tolerance: raw.is_within_tolerance ?? null,
   }
 }

@@ -271,6 +271,17 @@ def calculate_positions(
             if row['allocation_deviation_percent'] is not None and tolerance_percent is not None
             else None
         )
+        if row['allocation_deviation_percent'] is None or tolerance_percent is None:
+            row['rebalance_to_threshold_action'] = None
+            row['rebalance_to_threshold_amount_usd'] = None
+        elif row['is_within_tolerance']:
+            row['rebalance_to_threshold_action'] = 'hold'
+            row['rebalance_to_threshold_amount_usd'] = ZERO_AMOUNT
+        else:
+            threshold_deviation_percent = abs(row['allocation_deviation_percent']) - tolerance_percent
+            threshold_amount_usd = _money(total_current_value * threshold_deviation_percent / Decimal('100'))
+            row['rebalance_to_threshold_action'] = 'sell' if row['allocation_deviation_percent'] > ZERO_AMOUNT else 'buy'
+            row['rebalance_to_threshold_amount_usd'] = threshold_amount_usd
         if allocation_deviation_usd is None or allocation_deviation_usd == ZERO_AMOUNT:
             row['rebalance_action'] = 'hold'
             row['rebalance_amount_usd'] = ZERO_AMOUNT

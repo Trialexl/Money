@@ -1153,7 +1153,7 @@ export default function InvestmentsPage() {
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1040px] text-left text-sm">
+                  <table className="w-full min-w-[1180px] text-left text-sm">
                     <thead className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
                       <tr className="border-b border-border/70">
                         <th className="py-3 pr-4">Актив</th>
@@ -1162,7 +1162,8 @@ export default function InvestmentsPage() {
                         <th className="py-3 pr-4 text-right">Допуск</th>
                         <th className="py-3 pr-4 text-right">Отклонение</th>
                         <th className="py-3 pr-4 text-right">Сумма</th>
-                        <th className="py-3 pr-4 text-right">Действие</th>
+                        <th className="py-3 pr-4 text-right">До допуска</th>
+                        <th className="py-3 pr-4 text-right">До цели</th>
                         <th className="py-3 text-right">Настройки</th>
                       </tr>
                     </thead>
@@ -1193,6 +1194,12 @@ export default function InvestmentsPage() {
                               {position.allocation_deviation_usd === null || position.allocation_deviation_usd === undefined
                                 ? "нет цели"
                                 : `${position.allocation_deviation_usd > 0 ? "+" : ""}${money(position.allocation_deviation_usd)}`}
+                            </td>
+                            <td className={`py-3 pr-4 text-right font-medium ${actionClass}`}>
+                              {rebalanceActionLabels[position.rebalance_to_threshold_action ?? ""] ?? "Нет цели"}
+                              {position.rebalance_to_threshold_amount_usd !== null && position.rebalance_to_threshold_amount_usd !== undefined && position.rebalance_to_threshold_amount_usd > 0 ? (
+                                <div className="text-xs font-normal tabular-nums">{money(position.rebalance_to_threshold_amount_usd)}</div>
+                              ) : null}
                             </td>
                             <td className={`py-3 pr-4 text-right font-medium ${actionClass}`}>
                               {rebalanceActionLabels[position.rebalance_action ?? ""] ?? "Нет цели"}

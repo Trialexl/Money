@@ -459,6 +459,8 @@ class InvestmentPositionSerializer(serializers.Serializer):
     allocation_deviation_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     rebalance_action = serializers.CharField(allow_null=True)
     rebalance_amount_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    rebalance_to_threshold_action = serializers.CharField(allow_null=True)
+    rebalance_to_threshold_amount_usd = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     is_within_tolerance = serializers.BooleanField(allow_null=True)
 
 
