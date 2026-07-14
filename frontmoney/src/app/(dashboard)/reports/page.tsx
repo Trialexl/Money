@@ -345,6 +345,7 @@ export default function ReportsPage() {
   const searchParams = useSearchParams()
   const today = formatDateForInput()
   const currentYear = new Date().getFullYear()
+  const currentMonthDay = new Date().getDate()
   const defaultDateFrom = `${currentYear}-01-01`
   const defaultDateTo = `${currentYear}-12-31`
   const hasExplicitPeriod = searchParams.has("date_from") || searchParams.has("date_to")
@@ -358,6 +359,7 @@ export default function ReportsPage() {
   const [monthPickerYear, setMonthPickerYear] = useState(Number((searchParams.get("date_from") || defaultDateFrom).slice(0, 4)) || currentYear)
   const [monthSelectionAnchor, setMonthSelectionAnchor] = useState<string | null>(null)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
+  const [expenseMonthToDate, setExpenseMonthToDate] = useState(searchParams.get("expense_mtd") === "true")
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
   const [collapsedMonthlyGroups, setCollapsedMonthlyGroups] = useState<Record<string, boolean>>({})
   const [collapsedBudgetPlanGroups, setCollapsedBudgetPlanGroups] = useState<Record<string, boolean>>({})
@@ -392,12 +394,15 @@ export default function ReportsPage() {
   const reportsQuery = useQuery({
     queryKey: [
       "reports-analytics",
-      { dateFrom, dateTo, budgetForecast, budgetProjectId },
+      { dateFrom, dateTo, budgetForecast, budgetProjectId, expenseMonthToDate, currentMonthDay },
     ],
     staleTime: 60_000,
     queryFn: async () => {
-      const [cashFlow, budgetExpense, overview] = await Promise.all([
+      const [cashFlow, limitedExpenseCashFlow, budgetExpense, overview] = await Promise.all([
         ReportService.getCashFlowReport({ dateFrom, dateTo }),
+        expenseMonthToDate
+          ? ReportService.getCashFlowReport({ dateFrom, dateTo, monthDayLimit: currentMonthDay })
+          : Promise.resolve(null),
         ReportService.getBudgetExpenseReport({
           dateFrom,
           dateTo,
@@ -409,6 +414,7 @@ export default function ReportsPage() {
 
       return {
         cashFlow,
+        expenseCashFlow: limitedExpenseCashFlow ?? cashFlow,
         budgetExpense,
         overview,
       }
@@ -439,6 +445,19 @@ export default function ReportsPage() {
     setActiveTab(nextTab)
     const params = new URLSearchParams(searchParams.toString())
     params.set("tab", getReportTabParam(nextTab))
+    router.replace(`/reports?${params.toString()}`, { scroll: false })
+  }
+
+  const handleExpenseMonthToDateChange = (enabled: boolean) => {
+    setExpenseMonthToDate(enabled)
+    setSelectedMonthlyExpenseItemKey(null)
+    setHiddenMonthlyExpenseItemKeys({})
+    const params = new URLSearchParams(searchParams.toString())
+    if (enabled) {
+      params.set("expense_mtd", "true")
+    } else {
+      params.delete("expense_mtd")
+    }
     router.replace(`/reports?${params.toString()}`, { scroll: false })
   }
 
@@ -591,7 +610,7 @@ export default function ReportsPage() {
     )
   }
 
-  const { cashFlow, budgetExpense, overview } = reportsQuery.data
+  const { cashFlow, expenseCashFlow, budgetExpense, overview } = reportsQuery.data
   const budgetProjectOptions = (projectsQuery.data ?? [])
     .filter((project) => !project.deleted)
     .sort((left, right) => left.name.localeCompare(right.name, "ru"))
@@ -773,7 +792,7 @@ export default function ReportsPage() {
   })
 
   const categoryTotals = new Map<string, CategoryRow>()
-  cashFlow.details.forEach((detail: CashFlowReportDetail) => {
+  expenseCashFlow.details.forEach((detail: CashFlowReportDetail) => {
     if (detail.expense <= 0) {
       return
     }
@@ -793,12 +812,12 @@ export default function ReportsPage() {
     .sort((left: CategoryRow, right: CategoryRow) => right.amount - left.amount)
     .map((item: CategoryRow) => ({
       ...item,
-      percentage: expenseTotal > 0 ? (item.amount / expenseTotal) * 100 : 0,
+      percentage: expenseCashFlow.totals.expense > 0 ? (item.amount / expenseCashFlow.totals.expense) * 100 : 0,
     }))
   const topExpenseCategory = categoryRows[0] || null
 
   const monthlyCashFlowItemMap = new Map<string, MonthlyCashFlowItemRow>()
-  cashFlow.details.forEach((detail: CashFlowReportDetail) => {
+  expenseCashFlow.details.forEach((detail: CashFlowReportDetail) => {
     const monthKey = getMonthKey(detail.period)
     const itemKey = detail.cash_flow_item_id || detail.cash_flow_item_name || "unknown"
     const key = `${monthKey}:${itemKey}`
@@ -867,7 +886,7 @@ export default function ReportsPage() {
   const monthlyExpenseLegendItems = monthlyExpenseItems.map((item, index) => ({
     ...item,
     color: REPORT_ITEM_COLORS[index % REPORT_ITEM_COLORS.length],
-    share: expenseTotal > 0 ? (item.expense / expenseTotal) * 100 : 0,
+    share: expenseCashFlow.totals.expense > 0 ? (item.expense / expenseCashFlow.totals.expense) * 100 : 0,
   }))
   const monthlyExpenseItemByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item]))
   const monthlyExpenseColorByKey = new Map(monthlyExpenseLegendItems.map((item) => [item.key, item.color]))
@@ -1070,7 +1089,7 @@ export default function ReportsPage() {
   }
 
   const openMonthlyCashFlowBreakdown = (row: MonthlyCashFlowItemRow) => {
-    const rows: ReportDocumentBreakdownRow[] = cashFlow.details
+    const rows: ReportDocumentBreakdownRow[] = expenseCashFlow.details
       .filter((detail) => getMonthKey(detail.period) === row.monthKey)
       .filter((detail) => (detail.cash_flow_item_id || detail.cash_flow_item_name || "unknown") === row.itemKey)
       .map((detail, index) => {
@@ -1877,20 +1896,53 @@ export default function ReportsPage() {
                   итог расхода и статьи внутри группы.
                 </CardDescription>
               </div>
-              <ExportReportButtons
-                data={monthlyCashFlowExportRows}
-                columns={[
-                  { key: "month", header: "Месяц" },
-                  { key: "cashFlowItem", header: "Статья" },
-                  { key: "income", header: "Приход", formatter: exportFormatters.currency },
-                  { key: "expense", header: "Расход", formatter: exportFormatters.currency },
-                  { key: "net", header: "Итог", formatter: exportFormatters.currency },
-                ]}
-                filename="monthly-cash-flow-by-items"
-                title="Помесячный отчет по статьям"
-                chartRef={categoryChartRef}
-              />
+              <div className="flex flex-col items-stretch gap-3 sm:items-end">
+                <div
+                  className="inline-flex rounded-[14px] border border-border/70 bg-muted/50 p-1"
+                  role="group"
+                  aria-label="Период расчета расходов внутри месяца"
+                >
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={expenseMonthToDate ? "ghost" : "default"}
+                    className="rounded-[10px]"
+                    onClick={() => handleExpenseMonthToDateChange(false)}
+                  >
+                    Полный месяц
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={expenseMonthToDate ? "default" : "ghost"}
+                    className="rounded-[10px]"
+                    onClick={() => handleExpenseMonthToDateChange(true)}
+                  >
+                    По {currentMonthDay}-е число
+                  </Button>
+                </div>
+                <ExportReportButtons
+                  data={monthlyCashFlowExportRows}
+                  columns={[
+                    { key: "month", header: "Месяц" },
+                    { key: "cashFlowItem", header: "Статья" },
+                    { key: "income", header: "Приход", formatter: exportFormatters.currency },
+                    { key: "expense", header: "Расход", formatter: exportFormatters.currency },
+                    { key: "net", header: "Итог", formatter: exportFormatters.currency },
+                  ]}
+                  filename="monthly-cash-flow-by-items"
+                  title="Помесячный отчет по статьям"
+                  chartRef={categoryChartRef}
+                />
+              </div>
             </CardHeader>
+            {expenseMonthToDate ? (
+              <CardContent className="pt-0">
+                <div className="rounded-[14px] border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
+                  Для каждого месяца учитываются операции только с 1-го по {currentMonthDay}-е число.
+                </div>
+              </CardContent>
+            ) : null}
           </Card>
 
           {monthlyCashFlowGroups.length === 0 ? (

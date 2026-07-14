@@ -10,6 +10,7 @@ type BaseReportFilters = {
 type CashFlowReportFilters = BaseReportFilters & {
   wallet?: string
   cashFlowItem?: string
+  monthDayLimit?: number
 }
 
 type BudgetReportFilters = BaseReportFilters & {
@@ -203,6 +204,7 @@ export const ReportService = {
       ...buildCommonParams(filters),
       ...(filters?.wallet ? { wallet: filters.wallet } : {}),
       ...(filters?.cashFlowItem ? { cash_flow_item: filters.cashFlowItem } : {}),
+      ...(filters?.monthDayLimit ? { month_day_limit: filters.monthDayLimit } : {}),
     }
 
     const { data } = await api.get<any>("/reports/cash-flow/", { params })

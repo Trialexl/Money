@@ -2717,6 +2717,43 @@ class ReportEndpointsTests(TestCase):
             },
         )
 
+    def test_cash_flow_report_can_limit_every_month_to_same_day(self):
+        Expenditure.objects.create(
+            amount=Decimal('75.00'),
+            date=self.make_dt(2024, 3, 20),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('125.00'),
+            date=self.make_dt(2024, 4, 10),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('200.00'),
+            date=self.make_dt(2024, 4, 11),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+        )
+
+        response = self.client.get(
+            '/api/v1/reports/cash-flow/',
+            {
+                'date_from': self.make_dt(2024, 3, 1).isoformat(),
+                'date_to': self.make_dt(2024, 4, 30).isoformat(),
+                'month_day_limit': 10,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['totals'], {'income': '1000.00', 'expense': '425.00'})
+        self.assertEqual(
+            [(row['period'].month, row['expense']) for row in response.data['months']],
+            [(3, '300.00'), (4, '125.00')],
+        )
+        self.assertTrue(all(row['period'].day <= 10 for row in response.data['details']))
+
     def test_cash_flow_report_opening_balance_uses_same_analytics_rules(self):
         hidden_wallet = Wallet.objects.create(name='Скрытый переводный')
         Receipt.objects.create(

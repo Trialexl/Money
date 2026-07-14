@@ -116,6 +116,9 @@ class ReportViewSet(viewsets.ViewSet):
             ]
 
         queryset = _apply_period_filters(base_queryset, date_from=date_from, date_to=date_to)
+        month_day_limit = validated.get('month_day_limit')
+        if month_day_limit is not None:
+            queryset = queryset.filter(period__day__lte=month_day_limit)
 
         month_rows = []
         monthly_queryset = queryset.annotate(period_month=TruncMonth('period')).values('period_month').annotate(
@@ -144,6 +147,14 @@ class ReportViewSet(viewsets.ViewSet):
             for row in queryset.order_by('period', 'id')
         ]
 
+        wallet_balance_period_queryset = _apply_period_filters(
+            wallet_balance_queryset,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        if month_day_limit is not None:
+            wallet_balance_period_queryset = wallet_balance_period_queryset.filter(period__day__lte=month_day_limit)
+
         wallet_balance_movement_rows = [
             {
                 'period': row['period_date'],
@@ -151,8 +162,7 @@ class ReportViewSet(viewsets.ViewSet):
                 'wallet_name': row['wallet__name'],
                 'amount': _money_str(row['amount']),
             }
-            for row in _apply_period_filters(wallet_balance_queryset, date_from=date_from, date_to=date_to)
-            .annotate(period_date=TruncDate('period'))
+            for row in wallet_balance_period_queryset.annotate(period_date=TruncDate('period'))
             .values('period_date', 'wallet_id', 'wallet__name')
             .annotate(amount=Sum('amount'))
             .order_by('period_date', 'wallet__name')

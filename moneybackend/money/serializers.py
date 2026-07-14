@@ -421,6 +421,7 @@ class CashFlowReportQuerySerializer(serializers.Serializer):
     wallet = serializers.UUIDField(required=False)
     cash_flow_item = serializers.UUIDField(required=False)
     limit_by_today = serializers.BooleanField(required=False, default=False)
+    month_day_limit = serializers.IntegerField(required=False, min_value=1, max_value=31)
 
 
 class BudgetReportQuerySerializer(serializers.Serializer):
