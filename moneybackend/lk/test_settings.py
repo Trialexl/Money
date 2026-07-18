@@ -4,7 +4,7 @@ os.environ.setdefault('DJANGO_ALLOW_INSECURE_SETTINGS', '1')
 
 from .settings import *  # noqa: F401,F403
 
-SECRET_KEY = 'ci-test-secret-key'
+SECRET_KEY = 'ci-test-secret-key-at-least-32-bytes'
 DEBUG = False
 
 PASSWORD_HASHERS = [

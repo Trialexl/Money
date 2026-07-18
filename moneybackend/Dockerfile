@@ -1,4 +1,4 @@
-FROM python:3.10-slim-trixie
+FROM python:3.14-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -9,8 +9,6 @@ RUN set -eux; \
         apt-get update && \
         apt-get install -y --no-install-recommends --fix-missing \
             postgresql-client \
-            build-essential \
-            libpq-dev \
             netcat-openbsd && \
         rm -rf /var/lib/apt/lists/* && \
         break; \
@@ -28,8 +26,8 @@ COPY requirements.txt .
 
 # Устанавливаем Python зависимости. Docker Hub/PyPI иногда отвечают медленно,
 # поэтому явно задаем retries/timeout для воспроизводимой сборки.
-RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt && \
-    pip install --no-cache-dir --retries 10 --timeout 120 gunicorn
+RUN python -m pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt && \
+    python -m pip check
 
 # Копируем код приложения
 COPY . .
