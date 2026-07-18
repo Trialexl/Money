@@ -667,6 +667,286 @@ class AiAssistantViewSet(viewsets.ViewSet):
             pending.is_active = False
             pending.save(update_fields=['is_active', 'updated_at'])
 
+    def _active_web_pending_confirmation(self, user):
+        return AiPendingConfirmation.objects.filter(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=user,
+            telegram_binding__isnull=True,
+            is_active=True,
+        ).order_by('-updated_at').first()
+
+    def _upsert_web_pending_confirmation(self, *, user, result, input_context=None):
+        if result.get('status') != 'needs_confirmation':
+            return None
+
+        missing_fields = result.get('missing_fields') or []
+        if not missing_fields or any(field in {'intent', 'binding'} for field in missing_fields):
+            return None
+
+        AiPendingConfirmation.objects.filter(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=user,
+            telegram_binding__isnull=True,
+            is_active=True,
+        ).update(is_active=False)
+
+        return AiPendingConfirmation.objects.create(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=user,
+            intent=result.get('intent') or 'unknown',
+            provider=result.get('provider', ''),
+            normalized_payload=self._serialize_result_parsed_payload(result['parsed']),
+            missing_fields=missing_fields,
+            options_payload=result.get('options') or {},
+            context_payload=input_context or {},
+            prompt_text=(result.get('reply_text', '') or '')[:255],
+        )
+
+    def _web_cancel_result(self, *, request, pending):
+        return {
+            'status': 'created',
+            'intent': 'cancel_confirmation',
+            'provider': 'web',
+            'confidence': 1.0,
+            'reply_text': 'Текущая незавершенная команда отменена.',
+            'parsed': {'source': 'web'},
+            'created_object': {
+                'model': 'AiPendingConfirmation',
+                'id': str(pending.id) if pending else str(request.user.pk),
+                'number': 'CANCEL',
+            },
+        }
+
+    def _execute_web_conversation(self, *, request, validated, image, image_bytes):
+        service = self.get_operation_service()
+        text = validated.get('text') or ''
+        wallet_id = validated.get('wallet')
+        requested_dry_run = validated.get('dry_run', False)
+        image_mime_type = getattr(image, 'content_type', None) if image else None
+        pending = self._active_web_pending_confirmation(request.user)
+
+        if text and service.detect_meta_intent(text):
+            result = service.process(
+                text=text,
+                dry_run=True,
+                source='web',
+                user=request.user,
+                conversational=True,
+            )
+            self._create_audit_log(
+                source='web',
+                result=result,
+                input_text=text,
+                user=request.user,
+            )
+            return Response(self._build_response_payload(result), status=status.HTTP_200_OK)
+
+        if text.strip().lower() == '/cancel':
+            self._close_pending_confirmation(pending)
+            result = self._web_cancel_result(request=request, pending=pending)
+            self._create_audit_log(
+                source='web',
+                result=result,
+                input_text=text,
+                user=request.user,
+                pending_confirmation=pending,
+            )
+            return Response(self._build_response_payload(result), status=status.HTTP_200_OK)
+
+        is_new_command = bool(image_bytes) or self._looks_like_new_command(text)
+        if pending and not is_new_command:
+            confirmed_fields = list(pending.missing_fields)
+            result = service.continue_confirmation(
+                normalized_payload=pending.normalized_payload,
+                missing_fields=pending.missing_fields,
+                answer_text=text,
+                provider_name=pending.provider or 'web-confirmation',
+                dry_run=True,
+                options_payload=pending.options_payload,
+                confirmation_history=pending.confirmation_history,
+                pending_context=pending.context_payload,
+                source='web',
+                conversational=True,
+            )
+            pending.confirmation_history = list(pending.confirmation_history) + [{'answer_text': text}]
+            if result.get('status') == 'needs_confirmation':
+                pending.normalized_payload = self._serialize_result_parsed_payload(result['parsed'])
+                pending.missing_fields = result.get('missing_fields') or []
+                pending.options_payload = result.get('options') or {}
+                pending.prompt_text = (result.get('reply_text', '') or '')[:255]
+                pending.save(update_fields=[
+                    'normalized_payload',
+                    'missing_fields',
+                    'options_payload',
+                    'prompt_text',
+                    'confirmation_history',
+                    'updated_at',
+                ])
+                self._create_audit_log(
+                    source='web',
+                    result=result,
+                    input_text=text,
+                    user=request.user,
+                    pending_confirmation=pending,
+                    confirmed_fields=confirmed_fields,
+                )
+                return Response(self._build_response_payload(result), status=status.HTTP_200_OK)
+
+            semantic_duplicate = self._recent_semantic_duplicate(
+                source='web',
+                semantic_fingerprint=self._semantic_fingerprint_from_result(result),
+                user=request.user,
+            )
+            if semantic_duplicate:
+                duplicate_result = self._load_duplicate_result(semantic_duplicate)
+                self._close_pending_confirmation(pending)
+                self._create_audit_log(
+                    source='web',
+                    result=duplicate_result,
+                    input_text=text,
+                    user=request.user,
+                    processed_input=semantic_duplicate,
+                    pending_confirmation=pending,
+                    confirmed_fields=confirmed_fields,
+                )
+                return Response(self._build_response_payload(duplicate_result), status=status.HTTP_200_OK)
+
+            result = service.create_from_normalized(
+                normalized=result['parsed'],
+                provider_name=result['provider'],
+                source='web',
+                conversational=True,
+            )
+            self._close_pending_confirmation(pending)
+            fingerprint, normalized_text, image_sha256 = self._build_input_fingerprint(
+                source='web',
+                actor_key=f'user:{request.user.pk}',
+                text=text,
+                image_bytes=None,
+                wallet_id=wallet_id,
+            )
+            self._store_processed_input(
+                source='web',
+                fingerprint=fingerprint,
+                normalized_text=normalized_text,
+                image_sha256=image_sha256,
+                wallet_id_hint=wallet_id,
+                result=result,
+                user=request.user,
+            )
+            created_input = AiProcessedInput.objects.filter(
+                source='web',
+                fingerprint=fingerprint,
+                user=request.user,
+            ).order_by('-created_at').first()
+            self._create_audit_log(
+                source='web',
+                result=result,
+                input_text=text,
+                user=request.user,
+                processed_input=created_input,
+                pending_confirmation=pending,
+                confirmed_fields=confirmed_fields,
+            )
+            return Response(self._build_response_payload(result), status=status.HTTP_201_CREATED)
+
+        if pending and is_new_command:
+            self._close_pending_confirmation(pending)
+
+        fingerprint, normalized_text, image_sha256 = self._build_input_fingerprint(
+            source='web',
+            actor_key=f'user:{request.user.pk}',
+            text=text,
+            image_bytes=image_bytes,
+            wallet_id=wallet_id,
+        )
+        duplicate = self._recent_duplicate(
+            source='web',
+            fingerprint=fingerprint,
+            user=request.user,
+        )
+        if duplicate:
+            duplicate_result = self._load_duplicate_result(duplicate)
+            self._create_audit_log(
+                source='web',
+                result=duplicate_result,
+                input_text=text,
+                image_sha256=image_sha256,
+                user=request.user,
+                processed_input=duplicate,
+            )
+            return Response(self._build_response_payload(duplicate_result), status=status.HTTP_200_OK)
+
+        result = service.process(
+            text=text,
+            image_bytes=image_bytes,
+            image_mime_type=image_mime_type,
+            wallet_id=wallet_id,
+            dry_run=True,
+            source='web',
+            user=request.user,
+            conversational=True,
+        )
+        if result.get('status') == 'preview' and not requested_dry_run:
+            semantic_duplicate = self._recent_semantic_duplicate(
+                source='web',
+                semantic_fingerprint=self._semantic_fingerprint_from_result(result),
+                user=request.user,
+            )
+            if semantic_duplicate:
+                duplicate_result = self._load_duplicate_result(semantic_duplicate)
+                self._create_audit_log(
+                    source='web',
+                    result=duplicate_result,
+                    input_text=text,
+                    image_sha256=image_sha256,
+                    user=request.user,
+                    processed_input=semantic_duplicate,
+                )
+                return Response(self._build_response_payload(duplicate_result), status=status.HTTP_200_OK)
+            result = service.create_from_normalized(
+                normalized=result['parsed'],
+                provider_name=result['provider'],
+                source='web',
+                conversational=True,
+            )
+
+        pending = self._upsert_web_pending_confirmation(
+            user=request.user,
+            result=result,
+            input_context=self._build_pending_context(
+                result=result,
+                input_text=text,
+                image_bytes=image_bytes,
+                image_mime_type=image_mime_type,
+            ),
+        )
+        self._store_processed_input(
+            source='web',
+            fingerprint=fingerprint,
+            normalized_text=normalized_text,
+            image_sha256=image_sha256,
+            wallet_id_hint=wallet_id,
+            result=result,
+            user=request.user,
+        )
+        created_input = AiProcessedInput.objects.filter(
+            source='web',
+            fingerprint=fingerprint,
+            user=request.user,
+        ).order_by('-created_at').first()
+        self._create_audit_log(
+            source='web',
+            result=result,
+            input_text=text,
+            image_sha256=image_sha256,
+            user=request.user,
+            processed_input=created_input if result.get('status') == 'created' else None,
+            pending_confirmation=pending,
+        )
+        http_status = status.HTTP_201_CREATED if result['status'] == 'created' else status.HTTP_200_OK
+        return Response(self._build_response_payload(result), status=http_status)
+
     @extend_schema(
         request=AiAssistantExecuteSerializer,
         responses={200: AiAssistantResponseSerializer, 201: AiAssistantResponseSerializer},
@@ -683,6 +963,14 @@ class AiAssistantViewSet(viewsets.ViewSet):
 
         image = payload.validated_data.get('image')
         image_bytes = image.read() if image else None
+        if payload.validated_data.get('conversation'):
+            return self._execute_web_conversation(
+                request=request,
+                validated=payload.validated_data,
+                image=image,
+                image_bytes=image_bytes,
+            )
+
         wallet_id = payload.validated_data.get('wallet')
         fingerprint, normalized_text, image_sha256 = self._build_input_fingerprint(
             source='web',

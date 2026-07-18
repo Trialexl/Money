@@ -3134,7 +3134,18 @@ class AiOperationService:
             context=retry_context,
         )
 
-    def process(self, *, text=None, image_bytes=None, image_mime_type=None, wallet_id=None, dry_run=False, source='web', user=None):
+    def process(
+        self,
+        *,
+        text=None,
+        image_bytes=None,
+        image_mime_type=None,
+        wallet_id=None,
+        dry_run=False,
+        source='web',
+        user=None,
+        conversational=False,
+    ):
         context = self.build_context(user=user)
         parsed = None
         provider_name = 'rule_based'
@@ -3198,9 +3209,9 @@ class AiOperationService:
                 normalized_batch,
                 provider_name=provider_name,
                 dry_run=dry_run,
-                include_wallet_balances=source == 'telegram',
+                include_wallet_balances=(source == 'telegram' or conversational),
             )
-            if source == 'telegram' and bool(image_bytes) and dry_run and result.get('status') == 'preview':
+            if (source == 'telegram' or conversational) and bool(image_bytes) and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
                     parsed=result['parsed'],
                     provider_name=provider_name,
@@ -3222,7 +3233,7 @@ class AiOperationService:
                 provider_name=provider_name,
                 dry_run=dry_run,
             )
-            if source == 'telegram' and dry_run and result.get('status') == 'preview':
+            if (source == 'telegram' or conversational) and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
                     parsed=result['parsed'],
                     provider_name=provider_name,
@@ -3353,9 +3364,9 @@ class AiOperationService:
             normalized,
             provider_name=provider_name,
             dry_run=dry_run,
-            include_wallet_balances=source == 'telegram',
+            include_wallet_balances=(source == 'telegram' or conversational),
         )
-        if source == 'telegram' and bool(image_bytes) and dry_run and result.get('status') == 'preview':
+        if (source == 'telegram' or conversational) and bool(image_bytes) and dry_run and result.get('status') == 'preview':
             return self._final_confirmation_result(
                 parsed=result['parsed'],
                 provider_name=provider_name,
@@ -3364,13 +3375,13 @@ class AiOperationService:
             )
         return result
 
-    def create_from_normalized(self, *, normalized, provider_name, source='web'):
+    def create_from_normalized(self, *, normalized, provider_name, source='web', conversational=False):
         if self._is_batch_normalized(normalized):
             return self._create_multiple_financial_documents(
                 normalized,
                 provider_name=provider_name,
                 dry_run=False,
-                include_wallet_balances=source == 'telegram',
+                include_wallet_balances=(source == 'telegram' or conversational),
             )
         if self._is_investment_operation_intent(normalized.get('intent')):
             return self._create_investment_operation(normalized, provider_name=provider_name, dry_run=False)
@@ -3378,7 +3389,7 @@ class AiOperationService:
             normalized,
             provider_name=provider_name,
             dry_run=False,
-            include_wallet_balances=source == 'telegram',
+            include_wallet_balances=(source == 'telegram' or conversational),
         )
 
     def continue_confirmation(
@@ -3393,6 +3404,7 @@ class AiOperationService:
         confirmation_history=None,
         pending_context=None,
         source='web',
+        conversational=False,
     ):
         if missing_fields == [FINAL_CONFIRMATION_FIELD]:
             if self._is_batch_normalized(normalized_payload):
@@ -3410,9 +3422,9 @@ class AiOperationService:
                             revised['normalized'],
                             provider_name=revised['provider_name'],
                             dry_run=dry_run,
-                            include_wallet_balances=source == 'telegram',
+                            include_wallet_balances=(source == 'telegram' or conversational),
                         )
-                        if source == 'telegram' and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
+                        if (source == 'telegram' or conversational) and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
                             return self._final_confirmation_result(
                                 parsed=result['parsed'],
                                 provider_name=revised['provider_name'],
@@ -3533,9 +3545,9 @@ class AiOperationService:
                     revised['normalized'],
                     provider_name=revised['provider_name'],
                     dry_run=dry_run,
-                    include_wallet_balances=source == 'telegram',
+                    include_wallet_balances=(source == 'telegram' or conversational),
                 )
-                if source == 'telegram' and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
+                if (source == 'telegram' or conversational) and revised['normalized'].get('image_based') and dry_run and result.get('status') == 'preview':
                     return self._final_confirmation_result(
                         parsed=result['parsed'],
                         provider_name=revised['provider_name'],
@@ -3583,9 +3595,9 @@ class AiOperationService:
                 normalized,
                 provider_name=provider_name,
                 dry_run=dry_run,
-                include_wallet_balances=source == 'telegram',
+                include_wallet_balances=(source == 'telegram' or conversational),
             )
-            if source == 'telegram' and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
+            if (source == 'telegram' or conversational) and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
                     parsed=result['parsed'],
                     provider_name=provider_name,
@@ -3603,7 +3615,7 @@ class AiOperationService:
                 options_payload=options_payload,
             )
             result = self._create_investment_operation(normalized, provider_name=provider_name, dry_run=dry_run)
-            if source == 'telegram' and dry_run and result.get('status') == 'preview':
+            if (source == 'telegram' or conversational) and dry_run and result.get('status') == 'preview':
                 return self._final_confirmation_result(
                     parsed=result['parsed'],
                     provider_name=provider_name,
@@ -3633,9 +3645,9 @@ class AiOperationService:
             normalized,
             provider_name=provider_name,
             dry_run=dry_run,
-            include_wallet_balances=source == 'telegram',
+            include_wallet_balances=(source == 'telegram' or conversational),
         )
-        if source == 'telegram' and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
+        if (source == 'telegram' or conversational) and normalized.get('image_based') and dry_run and result.get('status') == 'preview':
             return self._final_confirmation_result(
                 parsed=result['parsed'],
                 provider_name=provider_name,

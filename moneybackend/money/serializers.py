@@ -688,6 +688,7 @@ class AiAssistantExecuteSerializer(serializers.Serializer):
     image = serializers.FileField(required=False)
     wallet = serializers.UUIDField(required=False)
     dry_run = serializers.BooleanField(required=False, default=False)
+    conversation = serializers.BooleanField(required=False, default=False)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

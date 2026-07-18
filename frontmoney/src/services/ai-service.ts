@@ -21,6 +21,7 @@ export interface AiAssistantResponse {
   provider: string
   confidence: number
   reply_text: string
+  reply_parse_mode?: string
   missing_fields?: string[]
   created_object?: AiAssistantCreatedObject | null
   created_objects?: AiAssistantCreatedObject[]
@@ -42,6 +43,7 @@ function normalizeAiResponse(raw: any): AiAssistantResponse {
     provider: raw?.provider ?? "unknown",
     confidence: typeof raw?.confidence === "number" ? raw.confidence : Number(raw?.confidence ?? 0),
     reply_text: raw?.reply_text ?? "",
+    reply_parse_mode: raw?.reply_parse_mode ?? undefined,
     missing_fields: Array.isArray(raw?.missing_fields) ? raw.missing_fields : [],
     created_object: raw?.created_object
       ? {
@@ -64,8 +66,8 @@ function normalizeAiResponse(raw: any): AiAssistantResponse {
           .filter((item: AiAssistantCreatedObject | null): item is AiAssistantCreatedObject => Boolean(item))
       : [],
     preview: raw?.preview ?? null,
-    balances: Array.isArray(raw?.balances)
-      ? raw.balances.map((row: any) => ({
+    balances: Array.isArray(raw?.balances ?? raw?.wallet_balances)
+      ? (raw.balances ?? raw.wallet_balances).map((row: any) => ({
           wallet_id: row.wallet_id,
           wallet_name: row.wallet_name,
           balance: fromApiAmount(row.balance),
@@ -82,6 +84,7 @@ export const AiService = {
     wallet?: string
     dryRun?: boolean
     image?: File | null
+    conversation?: boolean
   }) => {
     const hasImage = Boolean(payload.image)
 
@@ -95,6 +98,9 @@ export const AiService = {
       }
       if (typeof payload.dryRun === "boolean") {
         formData.append("dry_run", String(payload.dryRun))
+      }
+      if (typeof payload.conversation === "boolean") {
+        formData.append("conversation", String(payload.conversation))
       }
       if (payload.image) {
         formData.append("image", payload.image)
@@ -112,6 +118,7 @@ export const AiService = {
       text: payload.text?.trim() || undefined,
       wallet: payload.wallet || undefined,
       dry_run: payload.dryRun ?? false,
+      conversation: payload.conversation ?? false,
     })
 
     return normalizeAiResponse(data)

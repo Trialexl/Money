@@ -3575,6 +3575,99 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('options', response.data)
         self.assertIn('preview', response.data)
 
+    def test_ai_execute_conversation_continues_pending_confirmation(self):
+        first_response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'приход сбербанк 10000',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.data['status'], 'needs_confirmation')
+        pending = AiPendingConfirmation.objects.get(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=self.admin_user,
+            is_active=True,
+        )
+        self.assertEqual(pending.missing_fields, ['cash_flow_item'])
+
+        second_response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'зарплата',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(second_response.status_code, 201)
+        self.assertEqual(second_response.data['status'], 'created')
+        receipt = Receipt.objects.get(id=second_response.data['created_object']['id'])
+        self.assertEqual(receipt.wallet, self.wallet_sber)
+        self.assertEqual(receipt.cash_flow_item, self.income_item)
+        self.assertIn('Остатки:', second_response.data['reply_text'])
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
+
+    def test_ai_execute_conversation_cancel_closes_pending_confirmation(self):
+        self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'приход сбербанк 10000',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': '/cancel',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['intent'], 'cancel_confirmation')
+        pending = AiPendingConfirmation.objects.get(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=self.admin_user,
+        )
+        self.assertFalse(pending.is_active)
+
+    def test_ai_execute_conversation_new_command_replaces_pending_confirmation(self):
+        self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'приход сбербанк 10000',
+                'conversation': True,
+            },
+            format='json',
+        )
+        pending = AiPendingConfirmation.objects.get(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=self.admin_user,
+            is_active=True,
+        )
+
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'остатки по кошелькам',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'balance')
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
+
     def test_ai_telegram_webhook_uses_same_pipeline(self):
         client = APIClient()
         response = client.post(
