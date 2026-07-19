@@ -15,6 +15,12 @@ export interface AiAssistantBalanceRow {
   balance: number
 }
 
+export interface AiAssistantEntityLink {
+  kind: "wallet" | "cash_flow_item"
+  id: string
+  label: string
+}
+
 export interface AiAssistantResponse {
   status: AiAssistantStatus
   intent: string
@@ -29,6 +35,7 @@ export interface AiAssistantResponse {
   balances?: AiAssistantBalanceRow[]
   options?: Record<string, unknown> | unknown[] | null
   parsed?: Record<string, unknown> | null
+  entity_links?: AiAssistantEntityLink[]
 }
 
 export interface TelegramLinkTokenResponse {
@@ -75,6 +82,22 @@ function normalizeAiResponse(raw: any): AiAssistantResponse {
       : [],
     options: raw?.options ?? null,
     parsed: raw?.parsed ?? null,
+    entity_links: Array.isArray(raw?.entity_links)
+      ? raw.entity_links
+          .map((item: any) =>
+            item &&
+            (item.kind === "wallet" || item.kind === "cash_flow_item") &&
+            typeof item.id === "string" &&
+            typeof item.label === "string"
+              ? {
+                  kind: item.kind,
+                  id: item.id,
+                  label: item.label,
+                }
+              : null
+          )
+          .filter((item: AiAssistantEntityLink | null): item is AiAssistantEntityLink => Boolean(item))
+      : [],
   }
 }
 

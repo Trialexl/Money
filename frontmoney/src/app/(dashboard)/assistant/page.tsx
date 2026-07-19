@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { Bot, FileImage, Loader2, SendHorizontal, X } from "lucide-react"
 
+import { AssistantReply } from "@/components/shared/assistant-reply"
 import { DocumentEditDialog, type EditableDocumentKind } from "@/components/shared/document-edit-dialog"
 import { PageHeader } from "@/components/shared/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -93,55 +94,6 @@ function extractOptionChoices(input: AiAssistantResponse["options"]): OptionChoi
 
   return choices.filter(
     (choice, index) => choices.findIndex((candidate) => candidate.label === choice.label) === index
-  )
-}
-
-function decodeHtmlEntities(value: string) {
-  const named: Record<string, string> = {
-    amp: "&",
-    lt: "<",
-    gt: ">",
-    quot: '"',
-    apos: "'",
-    nbsp: " ",
-  }
-  return value.replace(/&(?:#(\d+)|#x([\da-f]+)|(\w+));/gi, (match, decimal, hex, name) => {
-    if (decimal) return String.fromCodePoint(Number(decimal))
-    if (hex) return String.fromCodePoint(Number.parseInt(hex, 16))
-    return named[String(name).toLowerCase()] ?? match
-  })
-}
-
-function plainTelegramHtml(value: string) {
-  return decodeHtmlEntities(
-    value
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/?(?:b|strong|i|em|u|s|code)(?:\s[^>]*)?>/gi, "")
-      .replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi, "$2 ($1)")
-  )
-}
-
-function AssistantReply({ response }: { response: AiAssistantResponse }) {
-  if (response.reply_parse_mode !== "HTML") {
-    return <div className="whitespace-pre-wrap break-words">{response.reply_text}</div>
-  }
-
-  const parts = response.reply_text.split(/(<pre>[\s\S]*?<\/pre>)/gi)
-  return (
-    <div className="space-y-3">
-      {parts.map((part, index) => {
-        const preMatch = part.match(/^<pre>([\s\S]*?)<\/pre>$/i)
-        if (preMatch) {
-          return (
-            <pre key={index} className="max-w-full overflow-x-auto rounded-md bg-muted/70 p-3 text-xs leading-5">
-              {decodeHtmlEntities(preMatch[1])}
-            </pre>
-          )
-        }
-        const text = plainTelegramHtml(part).trim()
-        return text ? <div key={index} className="whitespace-pre-wrap break-words">{text}</div> : null
-      })}
-    </div>
   )
 }
 

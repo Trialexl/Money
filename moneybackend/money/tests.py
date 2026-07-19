@@ -3609,8 +3609,40 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(receipt.wallet, self.wallet_sber)
         self.assertEqual(receipt.cash_flow_item, self.income_item)
         self.assertIn('Остатки:', second_response.data['reply_text'])
+        entity_links = {
+            (link['kind'], link['label']): link['id']
+            for link in second_response.data['entity_links']
+        }
+        self.assertEqual(
+            entity_links[('wallet', self.wallet_sber.name)],
+            str(self.wallet_sber.id),
+        )
         pending.refresh_from_db()
         self.assertFalse(pending.is_active)
+
+    def test_ai_web_response_links_mentioned_wallets_and_cash_flow_items(self):
+        from .views import AiAssistantViewSet
+
+        payload = AiAssistantViewSet()._build_response_payload(
+            {
+                'reply_text': 'Кошелек Сбербанк, статья Зарплата.',
+                'parsed': {},
+            },
+            user=self.admin_user,
+        )
+        entity_links = {
+            (link['kind'], link['label']): link['id']
+            for link in payload['entity_links']
+        }
+
+        self.assertEqual(
+            entity_links[('wallet', self.wallet_sber.name)],
+            str(self.wallet_sber.id),
+        )
+        self.assertEqual(
+            entity_links[('cash_flow_item', self.income_item.name)],
+            str(self.income_item.id),
+        )
 
     def test_ai_execute_conversation_cancel_closes_pending_confirmation(self):
         self.client.post(

@@ -1,6 +1,7 @@
 import base64
 from datetime import timedelta
 import hashlib
+from html import unescape
 import json
 import mimetypes
 import re
@@ -92,8 +93,48 @@ class AiAssistantViewSet(viewsets.ViewSet):
 
         return parsed
 
-    def _build_response_payload(self, result):
-        return self._serialize_ai_result_for_storage(result)
+    def _build_response_payload(self, result, *, user=None):
+        payload = self._serialize_ai_result_for_storage(result)
+        if user is not None:
+            payload['entity_links'] = self._build_entity_links(result, user=user)
+        return payload
+
+    def _build_entity_links(self, result, *, user):
+        reply_text = unescape(str(result.get('reply_text') or ''))
+        if not reply_text:
+            return []
+
+        links = []
+        wallet_queryset = Wallet.objects.filter(deleted=False).exclude(name__isnull=True).exclude(name='')
+        if not user.is_staff:
+            wallet_queryset = wallet_queryset.filter(hidden=False)
+
+        for wallet in wallet_queryset.only('id', 'name', 'hidden'):
+            if wallet.name in reply_text:
+                links.append({
+                    'kind': 'wallet',
+                    'id': str(wallet.id),
+                    'label': wallet.name,
+                })
+
+        for cash_flow_item in (
+            CashFlowItem.objects
+            .filter(deleted=False)
+            .exclude(name__isnull=True)
+            .exclude(name='')
+            .only('id', 'name')
+        ):
+            if cash_flow_item.name in reply_text:
+                links.append({
+                    'kind': 'cash_flow_item',
+                    'id': str(cash_flow_item.id),
+                    'label': cash_flow_item.name,
+                })
+
+        label_counts = {}
+        for link in links:
+            label_counts[link['label']] = label_counts.get(link['label'], 0) + 1
+        return [link for link in links if label_counts[link['label']] == 1]
 
     def _build_pending_context(self, *, result, input_text='', image_bytes=None, image_mime_type=None):
         parsed = result.get('parsed') or {}
@@ -739,7 +780,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 input_text=text,
                 user=request.user,
             )
-            return Response(self._build_response_payload(result), status=status.HTTP_200_OK)
+            return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_200_OK)
 
         if text.strip().lower() == '/cancel':
             self._close_pending_confirmation(pending)
@@ -751,7 +792,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 user=request.user,
                 pending_confirmation=pending,
             )
-            return Response(self._build_response_payload(result), status=status.HTTP_200_OK)
+            return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_200_OK)
 
         is_new_command = bool(image_bytes) or self._looks_like_new_command(text)
         if pending and not is_new_command:
@@ -790,7 +831,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                     pending_confirmation=pending,
                     confirmed_fields=confirmed_fields,
                 )
-                return Response(self._build_response_payload(result), status=status.HTTP_200_OK)
+                return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_200_OK)
 
             semantic_duplicate = self._recent_semantic_duplicate(
                 source='web',
@@ -809,7 +850,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                     pending_confirmation=pending,
                     confirmed_fields=confirmed_fields,
                 )
-                return Response(self._build_response_payload(duplicate_result), status=status.HTTP_200_OK)
+                return Response(self._build_response_payload(duplicate_result, user=request.user), status=status.HTTP_200_OK)
 
             result = service.create_from_normalized(
                 normalized=result['parsed'],
@@ -848,7 +889,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 pending_confirmation=pending,
                 confirmed_fields=confirmed_fields,
             )
-            return Response(self._build_response_payload(result), status=status.HTTP_201_CREATED)
+            return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_201_CREATED)
 
         if pending and is_new_command:
             self._close_pending_confirmation(pending)
@@ -875,7 +916,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 user=request.user,
                 processed_input=duplicate,
             )
-            return Response(self._build_response_payload(duplicate_result), status=status.HTTP_200_OK)
+            return Response(self._build_response_payload(duplicate_result, user=request.user), status=status.HTTP_200_OK)
 
         result = service.process(
             text=text,
@@ -903,7 +944,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                     user=request.user,
                     processed_input=semantic_duplicate,
                 )
-                return Response(self._build_response_payload(duplicate_result), status=status.HTTP_200_OK)
+                return Response(self._build_response_payload(duplicate_result, user=request.user), status=status.HTTP_200_OK)
             result = service.create_from_normalized(
                 normalized=result['parsed'],
                 provider_name=result['provider'],
@@ -945,7 +986,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             pending_confirmation=pending,
         )
         http_status = status.HTTP_201_CREATED if result['status'] == 'created' else status.HTTP_200_OK
-        return Response(self._build_response_payload(result), status=http_status)
+        return Response(self._build_response_payload(result, user=request.user), status=http_status)
 
     @extend_schema(
         request=AiAssistantExecuteSerializer,
@@ -985,7 +1026,10 @@ class AiAssistantViewSet(viewsets.ViewSet):
             user=request.user,
         )
         if duplicate:
-            return Response(self._build_response_payload(self._load_duplicate_result(duplicate)), status=status.HTTP_200_OK)
+            return Response(
+                self._build_response_payload(self._load_duplicate_result(duplicate), user=request.user),
+                status=status.HTTP_200_OK,
+            )
 
         requested_dry_run = payload.validated_data.get('dry_run', False)
         result = self.get_operation_service().process(
@@ -1013,7 +1057,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                     user=request.user,
                     processed_input=semantic_duplicate,
                 )
-                return Response(self._build_response_payload(duplicate_result), status=status.HTTP_200_OK)
+                return Response(self._build_response_payload(duplicate_result, user=request.user), status=status.HTTP_200_OK)
             result = self.get_operation_service().create_from_normalized(
                 normalized=result['parsed'],
                 provider_name=result['provider'],
@@ -1042,7 +1086,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             processed_input=created_input if result.get('status') == 'created' else None,
         )
         http_status = status.HTTP_201_CREATED if result['status'] == 'created' else status.HTTP_200_OK
-        return Response(self._build_response_payload(result), status=http_status)
+        return Response(self._build_response_payload(result, user=request.user), status=http_status)
 
     @extend_schema(
         responses={200: TelegramLinkTokenResponseSerializer},

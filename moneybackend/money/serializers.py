@@ -736,6 +736,12 @@ class AiAssistantMissingFieldByItemSerializer(serializers.Serializer):
     missing_fields = serializers.ListField(child=serializers.CharField())
 
 
+class AiAssistantEntityLinkSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(choices=['wallet', 'cash_flow_item'])
+    id = serializers.UUIDField()
+    label = serializers.CharField()
+
+
 class TelegramLinkTokenResponseSerializer(serializers.Serializer):
     code = serializers.CharField()
     expires_at = serializers.DateTimeField()
@@ -757,3 +763,4 @@ class AiAssistantResponseSerializer(serializers.Serializer):
     expense_summary = serializers.DictField(required=False)
     options = serializers.DictField(required=False)
     parsed = serializers.DictField(required=False)
+    entity_links = AiAssistantEntityLinkSerializer(many=True, required=False)
