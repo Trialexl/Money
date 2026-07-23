@@ -63,7 +63,7 @@ OPENAPI_TMP_DIR="$(mktemp -d)"
 (cd "$BACKEND_DIR" && "$PYTHON_BIN" manage.py spectacular --file "$OPENAPI_TMP_DIR/openapi.yaml" --validate)
 
 step "Backend tests"
-(cd "$BACKEND_DIR" && "$PYTHON_BIN" manage.py test users money investments ops --noinput)
+(cd "$BACKEND_DIR" && "$PYTHON_BIN" manage.py test --noinput)
 
 step "Frontend typecheck"
 (cd "$FRONTEND_DIR" && npm exec tsc -- --noEmit)

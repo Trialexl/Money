@@ -688,6 +688,7 @@ class AiAssistantExecuteSerializer(serializers.Serializer):
     image = serializers.FileField(required=False)
     wallet = serializers.UUIDField(required=False)
     dry_run = serializers.BooleanField(required=False, default=False)
+    conversation = serializers.BooleanField(required=False, default=False)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -735,6 +736,12 @@ class AiAssistantMissingFieldByItemSerializer(serializers.Serializer):
     missing_fields = serializers.ListField(child=serializers.CharField())
 
 
+class AiAssistantEntityLinkSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(choices=['wallet', 'cash_flow_item'])
+    id = serializers.UUIDField()
+    label = serializers.CharField()
+
+
 class TelegramLinkTokenResponseSerializer(serializers.Serializer):
     code = serializers.CharField()
     expires_at = serializers.DateTimeField()
@@ -756,3 +763,4 @@ class AiAssistantResponseSerializer(serializers.Serializer):
     expense_summary = serializers.DictField(required=False)
     options = serializers.DictField(required=False)
     parsed = serializers.DictField(required=False)
+    entity_links = AiAssistantEntityLinkSerializer(many=True, required=False)

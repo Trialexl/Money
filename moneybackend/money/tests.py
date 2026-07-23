@@ -123,8 +123,11 @@ class AdminBackupViewTests(TestCase):
 
         response = self.client.get(f'/admin/db-backups/{backup_path.name}/download/')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Disposition'], f'attachment; filename="{backup_path.name}"')
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response['Content-Disposition'], f'attachment; filename="{backup_path.name}"')
+        finally:
+            response.close()
 
     def test_admin_backup_create_writes_real_gzip_archive(self):
         from lk.admin_backup import create_database_backup
@@ -3574,6 +3577,131 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('cash_flow_item', response.data['missing_fields'])
         self.assertIn('options', response.data)
         self.assertIn('preview', response.data)
+
+    def test_ai_execute_conversation_continues_pending_confirmation(self):
+        first_response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'приход сбербанк 10000',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.data['status'], 'needs_confirmation')
+        pending = AiPendingConfirmation.objects.get(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=self.admin_user,
+            is_active=True,
+        )
+        self.assertEqual(pending.missing_fields, ['cash_flow_item'])
+
+        second_response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'зарплата',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(second_response.status_code, 201)
+        self.assertEqual(second_response.data['status'], 'created')
+        receipt = Receipt.objects.get(id=second_response.data['created_object']['id'])
+        self.assertEqual(receipt.wallet, self.wallet_sber)
+        self.assertEqual(receipt.cash_flow_item, self.income_item)
+        self.assertIn('Остатки:', second_response.data['reply_text'])
+        entity_links = {
+            (link['kind'], link['label']): link['id']
+            for link in second_response.data['entity_links']
+        }
+        self.assertEqual(
+            entity_links[('wallet', self.wallet_sber.name)],
+            str(self.wallet_sber.id),
+        )
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
+
+    def test_ai_web_response_links_mentioned_wallets_and_cash_flow_items(self):
+        from .views import AiAssistantViewSet
+
+        payload = AiAssistantViewSet()._build_response_payload(
+            {
+                'reply_text': 'Кошелек Сбербанк, статья Зарплата.',
+                'parsed': {},
+            },
+            user=self.admin_user,
+        )
+        entity_links = {
+            (link['kind'], link['label']): link['id']
+            for link in payload['entity_links']
+        }
+
+        self.assertEqual(
+            entity_links[('wallet', self.wallet_sber.name)],
+            str(self.wallet_sber.id),
+        )
+        self.assertEqual(
+            entity_links[('cash_flow_item', self.income_item.name)],
+            str(self.income_item.id),
+        )
+
+    def test_ai_execute_conversation_cancel_closes_pending_confirmation(self):
+        self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'приход сбербанк 10000',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': '/cancel',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['intent'], 'cancel_confirmation')
+        pending = AiPendingConfirmation.objects.get(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=self.admin_user,
+        )
+        self.assertFalse(pending.is_active)
+
+    def test_ai_execute_conversation_new_command_replaces_pending_confirmation(self):
+        self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'приход сбербанк 10000',
+                'conversation': True,
+            },
+            format='json',
+        )
+        pending = AiPendingConfirmation.objects.get(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=self.admin_user,
+            is_active=True,
+        )
+
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'остатки по кошелькам',
+                'conversation': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'balance')
+        pending.refresh_from_db()
+        self.assertFalse(pending.is_active)
 
     def test_ai_telegram_webhook_uses_same_pipeline(self):
         client = APIClient()

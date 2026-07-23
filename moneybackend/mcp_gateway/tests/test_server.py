@@ -1,11 +1,11 @@
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TransactionTestCase
 from starlette.testclient import TestClient
 
 from mcp_gateway.combined import application as app
 from mcp_gateway.server import mcp
 
 
-class McpServerMetadataTests(SimpleTestCase):
+class McpServerMetadataTests(TransactionTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

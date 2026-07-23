@@ -58,7 +58,11 @@ def _json_safe(value):
 
 @contextmanager
 def _time_limit(seconds: int):
-    if seconds <= 0 or threading.current_thread() is not threading.main_thread():
+    if (
+        seconds <= 0
+        or threading.current_thread() is not threading.main_thread()
+        or not hasattr(signal, 'SIGALRM')
+    ):
         yield
         return
 
