@@ -74,6 +74,7 @@ sudo ./update-server.sh
 ## Документация
 
 - [Индекс документации](docs/README.md)
+- [Навыки агентов и настройка секретов](docs/agent-skills.md)
 - [Server runbook: установка, обновление, cron, backup](docs/operations/server-runbook.md)
 - [Investment module](docs/investment-module.md)
 - [PRD финансовых инструментов](docs/product/financial-instruments-prd.md)

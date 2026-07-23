@@ -11,7 +11,26 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { isAuthenticated } from "@/lib/auth"
+import { AuthService } from "@/services/auth-service"
 import { useAuthStore } from "@/store/auth-store"
+
+function getSafeReturnTo() {
+  if (typeof window === "undefined") {
+    return "/dashboard"
+  }
+
+  const value = new URLSearchParams(window.location.search).get("return_to")
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/dashboard"
+  }
+
+  const target = new URL(value, window.location.origin)
+  if (target.origin !== window.location.origin) {
+    return "/dashboard"
+  }
+
+  return `${target.pathname}${target.search}`
+}
 
 const loginAdvantages = [
   "Новый рабочий стол с понятной иерархией блоков",
@@ -28,8 +47,29 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    if (isAuthenticated()) {
-      router.replace("/dashboard")
+    if (!isAuthenticated()) {
+      return
+    }
+
+    const returnTo = getSafeReturnTo()
+    if (returnTo === "/dashboard") {
+      router.replace(returnTo)
+      return
+    }
+
+    let cancelled = false
+    void AuthService.getProfile()
+      .then(() => {
+        if (!cancelled) {
+          window.location.replace(returnTo)
+        }
+      })
+      .catch(() => {
+        // The API interceptor clears a stale session marker; keep the login form visible.
+      })
+
+    return () => {
+      cancelled = true
     }
   }, [router])
 
@@ -40,7 +80,12 @@ export default function LoginPage() {
 
     try {
       await login(username, password)
-      router.push("/dashboard")
+      const returnTo = getSafeReturnTo()
+      if (returnTo === "/dashboard") {
+        router.push(returnTo)
+      } else {
+        window.location.assign(returnTo)
+      }
     } catch (err: any) {
       if (!err?.response) {
         setError("Не удалось подключиться к API. Проверь backend, CORS и адрес NEXT_PUBLIC_API_URL.")

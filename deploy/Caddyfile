@@ -1,6 +1,15 @@
 {$APP_DOMAIN:localhost} {
     encode gzip zstd
 
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "same-origin"
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), clipboard-read=()"
+    }
+
     @blocked_paths {
         path /server-status /v2/* /graphql /graphql/* /api/gql /api/graphql /api-docs* /api/swagger.json /webjars/* /telescope/* /trace.axd /exec* /php-cgi* /wp-admin* /wp-login.php /xmlrpc.php
     }
@@ -13,6 +22,16 @@
     handle_path /static/* {
         root * /srv/django-static
         file_server
+    }
+
+    @mcp_paths path /mcp /mcp/* /authorize /token /register /revoke /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource/mcp
+
+    handle @mcp_paths {
+        reverse_proxy backend:8000 {
+            header_up Host {host}
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto {scheme}
+        }
     }
 
     handle /api* {

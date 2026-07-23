@@ -3,6 +3,7 @@
 .idea/
 .vscode/
 .repo-backups/
+/.tmp/
 backups/postgres/
 
 .env

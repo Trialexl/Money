@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+from urllib.parse import urlsplit
 from decouple import config
 from django.core.exceptions import ImproperlyConfigured
 
@@ -64,6 +65,28 @@ AUTH_COOKIE_SECURE = config('AUTH_COOKIE_SECURE', default=not DEBUG, cast=bool)
 AUTH_COOKIE_SAMESITE = config('AUTH_COOKIE_SAMESITE', default='Lax')
 AUTH_COOKIE_PATH = config('AUTH_COOKIE_PATH', default='/')
 
+APP_DOMAIN = config(
+    'APP_DOMAIN',
+    default=ALLOWED_HOSTS[0] if ALLOWED_HOSTS else 'localhost',
+)
+_MCP_LOOPBACK_HOSTS = {'localhost', '127.0.0.1', '::1'}
+_MCP_EXTERNAL_HOST = urlsplit(f'//{APP_DOMAIN}').hostname
+_MCP_EXTERNAL_SCHEME = 'http' if _MCP_EXTERNAL_HOST in _MCP_LOOPBACK_HOSTS else 'https'
+_MCP_DEFAULT_ISSUER_URL = f'{_MCP_EXTERNAL_SCHEME}://{APP_DOMAIN}'
+MCP_ISSUER_URL = config('MCP_ISSUER_URL', default=_MCP_DEFAULT_ISSUER_URL).rstrip('/')
+MCP_PUBLIC_URL = config('MCP_PUBLIC_URL', default=f'{MCP_ISSUER_URL}/mcp').rstrip('/')
+MCP_BACKEND_URL = config('MCP_BACKEND_URL', default='http://127.0.0.1:8000').rstrip('/')
+MCP_OAUTH_ALLOWED_REDIRECT_ORIGINS = config(
+    'MCP_OAUTH_ALLOWED_REDIRECT_ORIGINS',
+    default='',
+    cast=csv_list,
+)
+MCP_OAUTH_ACCESS_TOKEN_SECONDS = config('MCP_OAUTH_ACCESS_TOKEN_SECONDS', default=900, cast=int)
+MCP_OAUTH_REFRESH_TOKEN_SECONDS = config('MCP_OAUTH_REFRESH_TOKEN_SECONDS', default=2592000, cast=int)
+MCP_OAUTH_AUTH_CODE_SECONDS = config('MCP_OAUTH_AUTH_CODE_SECONDS', default=300, cast=int)
+MCP_OAUTH_REQUEST_SECONDS = config('MCP_OAUTH_REQUEST_SECONDS', default=600, cast=int)
+MCP_DELEGATED_JWT_SECONDS = config('MCP_DELEGATED_JWT_SECONDS', default=60, cast=int)
+
 BACKUP_DIR = config('BACKUP_DIR', default=str(BASE_DIR / 'backups/postgres'))
 BACKUP_LOG_DIR = config('BACKUP_LOG_DIR', default=str(BASE_DIR / 'backups/logs'))
 BACKUP_MIN_BYTES = config('BACKUP_MIN_BYTES', default=1024, cast=int)
@@ -94,6 +117,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'money',
     'investments.apps.InvestmentsConfig',
+    'mcp_gateway.apps.McpGatewayConfig',
     'ops.apps.OpsConfig',
 ]
 

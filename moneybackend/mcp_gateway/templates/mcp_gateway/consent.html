@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Подключение Codex к FrontMoney</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #07111f; color: #e5edf7; }
+    main { width: min(560px, calc(100% - 32px)); box-sizing: border-box; padding: 32px; border: 1px solid #26364a; border-radius: 24px; background: #101c2c; box-shadow: 0 24px 80px #0008; }
+    h1 { margin: 0 0 12px; font-size: 28px; }
+    p, li { line-height: 1.55; color: #bdcadd; }
+    code { word-break: break-all; color: #89e3d4; }
+    .identity { padding: 12px 16px; border-radius: 14px; background: #17263a; }
+    ul { padding-left: 22px; }
+    .actions { display: flex; gap: 12px; margin-top: 28px; }
+    button { border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; }
+    .approve { background: #2dd4bf; color: #05201c; }
+    .deny { background: #2a394d; color: #e5edf7; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Разрешить доступ к FrontMoney?</h1>
+    <p><strong>{{ client_name }}</strong> запрашивает доступ от имени пользователя <strong>{{ username }}</strong>.</p>
+    <div class="identity">MCP-ресурс: <code>{{ resource }}</code></div>
+    <p>Запрашиваемые права:</p>
+    <ul>
+      {% for scope in scopes %}<li>{{ scope }}</li>{% endfor %}
+    </ul>
+    <p>Codex будет хранить OAuth-учётные данные в своём защищённом хранилище. Сам skill их не получает.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="request" value="{{ request_id }}">
+      <div class="actions">
+        <button class="approve" type="submit" name="action" value="approve">Разрешить</button>
+        <button class="deny" type="submit" name="action" value="deny">Отклонить</button>
+      </div>
+    </form>
+  </main>
+</body>
+</html>

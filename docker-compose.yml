@@ -9,9 +9,9 @@ services:
     image: postgres:14
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${DB_MEMORY_LIMIT:-768m}
-    mem_reservation: ${DB_MEMORY_RESERVATION:-256m}
-    pids_limit: ${DB_PIDS_LIMIT:-256}
+    mem_limit: ${DB_MEMORY_LIMIT:-256m}
+    mem_reservation: ${DB_MEMORY_RESERVATION:-96m}
+    pids_limit: ${DB_PIDS_LIMIT:-128}
     environment:
       POSTGRES_DB: ${DB_NAME:-money}
       POSTGRES_USER: ${DB_USER:-money}
@@ -27,21 +27,30 @@ services:
   backend:
     image: trialexl/money-backend:latest
     restart: unless-stopped
+    command:
+      - uvicorn
+      - mcp_gateway.combined:application
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "${ASGI_WORKERS:-1}"
+      - --limit-concurrency
+      - "${ASGI_LIMIT_CONCURRENCY:-32}"
+      - --timeout-keep-alive
+      - "${ASGI_KEEP_ALIVE:-5}"
+      - --proxy-headers
+      - --forwarded-allow-ips=*
     logging: *default-logging
-    mem_limit: ${BACKEND_MEMORY_LIMIT:-768m}
-    mem_reservation: ${BACKEND_MEMORY_RESERVATION:-256m}
-    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-320m}
+    mem_reservation: ${BACKEND_MEMORY_RESERVATION:-128m}
+    pids_limit: ${BACKEND_PIDS_LIMIT:-128}
     env_file:
       - ./.env
     environment:
       DB_HOST: db
       DB_PORT: 5432
-      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
-      GUNICORN_THREADS: ${GUNICORN_THREADS:-2}
-      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-180}
-      GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-30}
-      GUNICORN_MAX_REQUESTS: ${GUNICORN_MAX_REQUESTS:-500}
-      GUNICORN_MAX_REQUESTS_JITTER: ${GUNICORN_MAX_REQUESTS_JITTER:-50}
       BACKUP_DIR: /app/backups/postgres
       BACKUP_LOG_DIR: /app/backups/logs
     depends_on:
@@ -64,11 +73,11 @@ services:
     image: trialexl/money-frontend:latest
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${FRONTEND_MEMORY_LIMIT:-512m}
-    mem_reservation: ${FRONTEND_MEMORY_RESERVATION:-128m}
-    pids_limit: ${FRONTEND_PIDS_LIMIT:-128}
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-224m}
+    mem_reservation: ${FRONTEND_MEMORY_RESERVATION:-64m}
+    pids_limit: ${FRONTEND_PIDS_LIMIT:-96}
     environment:
-      NODE_OPTIONS: ${FRONTEND_NODE_OPTIONS:---max-old-space-size=256}
+      NODE_OPTIONS: ${FRONTEND_NODE_OPTIONS:---max-old-space-size=128}
     depends_on:
       backend:
         condition: service_healthy
@@ -85,9 +94,9 @@ services:
     image: caddy:2.8-alpine
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${CADDY_MEMORY_LIMIT:-128m}
-    mem_reservation: ${CADDY_MEMORY_RESERVATION:-32m}
-    pids_limit: ${CADDY_PIDS_LIMIT:-128}
+    mem_limit: ${CADDY_MEMORY_LIMIT:-48m}
+    mem_reservation: ${CADDY_MEMORY_RESERVATION:-16m}
+    pids_limit: ${CADDY_PIDS_LIMIT:-64}
     depends_on:
       backend:
         condition: service_healthy

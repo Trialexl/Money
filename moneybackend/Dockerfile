@@ -28,8 +28,7 @@ COPY requirements.txt .
 
 # Устанавливаем Python зависимости. Docker Hub/PyPI иногда отвечают медленно,
 # поэтому явно задаем retries/timeout для воспроизводимой сборки.
-RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt && \
-    pip install --no-cache-dir --retries 10 --timeout 120 gunicorn
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
 # Копируем код приложения
 COPY . .
@@ -44,5 +43,5 @@ EXPOSE 8000
 # Устанавливаем entrypoint
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-# Команда по умолчанию для запуска
-CMD ["gunicorn", "lk.wsgi:application", "--config", "gunicorn.conf.py"]
+# Один ASGI-процесс обслуживает Django и OAuth MCP.
+CMD ["uvicorn", "mcp_gateway.combined:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]

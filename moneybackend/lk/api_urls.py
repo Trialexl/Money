@@ -10,6 +10,7 @@ urlpatterns = [
     # Аутентификация
     path('auth/token/', CookieTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', CookieTokenRefreshView.as_view(), name='token_refresh'),
+    path('mcp/oauth/', include('mcp_gateway.urls')),
     
     # Приложения
     path('', include('money.api_urls')),
