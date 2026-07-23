@@ -38,7 +38,7 @@ nano .env
 
 Минимально проверить в `.env`:
 
-- `APP_DOMAIN` - домен приложения, например `trialexl.freemyip.com`.
+- `APP_DOMAIN` - домен приложения, например `<app-domain>`.
 - `ALLOWED_HOSTS` - тот же домен.
 - `CSRF_TRUSTED_ORIGINS=https://<домен>`.
 - `CORS_ALLOWED_ORIGINS=https://<домен>`.
@@ -255,7 +255,7 @@ sudo crontab -l
 ```cron
 SHELL=/bin/bash
 APP_DIR=/opt/money
-API_BASE=https://trialexl.freemyip.com
+API_BASE=https://<app-domain>
 
 # Единая точка регламентных заданий backend.
 */5 * * * * cd "$APP_DIR" && /usr/bin/docker compose exec -T backend python manage.py run_scheduled_jobs >/tmp/money-scheduled-jobs.log 2>&1
@@ -489,9 +489,9 @@ docker system prune --volumes
 ```bash
 cd /opt/money
 sudo docker compose ps
-curl -fsS https://trialexl.freemyip.com/api/v1/health/
-curl -I https://trialexl.freemyip.com/
-curl -I https://trialexl.freemyip.com/api/schema/
+curl -fsS https://<app-domain>/api/v1/health/
+curl -I https://<app-domain>/
+curl -I https://<app-domain>/api/schema/
 tail -50 /tmp/money-health-cron.log
 tail -50 /tmp/money-scheduled-jobs.log
 sudo docker compose exec backend python manage.py run_scheduled_jobs --list

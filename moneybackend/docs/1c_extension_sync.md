@@ -22,7 +22,7 @@
 
 Для production-сервера с текущим deployment это означает:
 
-- `Адрес = trialexl.freemyip.com`
+- `Адрес = <app-domain>`
 - `Порт = 443`
 - `Токен = <DRF token>`
 
