@@ -1,6 +1,8 @@
+from unittest.mock import patch
+
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from mcp.server.auth.provider import (
     AuthorizationParams,
     AuthorizeError,
@@ -119,3 +121,30 @@ class OAuthProviderTests(TestCase):
         validate_redirect_uri('http://[::1]:54321/callback')
         with self.assertRaises(RegistrationError):
             validate_redirect_uri('https://attacker.example/callback')
+
+    def test_consent_csp_allows_registered_loopback_callback(self):
+        async_to_sync(self.provider.authorize)(
+            self.client,
+            AuthorizationParams(
+                state='state-123',
+                scopes=VALID_SCOPES,
+                code_challenge='challenge',
+                redirect_uri='http://127.0.0.1:49152/callback',
+                redirect_uri_provided_explicitly=True,
+                resource='https://money.example.test/mcp',
+            ),
+        )
+        pending = McpOAuthAuthorizationRequest.objects.get()
+
+        with patch('mcp_gateway.views._authenticated_user', return_value=self.user):
+            response = Client().get(
+                '/api/v1/mcp/oauth/consent/',
+                {'request': pending.pk},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "form-action 'self' http://127.0.0.1:49152",
+            response['Content-Security-Policy'],
+        )
+        self.assertNotIn('upgrade-insecure-requests', response['Content-Security-Policy'])

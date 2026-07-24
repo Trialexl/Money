@@ -57,6 +57,9 @@ run_docker compose pull
 echo "==> Starting services"
 run_docker compose up -d --remove-orphans
 
+echo "==> Applying Caddy configuration"
+run_docker compose up -d --no-deps --force-recreate caddy
+
 echo "==> Pruning dangling Docker images"
 run_docker image prune -f
 
