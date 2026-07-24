@@ -1,3 +1,6 @@
+from urllib.parse import urlparse
+
+from django.conf import settings
 from django.test import SimpleTestCase, TransactionTestCase
 from starlette.testclient import TestClient
 
@@ -9,7 +12,7 @@ class McpServerMetadataTests(TransactionTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.client_context = TestClient(app)
+        cls.client_context = TestClient(app, base_url='http://localhost')
         cls.mcp_client = cls.client_context.__enter__()
 
     @classmethod
@@ -36,6 +39,16 @@ class McpServerMetadataTests(TransactionTestCase):
 
 
 class McpDomainToolContractTests(SimpleTestCase):
+    def test_transport_security_allows_public_host_without_wildcard(self):
+        transport_security = mcp.settings.transport_security
+
+        self.assertTrue(transport_security.enable_dns_rebinding_protection)
+        self.assertIn(
+            urlparse(settings.MCP_ISSUER_URL).netloc,
+            transport_security.allowed_hosts,
+        )
+        self.assertNotIn('*', transport_security.allowed_hosts)
+
     def test_server_exposes_domain_tools_instead_of_http_proxy_tools(self):
         tools = {tool.name: tool for tool in mcp._tool_manager.list_tools()}
 

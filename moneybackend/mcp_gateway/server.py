@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lk.settings')
 
@@ -11,6 +12,7 @@ django.setup()
 from django.conf import settings
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -24,6 +26,8 @@ from .oauth_provider import (
 
 
 provider = FrontMoneyOAuthProvider()
+public_host = urlparse(settings.MCP_ISSUER_URL).netloc
+public_origin = settings.MCP_ISSUER_URL
 mcp = FastMCP(
     name='FrontMoney',
     instructions=(
@@ -45,6 +49,21 @@ mcp = FastMCP(
     streamable_http_path='/mcp',
     stateless_http=True,
     json_response=True,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            public_host,
+            'localhost:*',
+            '127.0.0.1:*',
+            '[::1]:*',
+        ],
+        allowed_origins=[
+            public_origin,
+            'http://localhost:*',
+            'http://127.0.0.1:*',
+            'http://[::1]:*',
+        ],
+    ),
 )
 
 
