@@ -9,6 +9,7 @@ backups/postgres/
 .env
 .env.local
 .env.*.local
+/.codex/config.toml
 frontmoney/.env
 moneybackend/.env
 

@@ -1,8 +1,8 @@
 mcp_oauth_credentials_store = "keyring"
 
 [mcp_servers.frontmoney]
-url = "https://trialexl.freemyip.com/mcp"
+url = "https://<app-domain>/mcp"
 auth = "oauth"
 scopes = ["frontmoney.read", "frontmoney.write"]
-oauth_resource = "https://trialexl.freemyip.com/mcp"
+oauth_resource = "https://<app-domain>/mcp"
 default_tools_approval_mode = "writes"

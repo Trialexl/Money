@@ -3,10 +3,5 @@ interface:
   short_description: "Бюджет и портфель через OAuth MCP"
   default_prompt: "Use $manage-frontmoney-finances to review my current budget and portfolio."
 
-dependencies:
-  tools:
-    - type: "mcp"
-      value: "frontmoney"
-      description: "FrontMoney OAuth MCP server"
-      transport: "streamable_http"
-      url: "https://trialexl.freemyip.com/mcp"
+policy:
+  allow_implicit_invocation: true

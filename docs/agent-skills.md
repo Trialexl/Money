@@ -9,7 +9,7 @@
 Состав:
 
 - `SKILL.md` — выбор предметных MCP tools, процесс и ограничения безопасных операций;
-- `agents/openai.yaml` — зависимость от MCP `frontmoney`.
+- `agents/openai.yaml` — отображение и запуск Skill в интерфейсе Codex.
 
 Явный вызов:
 
@@ -19,15 +19,36 @@ $manage-frontmoney-finances покажи расходы за текущий ме
 
 ## OAuth вместо секретов в skill
 
-Skill не читает API-токены, `.env` или секреты агента. Codex подключается к `https://trialexl.freemyip.com/mcp`, выполняет Authorization Code + PKCE и хранит OAuth-учетные данные в системном keyring.
+Skill не читает API-токены, `.env` или секреты агента. Codex подключается к
+`https://<app-domain>/mcp`, выполняет Authorization Code + PKCE и хранит
+OAuth-учетные данные в системном keyring.
 
-Проектная конфигурация находится в `.codex/config.toml`. После первого запуска выбрать **Authenticate** у MCP `frontmoney` или выполнить:
+Реальный production-домен не хранится в публичном репозитории. Шаблон
+проектной конфигурации находится в `.codex/config.toml.example`, а локальный
+`.codex/config.toml` исключён из Git.
+
+Для подключения:
+
+1. Создать `.codex/config.toml` по шаблону, не перезаписывая существующую
+   пользовательскую конфигурацию.
+2. Заменить оба вхождения `<app-domain>` реальным публичным доменом
+   FrontMoney без `https://` и без завершающего `/`.
+3. Перезапустить Codex.
+4. Выбрать **Authenticate** у MCP `frontmoney` или выполнить:
 
 ```powershell
 codex mcp login frontmoney
 ```
 
-В браузере нужно войти в FrontMoney и подтвердить scopes `frontmoney.read` и `frontmoney.write`. Агент получает предметные MCP-инструменты вроде `list_wallets`, `get_financial_report`, `get_portfolio_analysis` и `create_transaction`, но не OAuth-токены, REST-пути или HTTP-методы.
+В Codex Desktop тот же сервер можно добавить через **Settings → MCP servers →
+Add server**: выбрать **Streamable HTTP**, указать
+`https://<app-domain>/mcp`, сохранить, перезапустить Codex и выбрать
+**Authenticate**.
+
+В браузере нужно войти в FrontMoney и подтвердить scopes `frontmoney.read` и
+`frontmoney.write`. Агент получает предметные MCP-инструменты вроде
+`list_wallets`, `get_financial_report`, `get_portfolio_analysis` и
+`create_transaction`, но не OAuth-токены, REST-пути или HTTP-методы.
 
 ## Серверная конфигурация
 
