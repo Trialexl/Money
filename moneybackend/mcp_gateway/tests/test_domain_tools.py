@@ -8,6 +8,21 @@ from mcp_gateway.server import mcp
 
 class McpDomainToolRoutingTests(SimpleTestCase):
     @patch('mcp_gateway.domain_tools.proxy_api_request', new_callable=AsyncMock)
+    def test_all_wallet_balances_maps_as_of_date(self, proxy):
+        proxy.return_value = {'status': 200, 'data': {'balances': []}}
+        tool = mcp._tool_manager.get_tool('get_all_wallet_balances')
+
+        result = asyncio.run(tool.fn(as_of='2026-07-31'))
+
+        self.assertEqual(result, {'balances': []})
+        proxy.assert_awaited_once_with(
+            'GET',
+            '/api/v1/wallets/balances/',
+            query={'date': '2026-07-31'},
+            payload=None,
+        )
+
+    @patch('mcp_gateway.domain_tools.proxy_api_request', new_callable=AsyncMock)
     def test_expense_list_maps_domain_filters_internally(self, proxy):
         proxy.return_value = {'status': 200, 'data': {'results': []}}
         tool = mcp._tool_manager.get_tool('list_transactions')

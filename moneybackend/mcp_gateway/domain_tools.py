@@ -115,9 +115,13 @@ def register_domain_tools(mcp: FastMCP) -> None:
         return await _call('GET', f'{base}summary/')
 
     @mcp.tool(annotations=READ_ONLY)
-    async def get_all_wallet_balances() -> Any:
-        """Get non-zero wallet balances and their total in RUB."""
-        return await _call('GET', '/api/v1/wallets/balances/')
+    async def get_all_wallet_balances(as_of: str | None = None) -> Any:
+        """Get non-zero wallet balances in RUB as of an ISO date; defaults to now."""
+        return await _call(
+            'GET',
+            '/api/v1/wallets/balances/',
+            query=_without_none(date=as_of),
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_cash_flow_items(

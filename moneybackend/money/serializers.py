@@ -257,6 +257,7 @@ class WalletBalanceResponseSerializer(serializers.Serializer):
     wallet_name = serializers.CharField()
     balance = serializers.FloatField()
     currency = serializers.CharField()
+    as_of = serializers.DateTimeField(required=False)
     last_updated = serializers.DateTimeField(required=False)
 
 
@@ -264,6 +265,7 @@ class WalletBalancesResponseSerializer(serializers.Serializer):
     balances = WalletBalanceResponseSerializer(many=True)
     total_wallets = serializers.IntegerField()
     total_balance = serializers.FloatField()
+    as_of = serializers.DateTimeField(required=False)
 
 
 class WalletSummaryOperationSerializer(serializers.Serializer):

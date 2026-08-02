@@ -4,7 +4,8 @@ from decimal import Decimal
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -32,6 +33,12 @@ from .serializers import (
 
 
 TRANSFER_DOCUMENT_TYPE = 2
+WALLET_BALANCE_DATE_PARAMETER = OpenApiParameter(
+    'date',
+    OpenApiTypes.DATETIME,
+    OpenApiParameter.QUERY,
+    description='Остаток на конец дня YYYY-MM-DD или на указанный ISO datetime. По умолчанию текущий момент.',
+)
 
 
 def _money(value):
@@ -195,6 +202,7 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
         return items
 
     @extend_schema(
+        parameters=[WALLET_BALANCE_DATE_PARAMETER],
         responses={200: WalletBalanceResponseSerializer},
     )
     @action(detail=True, methods=['get'])
@@ -202,7 +210,6 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
         """Получить баланс кошелька на основе регистра движения средств."""
         wallet = self.get_object()
 
-        flows = FlowOfFunds.objects.filter(wallet=wallet)
         balance_date = request.query_params.get('date')
         if balance_date:
             as_of = _parse_wallet_balance_as_of(balance_date)
@@ -211,8 +218,10 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
                     {'date': 'Передай дату в формате YYYY-MM-DD или ISO datetime.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            flows = flows.filter(period__lte=as_of)
+        else:
+            as_of = timezone.now()
 
+        flows = FlowOfFunds.objects.filter(wallet=wallet, period__lte=as_of)
         balance = flows.aggregate(total=Sum('amount'))['total'] or 0
 
         return Response({
@@ -220,6 +229,7 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
             'wallet_name': wallet.name,
             'balance': float(balance),
             'currency': 'RUB',
+            'as_of': as_of,
             'last_updated': timezone.now(),
         })
 
@@ -251,17 +261,28 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
         })
 
     @extend_schema(
+        parameters=[WALLET_BALANCE_DATE_PARAMETER],
         responses={200: WalletBalancesResponseSerializer},
     )
     @action(detail=False, methods=['get'])
     def balances(self, request):
         """Получить балансы всех кошельков."""
         wallets = self.get_queryset()
+        balance_date = request.query_params.get('date')
+        if balance_date:
+            as_of = _parse_wallet_balance_as_of(balance_date)
+            if as_of is None:
+                return Response(
+                    {'date': 'Передай дату в формате YYYY-MM-DD или ISO datetime.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            as_of = timezone.now()
         balances = []
 
         for wallet in wallets:
             balance = (
-                FlowOfFunds.objects.filter(wallet=wallet).aggregate(total=Sum('amount'))['total']
+                FlowOfFunds.objects.filter(wallet=wallet, period__lte=as_of).aggregate(total=Sum('amount'))['total']
                 or ZERO_AMOUNT
             )
             balance = _money(balance)
@@ -273,6 +294,7 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
                 'wallet_name': wallet.name,
                 'balance': float(balance),
                 'currency': 'RUB',
+                'as_of': as_of,
             })
 
         balances.sort(key=lambda x: x['balance'], reverse=True)
@@ -281,6 +303,7 @@ class WalletViewSet(OneCSyncSoftDeleteCompatibilityMixin, viewsets.ModelViewSet)
             'balances': balances,
             'total_wallets': len(balances),
             'total_balance': sum(b['balance'] for b in balances),
+            'as_of': as_of,
         })
 
 

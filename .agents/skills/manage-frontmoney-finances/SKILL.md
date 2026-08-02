@@ -10,6 +10,7 @@ description: "Работа с личными финансами через OAuth
 ## Использовать MCP
 
 - Для кошельков использовать `list_wallets`, `get_wallet` и `get_all_wallet_balances`.
+- Для исторического остатка передавать `as_of` в формате `YYYY-MM-DD`: в `get_wallet` для одного кошелька или в `get_all_wallet_balances` для всех. Без `as_of` возвращается остаток на текущий момент.
 - Для доходов, расходов и переводов использовать `list_transactions`, `get_transaction`, `create_transaction`, `update_transaction` и `delete_transaction`.
 - Для планирования использовать `list_budgets`, `list_auto_payments`, `list_projects`, инструменты создания/изменения и инструменты графиков.
 - Для аналитики использовать `get_dashboard`, `get_financial_report` и `get_financial_register`.

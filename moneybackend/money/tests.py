@@ -2,7 +2,7 @@ import json
 import gzip
 import io
 import uuid
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -2236,6 +2236,51 @@ class DashboardOverviewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['balance'], 1000.0)
+
+    def test_wallet_balance_endpoints_exclude_future_movements_by_default(self):
+        FlowOfFunds.objects.create(
+            document_id=uuid.uuid4(),
+            period=timezone.now() + timedelta(days=7),
+            type_of_document=3,
+            wallet=self.visible_wallet,
+            cash_flow_item=self.salary_item,
+            amount=Decimal('5000.00'),
+        )
+
+        response = self.client.get(
+            f'/api/v1/wallets/{self.visible_wallet.id}/balance/',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['balance'], 400.0)
+
+        all_balances_response = self.client.get('/api/v1/wallets/balances/')
+
+        self.assertEqual(all_balances_response.status_code, 200)
+        balances = {
+            row['wallet_name']: row['balance']
+            for row in all_balances_response.data['balances']
+        }
+        self.assertEqual(balances['Основной кошелек'], 400.0)
+
+    def test_all_wallet_balances_can_be_limited_to_document_date(self):
+        response = self.client.get(
+            '/api/v1/wallets/balances/',
+            {'date': '2024-03-02'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        balances = {row['wallet_name']: row['balance'] for row in response.data['balances']}
+        self.assertEqual(balances['Основной кошелек'], 1000.0)
+        self.assertEqual(timezone.localtime(response.data['as_of']).date(), date(2024, 3, 2))
+
+    def test_all_wallet_balances_rejects_invalid_date_filter(self):
+        response = self.client.get(
+            '/api/v1/wallets/balances/',
+            {'date': 'not-a-date'},
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_wallet_balance_rejects_invalid_date_filter(self):
         response = self.client.get(
