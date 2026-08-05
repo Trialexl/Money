@@ -18,6 +18,14 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatDate, formatDateForInput } from "@/lib/formatters"
 import {
+  calculateInvestmentPortfolioShare,
+  getInvestmentChartDateKey as getPeriodChartKey,
+  getInvestmentPeriodKey as getPeriodKey,
+  getSortedInvestmentChartDateKeys,
+  parseInvestmentChartDate as parseChartDate,
+  splitInvestmentChartSeriesOnDateGaps as splitChartSeriesOnDateGaps,
+} from "@/lib/investment-report-charts"
+import {
   readInvestmentDisplayCurrency,
   readSelectedInvestmentPortfolioId,
   writeInvestmentDisplayCurrency,
@@ -125,24 +133,6 @@ function normalizeDateRange(from: string, to: string) {
   return from <= to ? { from, to } : { from: to, to: from }
 }
 
-function getPeriodKey(value: string, groupBy: GroupBy) {
-  const dateKey = getDateKey(value)
-  return groupBy === "month" ? dateKey.slice(0, 7) : dateKey
-}
-
-function getPeriodChartKey(value: string, groupBy: GroupBy) {
-  const periodKey = getPeriodKey(value, groupBy)
-  return groupBy === "month" ? `${periodKey}-01` : periodKey
-}
-
-function parseChartDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number)
-  if (!year || !month || !day) {
-    return null
-  }
-  return new Date(year, month - 1, day)
-}
-
 function formatDateTick(value: unknown, groupBy: GroupBy) {
   if (value instanceof Date) {
     const dateKey = formatDateForInput(value)
@@ -226,38 +216,6 @@ function getTimeChartTickValues(data: ChartPoint[]) {
     .filter((date): date is Date => date !== null)
 }
 
-function getDaysBetween(left: string, right: string) {
-  const leftDate = parseChartDate(left)
-  const rightDate = parseChartDate(right)
-  if (!leftDate || !rightDate) {
-    return 0
-  }
-  return Math.round((rightDate.getTime() - leftDate.getTime()) / 86_400_000)
-}
-
-function splitChartSeriesOnDateGaps(points: ChartPoint[], groupBy: GroupBy) {
-  const maxGapDays = groupBy === "month" ? 45 : 4
-  const segments: ChartPoint[][] = []
-  let current: ChartPoint[] = []
-
-  points.forEach((point) => {
-    const previous = current[current.length - 1]
-    if (previous && getDaysBetween(previous.x, point.x) > maxGapDays) {
-      if (current.length > 0) {
-        segments.push(current)
-      }
-      current = []
-    }
-    current.push(point)
-  })
-
-  if (current.length > 0) {
-    segments.push(current)
-  }
-
-  return segments
-}
-
 function getChartYDomain(data: ChartPoint[], includeZero = false) {
   const values = data.map((point) => point.y).filter((value) => Number.isFinite(value))
   if (values.length === 0) {
@@ -274,7 +232,7 @@ function getChartYDomain(data: ChartPoint[], includeZero = false) {
 }
 
 function getOperationMarkerLabel(operation: InvestmentOperation, groupBy: GroupBy) {
-  return formatShortPeriodLabel(getPeriodKey(operation.date, groupBy), groupBy)
+  return getPeriodChartKey(operation.date, groupBy)
 }
 
 function buildOperationMarkers(
@@ -334,8 +292,9 @@ function toPerformancePointData(point: InvestmentPerformancePoint, groupBy: Grou
       : point.total_pl_display ?? point.total_pl_usd
 
   return {
-    x: label,
+    x: getPeriodChartKey(point.date, groupBy),
     y: value,
+    label,
     date: point.date,
     realized: point.realized_pl_display ?? point.realized_pl_usd,
     unrealized: point.unrealized_pl_display ?? point.unrealized_pl_usd,
@@ -345,6 +304,19 @@ function toPerformancePointData(point: InvestmentPerformancePoint, groupBy: Grou
 
 function getSeriesLastPoint(series: InvestmentInstrumentPerformanceSeries) {
   return series.points[series.points.length - 1]
+}
+
+function splitLineSeries<T extends { id: string; data: ChartPoint[] }>(series: T, groupBy: GroupBy) {
+  return splitChartSeriesOnDateGaps(series.data, groupBy).map((data, index) => ({
+    ...series,
+    id: index === 0 ? series.id : `${series.id}:${index + 1}`,
+    data,
+  }))
+}
+
+function getLineSeriesTimeTicks(series: Array<{ data: ChartPoint[] }>) {
+  const tickPoints = getSortedInvestmentChartDateKeys(series).map((x) => ({ x, y: 0 }))
+  return getTimeChartTickValues(tickPoints)
 }
 
 export default function InvestmentReportsPage() {
@@ -494,8 +466,10 @@ export default function InvestmentReportsPage() {
 
   const valueLineData = performancePoints.map((point) => toPerformancePointData(point, groupBy, "current_value"))
   const plLineData = performancePoints.map((point) => toPerformancePointData(point, groupBy, "total_pl"))
-  const valueChartTicks = getChartTickValues(valueLineData)
-  const plChartTicks = getChartTickValues(plLineData)
+  const valueLineSeries = splitLineSeries({ id: "Стоимость", data: valueLineData }, groupBy)
+  const plLineSeries = splitLineSeries({ id: "Total P/L", data: plLineData }, groupBy)
+  const valueChartTicks = getLineSeriesTimeTicks(valueLineSeries)
+  const plChartTicks = getLineSeriesTimeTicks(plLineSeries)
   const valueChartDomain = getChartYDomain(valueLineData)
   const plChartDomain = getChartYDomain(plLineData, true)
   const chartPointSize = performancePoints.length > 60 ? 0 : 7
@@ -503,42 +477,50 @@ export default function InvestmentReportsPage() {
   const plOperationMarkers = buildOperationMarkers(plLineData, operations, groupBy)
 
   const visibleInstrumentPlSeries = instrumentPlSeries.filter((series) => visibleInstrumentIds.has(series.instrument_id))
-  const instrumentPlLineData: InstrumentLineSeries[] = visibleInstrumentPlSeries.map((series) => ({
-    id: series.instrument_ticker,
-    instrumentId: series.instrument_id,
-    data: series.points.map((point) => toPerformancePointData(point, groupBy, "total_pl")),
-  }))
-  const instrumentPlTicks = getChartTickValues(instrumentPlLineData[0]?.data ?? [])
+  const instrumentPlLineData: InstrumentLineSeries[] = visibleInstrumentPlSeries.flatMap((series) =>
+    splitLineSeries({
+      id: series.instrument_ticker,
+      instrumentId: series.instrument_id,
+      data: series.points.map((point) => toPerformancePointData(point, groupBy, "total_pl")),
+    }, groupBy),
+  )
+  const instrumentPlTicks = getLineSeriesTimeTicks(instrumentPlLineData)
   const instrumentPlDomain = getChartYDomain(instrumentPlLineData.flatMap((series) => series.data), true)
   const instrumentPlOperationMarkers = instrumentPlLineData.flatMap((series) =>
     buildOperationMarkers(series.data, operations, groupBy, { instrumentId: series.instrumentId }),
   )
-  const portfolioValueByLabel = new Map(
+  const portfolioValueByDate = new Map(
     performancePoints.map((point) => [
-      point.label === "Старт" ? "Старт" : formatShortPeriodLabel(point.date, groupBy),
+      getPeriodChartKey(point.date, groupBy),
       point.current_value_usd,
     ]),
   )
   const allocationLineData: InstrumentLineSeries[] = visibleInstrumentPlSeries
-    .map((series) => ({
-      id: series.instrument_ticker,
-      instrumentId: series.instrument_id,
-      data: series.points
-        .map((point) => {
-          const label = point.label === "Старт" ? "Старт" : formatShortPeriodLabel(point.date, groupBy)
-          const portfolioValue = portfolioValueByLabel.get(label) ?? 0
-          const share = portfolioValue > 0 ? (point.current_value_usd / portfolioValue) * 100 : 0
+    .flatMap((series) => {
+      const data = series.points
+        .map((point): ChartPoint | null => {
+          const x = getPeriodChartKey(point.date, groupBy)
+          const share = calculateInvestmentPortfolioShare(point.current_value_usd, portfolioValueByDate.get(x))
+          if (share === null || !Number.isFinite(share)) {
+            return null
+          }
           return {
-            x: label,
+            x,
             y: share,
+            label: point.label === "Старт" ? "Старт" : formatShortPeriodLabel(point.date, groupBy),
             date: point.date,
             actualValue: point.current_value_display ?? point.current_value_usd,
           }
         })
-        .filter((point) => Number.isFinite(point.y)),
-    }))
+        .filter((point): point is ChartPoint => point !== null)
+      return splitLineSeries({
+        id: series.instrument_ticker,
+        instrumentId: series.instrument_id,
+        data,
+      }, groupBy)
+    })
     .filter((series) => series.data.length > 0)
-  const allocationTicks = getChartTickValues(allocationLineData[0]?.data ?? [])
+  const allocationTicks = getLineSeriesTimeTicks(allocationLineData)
   const allocationDomain = getChartYDomain(allocationLineData.flatMap((series) => series.data), true)
   const allocationOperationMarkers = allocationLineData.flatMap((series) =>
     buildOperationMarkers(series.data, operations, groupBy, { instrumentId: series.instrumentId }),
@@ -556,7 +538,7 @@ export default function InvestmentReportsPage() {
       return
     }
     const periodKey = getPeriodKey(snapshot.captured_at, groupBy)
-    const x = formatShortPeriodLabel(periodKey, groupBy)
+    const x = getPeriodChartKey(snapshot.captured_at, groupBy)
     const convertedPrice = convertUsdAmountAtDate(snapshot.price_usd, snapshot.captured_at, displayCurrency, conversionFxRates)
     if (convertedPrice === null) {
       return
@@ -566,6 +548,7 @@ export default function InvestmentReportsPage() {
     const map = priceSnapshotsByInstrument.get(snapshot.instrument) ?? new Map<string, ChartPoint>()
     map.set(periodKey, {
       x,
+      label: formatShortPeriodLabel(periodKey, groupBy),
       y: priceValue,
       date: snapshot.captured_at,
     })
@@ -574,7 +557,7 @@ export default function InvestmentReportsPage() {
 
   const priceLineData: InstrumentLineSeries[] = portfolioInstruments
     .filter((instrument) => visibleInstrumentIds.has(instrument.id))
-    .map((instrument) => {
+    .flatMap((instrument) => {
       const points = Array.from(priceSnapshotsByInstrument.get(instrument.id)?.entries() ?? [])
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([, point]) => point)
@@ -586,14 +569,14 @@ export default function InvestmentReportsPage() {
             y: (point.y / basePrice) * 100,
           }))
         : []
-      return {
+      return splitLineSeries({
         id: instrument.ticker,
         instrumentId: instrument.id,
         data: normalizedPoints,
-      }
+      }, groupBy)
     })
     .filter((series) => series.data.length > 0)
-  const priceChartTicks = getChartTickValues(priceLineData[0]?.data ?? [])
+  const priceChartTicks = getLineSeriesTimeTicks(priceLineData)
   const priceChartDomain = getChartYDomain(priceLineData.flatMap((series) => series.data))
   const priceOperationMarkers = priceLineData.flatMap((series) =>
     buildOperationMarkers(series.data, operations, groupBy, { instrumentId: series.instrumentId }),
@@ -640,16 +623,10 @@ export default function InvestmentReportsPage() {
             y: (point.y / baseRate) * 100,
           }))
         : []
-      return splitChartSeriesOnDateGaps(normalizedPoints, groupBy).map((segment, index) => ({
-        id: index === 0 ? pairId : `${pairId}:${index + 1}`,
-        data: segment,
-      }))
+      return splitLineSeries({ id: pairId, data: normalizedPoints }, groupBy)
     })
     .filter((series) => series.data.length > 0)
-  const fxRateTickPoints = Array.from(new Set(fxRateLineData.flatMap((series) => series.data.map((point) => point.x))))
-    .sort((left, right) => left.localeCompare(right))
-    .map((x) => ({ x, y: 0 }))
-  const fxRateTicks = getTimeChartTickValues(fxRateTickPoints)
+  const fxRateTicks = getLineSeriesTimeTicks(fxRateLineData)
   const fxRateDomain = getChartYDomain(fxRateLineData.flatMap((series) => series.data))
   const fxLegendItems: FxLegendItem[] = fxPairIds.map((pairId) => ({
     id: pairId,
@@ -778,7 +755,8 @@ export default function InvestmentReportsPage() {
   const renderOperationMarkers = (markers: OperationChartMarker[]) => ({ xScale, yScale, innerHeight }: any) => (
     <g pointerEvents="none">
       {markers.map((marker, index) => {
-        const rawX = xScale(marker.x)
+        const markerDate = parseChartDate(marker.x)
+        const rawX = xScale(markerDate ?? marker.x)
         const rawY = yScale(marker.y)
         const x = Number(rawX)
         const baseY = Number(rawY)
@@ -791,7 +769,7 @@ export default function InvestmentReportsPage() {
         const y = Math.min(Math.max(baseY + yOffset, 10), Math.max(Number(innerHeight) - 10, 10))
         const title = [
           isBuy ? "Покупка" : "Продажа",
-          marker.x,
+          formatDateTick(marker.x, groupBy),
           marker.tickers.join(", "),
           `${marker.count} сделк.`,
           marker.amountDisplay === null ? "нет курса" : formatCurrencyValue(marker.amountDisplay, displayCurrency),
@@ -1063,23 +1041,29 @@ export default function InvestmentReportsPage() {
             <div className="grid gap-6 xl:grid-cols-2">
               <LineChartPanel
                 title="Стоимость"
-                data={[{ id: "Стоимость", data: valueLineData }]}
+                data={valueLineSeries}
                 ticks={valueChartTicks}
                 domain={valueChartDomain}
                 pointSize={chartPointSize}
                 colors={["hsl(var(--primary))"]}
                 displayCurrency={displayCurrency}
                 operationLayer={renderOperationMarkers(valueOperationMarkers)}
+                xScale={{ type: "time", format: "%Y-%m-%d", precision: "day", useUTC: false }}
+                curve="linear"
+                formatXAxisValue={(value) => formatDateTick(value, groupBy)}
               />
               <LineChartPanel
                 title="Total P/L"
-                data={[{ id: "Total P/L", data: plLineData }]}
+                data={plLineSeries}
                 ticks={plChartTicks}
                 domain={plChartDomain}
                 pointSize={chartPointSize}
                 colors={[overviewQuery.data.total_pl_usd < 0 ? "#ef4444" : "#10b981"]}
                 displayCurrency={displayCurrency}
                 operationLayer={renderOperationMarkers(plOperationMarkers)}
+                xScale={{ type: "time", format: "%Y-%m-%d", precision: "day", useUTC: false }}
+                curve="linear"
+                formatXAxisValue={(value) => formatDateTick(value, groupBy)}
               />
             </div>
           )}
@@ -1181,6 +1165,9 @@ export default function InvestmentReportsPage() {
                   }}
                   displayCurrency={displayCurrency}
                   operationLayer={renderOperationMarkers(instrumentPlOperationMarkers)}
+                  xScale={{ type: "time", format: "%Y-%m-%d", precision: "day", useUTC: false }}
+                  curve="linear"
+                  formatXAxisValue={(value) => formatDateTick(value, groupBy)}
                 />
               )}
 
@@ -1208,6 +1195,9 @@ export default function InvestmentReportsPage() {
                   }}
                   displayCurrency={displayCurrency}
                   operationLayer={renderOperationMarkers(allocationOperationMarkers)}
+                  xScale={{ type: "time", format: "%Y-%m-%d", precision: "day", useUTC: false }}
+                  curve="linear"
+                  formatXAxisValue={(value) => formatDateTick(value, groupBy)}
                   formatYAxisValue={(value) => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)}%`}
                   formatTooltipValue={(point) => {
                     const share = Number(point.y)
@@ -1245,6 +1235,9 @@ export default function InvestmentReportsPage() {
                   }}
                   displayCurrency={displayCurrency}
                   operationLayer={renderOperationMarkers(priceOperationMarkers)}
+                  xScale={{ type: "time", format: "%Y-%m-%d", precision: "day", useUTC: false }}
+                  curve="linear"
+                  formatXAxisValue={(value) => formatDateTick(value, groupBy)}
                   formatYAxisValue={(value) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)}
                   formatTooltipValue={(point) => {
                     const indexValue = Number(point.y)
