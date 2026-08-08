@@ -173,7 +173,8 @@ reset_public_schema() {
     if [ -z "$database" ]; then
       database="$POSTGRES_DB"
     fi
-    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$database" -c "DROP SCHEMA IF EXISTS public CASCADE;" >/dev/null
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$database" -c \
+      "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" >/dev/null
   ' sh "$database" \
     || fail_command "$action" "cannot reset public schema before restore" "$file"
 }

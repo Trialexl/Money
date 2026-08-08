@@ -25,7 +25,7 @@ notify() {
 }
 
 timestamp="$(date -Iseconds)"
-if curl -fsS "$HEALTH_URL" >/dev/null; then
+if curl -fsS --connect-timeout 5 --max-time 15 "$HEALTH_URL" >/dev/null; then
   printf '%s OK %s\n' "$timestamp" "$HEALTH_URL" >>"$LOG_FILE"
   exit 0
 fi

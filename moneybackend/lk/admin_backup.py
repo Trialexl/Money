@@ -251,18 +251,32 @@ def restore_check_backup(filename: str) -> None:
 
     try:
         _run_checked(['createdb', *common_args, temp_db], database=database)
-        with gzip.open(file_path, 'rb') as archive:
+        suffix = '.dump' if file_path.suffixes[-2:] == ['.dump', '.gz'] else '.sql'
+        with tempfile.NamedTemporaryFile(suffix=suffix) as decompressed:
+            with gzip.open(file_path, 'rb') as archive:
+                shutil.copyfileobj(archive, decompressed)
+            decompressed.flush()
+
             if file_path.suffixes[-2:] == ['.dump', '.gz']:
                 _run_checked(
-                    ['pg_restore', '--exit-on-error', '--no-owner', '--no-acl', *common_args, '--dbname', temp_db],
+                    [
+                        'pg_restore',
+                        '--exit-on-error',
+                        '--no-owner',
+                        '--no-acl',
+                        *common_args,
+                        '--dbname',
+                        temp_db,
+                        decompressed.name,
+                    ],
                     database=database,
-                    stdin=archive,
                 )
             else:
+                decompressed.seek(0)
                 _run_checked(
                     ['psql', '-v', 'ON_ERROR_STOP=1', *common_args, '--dbname', temp_db],
                     database=database,
-                    stdin=archive,
+                    stdin=decompressed,
                 )
         _run_checked(
             ['psql', '-v', 'ON_ERROR_STOP=1', *common_args, '--dbname', temp_db, '-c', 'select count(*) from django_migrations;'],

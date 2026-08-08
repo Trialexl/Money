@@ -1,14 +1,22 @@
+FROM postgres:14 AS postgres14-client
+
 FROM python:3.14-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH="/usr/lib/postgresql/14/bin:${PATH}"
+
+# Keep pg_dump/pg_restore on the same major version as the production database.
+# Debian Trixie currently ships a newer client whose archives cannot be restored
+# by PostgreSQL 14.
+COPY --from=postgres14-client /usr/lib/postgresql/14/bin /usr/lib/postgresql/14/bin
 
 # Устанавливаем системные зависимости
 RUN set -eux; \
     for attempt in 1 2 3; do \
         apt-get update && \
         apt-get install -y --no-install-recommends --fix-missing \
-            postgresql-client \
+            libpq5 \
             netcat-openbsd && \
         rm -rf /var/lib/apt/lists/* && \
         break; \
@@ -17,6 +25,9 @@ RUN set -eux; \
         if [ "$attempt" = "3" ]; then exit 1; fi; \
         sleep 5; \
     done
+
+RUN pg_dump --version | grep -E '^pg_dump \(PostgreSQL\) 14\.' && \
+    pg_restore --version | grep -E '^pg_restore \(PostgreSQL\) 14\.'
 
 # Устанавливаем рабочую директорию
 WORKDIR /app

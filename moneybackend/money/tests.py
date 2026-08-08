@@ -160,6 +160,70 @@ class AdminBackupViewTests(TestCase):
         with gzip.open(backup.path, 'rb') as archive:
             self.assertEqual(archive.read(), b'postgres-custom-dump')
 
+    def test_restore_check_decompresses_custom_dump_before_pg_restore(self):
+        from lk.admin_backup import restore_check_backup
+
+        backup_path = Path(self.temp_dir.name) / 'money-postgres-20260101-000000.dump.gz'
+        with gzip.open(backup_path, 'wb') as archive:
+            archive.write(b'postgres-custom-dump')
+
+        restored_payloads = []
+
+        def fake_run_checked(args, **_kwargs):
+            if args[0] == 'pg_restore':
+                restored_payloads.append(Path(args[-1]).read_bytes())
+            return Mock()
+
+        postgres_database = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': 'money',
+                'USER': 'money',
+                'PASSWORD': 'secret',
+                'HOST': 'db',
+                'PORT': '5432',
+            }
+        }
+
+        with override_settings(DATABASES=postgres_database):
+            with patch('lk.admin_backup._run_checked', side_effect=fake_run_checked):
+                with patch('lk.admin_backup.subprocess.run'):
+                    restore_check_backup(backup_path.name)
+
+        self.assertEqual(restored_payloads, [b'postgres-custom-dump'])
+
+    def test_restore_check_decompresses_sql_before_psql(self):
+        from lk.admin_backup import restore_check_backup
+
+        backup_path = Path(self.temp_dir.name) / 'money-postgres-20260101-000000.sql.gz'
+        with gzip.open(backup_path, 'wb') as archive:
+            archive.write(b'SELECT 1;')
+
+        restored_payloads = []
+
+        def fake_run_checked(args, **kwargs):
+            if args[0] == 'psql' and '-c' not in args:
+                restored_payloads.append(kwargs['stdin'].read())
+            return Mock()
+
+        postgres_database = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': 'money',
+                'USER': 'money',
+                'PASSWORD': 'secret',
+                'HOST': 'db',
+                'PORT': '5432',
+            }
+        }
+
+        with override_settings(DATABASES=postgres_database):
+            with patch('lk.admin_backup._run_checked', side_effect=fake_run_checked):
+                with patch('lk.admin_backup.subprocess.run'):
+                    restore_check_backup(backup_path.name)
+
+        self.assertEqual(restored_payloads, [b'SELECT 1;'])
+
 
 class DataHealthReportTests(TestCase):
     @classmethod

@@ -258,11 +258,27 @@ APP_DIR=/opt/money
 API_BASE=https://<app-domain>
 
 # Единая точка регламентных заданий backend.
-*/5 * * * * cd "$APP_DIR" && /usr/bin/docker compose exec -T backend python manage.py run_scheduled_jobs >/tmp/money-scheduled-jobs.log 2>&1
+*/5 * * * * /usr/bin/flock -n /run/money-scheduled-jobs.lock /bin/bash -lc 'cd "$APP_DIR" && /usr/bin/docker compose exec -T backend python manage.py run_scheduled_jobs' >/tmp/money-scheduled-jobs.log 2>&1
 
 # Базовый healthcheck приложения с опциональным webhook-уведомлением.
-*/5 * * * * cd "$APP_DIR" && HEALTH_URL="$API_BASE/api/v1/health/" ./health-check.sh >/tmp/money-health-cron.log 2>&1
+*/5 * * * * /usr/bin/flock -n /run/money-health-check.lock /bin/bash -lc 'cd "$APP_DIR" && HEALTH_URL="$API_BASE/api/v1/health/" ./health-check.sh' >/tmp/money-health-cron.log 2>&1
 ```
+
+Для VPS с 1 ГБ RAM нужен swap, иначе кратковременный запуск `apt`, backup или
+Docker healthcheck может вызвать глобальный OOM. Однократная настройка:
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+printf 'vm.swappiness=20\nvm.vfs_cache_pressure=50\n' | sudo tee /etc/sysctl.d/99-money-memory.conf
+sudo sysctl --system
+```
+
+Ежедневный reboot не заменяет swap и лимиты памяти: он скрывает накопление
+нагрузки, но не предотвращает следующий OOM.
 
 Пользовательский cron должен содержать только личные задачи пользователя. Регламентные задания Money хранятся в `root crontab`.
 

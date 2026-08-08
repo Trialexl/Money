@@ -9,8 +9,8 @@ services:
     image: postgres:14
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${DB_MEMORY_LIMIT:-256m}
-    mem_reservation: ${DB_MEMORY_RESERVATION:-96m}
+    mem_limit: ${DB_MEMORY_LIMIT:-192m}
+    mem_reservation: ${DB_MEMORY_RESERVATION:-64m}
     pids_limit: ${DB_PIDS_LIMIT:-128}
     environment:
       POSTGRES_DB: ${DB_NAME:-money}
@@ -43,8 +43,8 @@ services:
       - --proxy-headers
       - --forwarded-allow-ips=*
     logging: *default-logging
-    mem_limit: ${BACKEND_MEMORY_LIMIT:-320m}
-    mem_reservation: ${BACKEND_MEMORY_RESERVATION:-128m}
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-224m}
+    mem_reservation: ${BACKEND_MEMORY_RESERVATION:-96m}
     pids_limit: ${BACKEND_PIDS_LIMIT:-256}
     env_file:
       - ./.env
@@ -73,11 +73,11 @@ services:
     image: trialexl/money-frontend:latest
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: ${FRONTEND_MEMORY_LIMIT:-224m}
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-160m}
     mem_reservation: ${FRONTEND_MEMORY_RESERVATION:-64m}
     pids_limit: ${FRONTEND_PIDS_LIMIT:-96}
     environment:
-      NODE_OPTIONS: ${FRONTEND_NODE_OPTIONS:---max-old-space-size=128}
+      NODE_OPTIONS: ${FRONTEND_NODE_OPTIONS:---max-old-space-size=96}
     depends_on:
       backend:
         condition: service_healthy
@@ -95,7 +95,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     mem_limit: ${CADDY_MEMORY_LIMIT:-48m}
-    mem_reservation: ${CADDY_MEMORY_RESERVATION:-16m}
+    mem_reservation: ${CADDY_MEMORY_RESERVATION:-12m}
     pids_limit: ${CADDY_PIDS_LIMIT:-64}
     depends_on:
       backend:
