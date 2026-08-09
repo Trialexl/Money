@@ -233,6 +233,7 @@ CORS_ALLOW_CREDENTIALS = config('CORS_ALLOW_CREDENTIALS', default=True, cast=boo
 AI_DEFAULT_PROVIDER = config('AI_DEFAULT_PROVIDER', default='openrouter')
 AI_OPENROUTER_API_KEY = config('AI_OPENROUTER_API_KEY', default='')
 AI_OPENROUTER_MODEL = config('AI_OPENROUTER_MODEL', default='google/gemini-2.5-flash')
+AI_OPENROUTER_MAX_TOKENS = config('AI_OPENROUTER_MAX_TOKENS', default=4096, cast=int)
 AI_OPENROUTER_BASE_URL = config(
     'AI_OPENROUTER_BASE_URL',
     default='https://openrouter.ai/api/v1/chat/completions',

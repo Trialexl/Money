@@ -1122,6 +1122,7 @@ class OpenRouterIntentProvider:
                 'type': 'json_object',
             },
             'temperature': 0.1,
+            'max_tokens': getattr(settings, 'AI_OPENROUTER_MAX_TOKENS', 4096),
             'provider': {
                 'allow_fallbacks': True,
             },

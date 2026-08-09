@@ -3571,6 +3571,7 @@ class AiAssistantApiTests(TestCase):
         AI_OPENROUTER_BASE_URL='https://openrouter.ai/api/v1/chat/completions',
         AI_OPENROUTER_SITE_URL='https://lk.example.com',
         AI_OPENROUTER_APP_NAME='LK Test',
+        AI_OPENROUTER_MAX_TOKENS=4096,
     )
     def test_openrouter_provider_calls_chat_completions_endpoint(self):
         provider = ai_service.OpenRouterIntentProvider(
@@ -3602,10 +3603,12 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(result['intent'], 'unknown')
         http_request = mocked_urlopen.call_args.args[0]
         request_headers = {key.lower(): value for key, value in http_request.header_items()}
+        request_payload = json.loads(http_request.data.decode('utf-8'))
         self.assertEqual(http_request.full_url, 'https://openrouter.ai/api/v1/chat/completions')
         self.assertEqual(request_headers['authorization'], 'Bearer openrouter-test-key')
         self.assertEqual(request_headers['http-referer'], 'https://lk.example.com')
         self.assertEqual(request_headers['x-title'], 'LK Test')
+        self.assertEqual(request_payload['max_tokens'], 4096)
 
     def test_openrouter_prompt_includes_wallet_and_cash_flow_context(self):
         provider = ai_service.OpenRouterIntentProvider(

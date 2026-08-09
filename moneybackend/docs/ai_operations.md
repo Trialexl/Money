@@ -94,6 +94,7 @@ Backend использует их, чтобы:
 - `AI_DEFAULT_PROVIDER`
 - `AI_OPENROUTER_API_KEY`
 - `AI_OPENROUTER_MODEL`
+- `AI_OPENROUTER_MAX_TOKENS` — максимальный размер ответа; по умолчанию `4096`, чтобы OpenRouter не резервировал весь лимит модели.
 - `AI_OPENROUTER_BASE_URL`
 - `AI_OPENROUTER_SITE_URL`
 - `AI_OPENROUTER_APP_NAME`
