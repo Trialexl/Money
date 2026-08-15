@@ -1,3 +1,5 @@
+import json
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -685,6 +687,16 @@ class OneCSyncOutboxAckResponseSerializer(serializers.Serializer):
     deleted_count = serializers.IntegerField()
 
 
+class AiAssistantHistoryField(serializers.JSONField):
+    def to_internal_value(self, data):
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                self.fail('invalid')
+        return super().to_internal_value(data)
+
+
 class AiAssistantExecuteSerializer(serializers.Serializer):
     MODE_CLASSIC = 'classic'
     MODE_AGENT = 'agent'
@@ -694,6 +706,7 @@ class AiAssistantExecuteSerializer(serializers.Serializer):
     wallet = serializers.UUIDField(required=False)
     dry_run = serializers.BooleanField(required=False, default=False)
     conversation = serializers.BooleanField(required=False, default=False)
+    history = AiAssistantHistoryField(required=False, default=list)
     mode = serializers.ChoiceField(
         choices=[MODE_CLASSIC, MODE_AGENT],
         required=False,
@@ -704,6 +717,16 @@ class AiAssistantExecuteSerializer(serializers.Serializer):
         attrs = super().validate(attrs)
         if not attrs.get('text') and not attrs.get('image'):
             raise serializers.ValidationError('Передайте текст, изображение или оба поля.')
+        history = attrs.get('history') or []
+        if not isinstance(history, list):
+            raise serializers.ValidationError({'history': 'История должна быть списком сообщений.'})
+        for item in history:
+            if (
+                not isinstance(item, dict)
+                or item.get('role') not in {'user', 'assistant'}
+                or not isinstance(item.get('content'), str)
+            ):
+                raise serializers.ValidationError({'history': 'Некорректный формат сообщения истории.'})
         return attrs
 
 

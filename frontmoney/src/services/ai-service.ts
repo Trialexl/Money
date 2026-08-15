@@ -3,6 +3,7 @@ import { fromApiAmount, fromApiDateTime } from "@/types"
 
 export type AiAssistantStatus = "created" | "preview" | "needs_confirmation" | "balance" | "duplicate" | "info"
 export type AiAssistantMode = "classic" | "agent"
+export type AiAssistantHistoryMessage = { role: "user" | "assistant"; content: string }
 
 export interface AiAssistantCreatedObject {
   model: string
@@ -110,6 +111,7 @@ export const AiService = {
     image?: File | null
     conversation?: boolean
     mode?: AiAssistantMode
+    history?: AiAssistantHistoryMessage[]
   }) => {
     const hasImage = Boolean(payload.image)
 
@@ -130,6 +132,9 @@ export const AiService = {
       if (payload.mode) {
         formData.append("mode", payload.mode)
       }
+      if (payload.history?.length) {
+        formData.append("history", JSON.stringify(payload.history))
+      }
       if (payload.image) {
         formData.append("image", payload.image)
       }
@@ -148,6 +153,7 @@ export const AiService = {
       dry_run: payload.dryRun ?? false,
       conversation: payload.conversation ?? false,
       mode: payload.mode ?? "classic",
+      history: payload.history ?? [],
     })
 
     return normalizeAiResponse(data)

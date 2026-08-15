@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any, Literal
 from uuid import UUID
 
@@ -54,6 +55,16 @@ MARKET_DATA_PATHS = {
     'fx_rate': '/api/v1/investment/fx-rates/',
 }
 
+_agent_api_executor = ContextVar('frontmoney_agent_api_executor', default=None)
+
+
+def set_agent_api_executor(executor):
+    return _agent_api_executor.set(executor)
+
+
+def reset_agent_api_executor(token):
+    _agent_api_executor.reset(token)
+
 
 def _without_none(**values: Any) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
@@ -83,7 +94,11 @@ async def _call(
     query: dict[str, Any] | None = None,
     payload: dict[str, Any] | None = None,
 ) -> Any:
-    response = await proxy_api_request(method, path, query=query, payload=payload)
+    executor = _agent_api_executor.get()
+    if executor is None:
+        response = await proxy_api_request(method, path, query=query, payload=payload)
+    else:
+        response = await executor(method, path, query=query, payload=payload)
     status = response['status']
     if 200 <= status < 300:
         return response['data']

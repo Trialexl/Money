@@ -20,7 +20,7 @@ from users.models import CustomUser
 from lk.admin_backup import BackupFile
 from .data_health import generate_data_health_report
 
-from . import ai_service
+from . import agent_service, ai_service
 from .admin import ExpenditureGraphicAdminForm, ExpenditureGraphicInlineFormSet
 from .models import (
     AutoPayment,
@@ -3631,46 +3631,104 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('wallet_hint', prompt)
         self.assertIn('cash_flow_item_hint', prompt)
 
-    def test_openrouter_tool_planner_sends_available_tools_and_reads_calls(self):
-        planner = ai_service.OpenRouterToolPlanner(
+    def test_openrouter_tool_agent_exposes_real_domain_tools(self):
+        agent = agent_service.OpenRouterToolAgent(
             api_key='openrouter-test-key',
             model_name='google/gemini-2.5-flash',
         )
+        tool_names = {tool['function']['name'] for tool in agent.tools}
 
-        class _FakeResponse:
-            def __enter__(self):
-                return self
+        self.assertIn('list_wallets', tool_names)
+        self.assertIn('get_financial_report', tool_names)
+        self.assertIn('create_transaction', tool_names)
+        self.assertIn('delete_investment_operation', tool_names)
 
-            def __exit__(self, exc_type, exc, tb):
-                return False
+    def test_openrouter_tool_agent_returns_read_result_to_llm_and_keeps_history(self):
+        agent = agent_service.OpenRouterToolAgent(
+            api_key='openrouter-test-key',
+            model_name='google/gemini-2.5-flash',
+        )
+        responses = [
+            {
+                'choices': [{
+                    'message': {
+                        'content': None,
+                        'tool_calls': [{
+                            'id': 'call-wallets',
+                            'type': 'function',
+                            'function': {'name': 'list_wallets', 'arguments': '{}'},
+                        }],
+                    },
+                }],
+            },
+            {
+                'choices': [{
+                    'message': {'content': 'У вас есть кошелек Сбербанк.'},
+                }],
+            },
+        ]
 
-            def read(self):
-                return json.dumps({
-                    'choices': [{
-                        'message': {
-                            'tool_calls': [{
-                                'type': 'function',
-                                'function': {
-                                    'name': 'get_wallet_balances',
-                                    'arguments': json.dumps({'instruction': 'остатки по кошелькам'}),
-                                },
-                            }],
-                        },
-                    }],
-                }).encode('utf-8')
+        with patch.object(agent, '_request', side_effect=responses) as mocked_request:
+            result = agent.run(
+                user=self.admin_user,
+                text='Какие кошельки у меня есть?',
+                history=[
+                    {'role': 'user', 'content': 'Привет'},
+                    {'role': 'assistant', 'content': 'Здравствуйте!'},
+                ],
+            )
 
-        with patch('money.ai_service.request.urlopen', return_value=_FakeResponse()) as mocked_urlopen:
-            actions = planner.plan(text='Сколько у меня денег?')
+        self.assertEqual(result['reply_text'], 'У вас есть кошелек Сбербанк.')
+        self.assertEqual(result['tool_trace'][0]['name'], 'list_wallets')
+        first_payload = mocked_request.call_args_list[0].args[0]
+        self.assertIn({'role': 'user', 'content': 'Привет'}, first_payload['messages'])
+        second_payload = mocked_request.call_args_list[1].args[0]
+        tool_message = next(item for item in second_payload['messages'] if item['role'] == 'tool')
+        self.assertIn('Сбербанк', tool_message['content'])
 
-        self.assertEqual(actions, [{
-            'name': 'get_wallet_balances',
-            'instruction': 'остатки по кошелькам',
-        }])
-        request_payload = json.loads(mocked_urlopen.call_args.args[0].data.decode('utf-8'))
-        tool_names = {tool['function']['name'] for tool in request_payload['tools']}
-        self.assertIn('record_transactions', tool_names)
-        self.assertIn('analyze_investments', tool_names)
-        self.assertEqual(request_payload['tool_choice'], 'auto')
+    def test_openrouter_tool_agent_queues_write_without_executing_it(self):
+        agent = agent_service.OpenRouterToolAgent(
+            api_key='openrouter-test-key',
+            model_name='google/gemini-2.5-flash',
+        )
+        arguments = {
+            'kind': 'expense',
+            'amount': '990.00',
+            'date': '2026-08-15T10:00:00+03:00',
+            'wallet_id': str(self.wallet_sber.id),
+            'cash_flow_item_id': str(self.expense_item.id),
+        }
+        responses = [
+            {
+                'choices': [{
+                    'message': {
+                        'content': None,
+                        'tool_calls': [{
+                            'id': 'call-create',
+                            'type': 'function',
+                            'function': {
+                                'name': 'create_transaction',
+                                'arguments': json.dumps(arguments),
+                            },
+                        }],
+                    },
+                }],
+            },
+            {
+                'choices': [{
+                    'message': {'content': 'Расход подготовлен. Подтвердите запись.'},
+                }],
+            },
+        ]
+
+        with patch.object(agent, '_request', side_effect=responses) as mocked_request:
+            result = agent.run(user=self.admin_user, text='Запиши расход 990 рублей')
+
+        self.assertEqual(result['pending_calls'][0]['name'], 'create_transaction')
+        self.assertFalse(Expenditure.objects.filter(amount=Decimal('990.00')).exists())
+        second_payload = mocked_request.call_args_list[1].args[0]
+        tool_message = next(item for item in second_payload['messages'] if item['role'] == 'tool')
+        self.assertIn('requires_confirmation', tool_message['content'])
 
     @override_settings(
         AI_OPENAI_API_KEY='openai-test-key',
@@ -3777,34 +3835,97 @@ class AiAssistantApiTests(TestCase):
         self.assertFalse(pending.is_active)
 
     @override_settings(AI_OPENROUTER_API_KEY='openrouter-test-key')
-    def test_ai_execute_agent_mode_plans_and_executes_web_action(self):
+    def test_ai_execute_agent_mode_requires_confirmation_before_write(self):
         with patch(
-            'money.views.OpenRouterToolPlanner.plan',
-            return_value=[{
-                'name': 'record_transactions',
-                'instruction': 'расход сбер еда 2750',
-            }],
-        ) as mocked_plan:
-            response = self.client.post(
+            'money.views.OpenRouterToolAgent.run',
+            return_value={
+                'reply_text': 'Подготовлен расход 2750 ₽. Подтвердите запись.',
+                'pending_calls': [{
+                    'name': 'create_transaction',
+                    'arguments': {
+                        'kind': 'expense',
+                        'amount': '2750.00',
+                        'date': '2026-08-15T10:00:00+03:00',
+                        'comment': 'Продукты',
+                        'wallet_id': str(self.wallet_sber.id),
+                        'cash_flow_item_id': str(self.expense_item.id),
+                        'include_in_budget': True,
+                        'posted': True,
+                        'wallet_from_id': None,
+                        'wallet_to_id': None,
+                    },
+                }],
+                'tool_trace': [],
+            },
+        ):
+            first_response = self.client.post(
                 '/api/v1/ai/execute/',
                 {
                     'text': 'Запиши мою покупку продуктов на 2750 со Сбера',
+                    'conversation': True,
+                    'mode': 'agent',
+                    'history': [{'role': 'assistant', 'content': 'Чем помочь?'}],
+                },
+                format='json',
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.data['status'], 'needs_confirmation')
+        self.assertEqual(first_response.data['intent'], 'agent_tool_confirmation')
+        self.assertFalse(Expenditure.objects.filter(amount=Decimal('2750.00')).exists())
+
+        with patch(
+            'money.views.OpenRouterToolAgent.complete_after_confirmation',
+            return_value='Расход 2750 ₽ записан.',
+        ):
+            second_response = self.client.post(
+                '/api/v1/ai/execute/',
+                {
+                    'text': 'Подтвердить',
                     'conversation': True,
                     'mode': 'agent',
                 },
                 format='json',
             )
 
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['status'], 'created')
-        expenditure = Expenditure.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(second_response.status_code, 201)
+        self.assertEqual(second_response.data['status'], 'created')
+        expenditure = Expenditure.objects.get(amount=Decimal('2750.00'))
         self.assertEqual(expenditure.amount, Decimal('2750.00'))
-        self.assertEqual(response.data['parsed']['agent_actions'][0]['name'], 'record_transactions')
-        mocked_plan.assert_called_once()
+        self.assertIn('записан', second_response.data['reply_text'])
 
     @override_settings(AI_OPENROUTER_API_KEY='openrouter-test-key')
-    def test_ai_execute_classic_mode_does_not_call_tool_planner(self):
-        with patch('money.views.OpenRouterToolPlanner.plan') as mocked_plan:
+    def test_ai_execute_agent_mode_returns_direct_llm_answer_with_history(self):
+        with patch(
+            'money.views.OpenRouterToolAgent.run',
+            return_value={
+                'reply_text': 'Умный режим использует tools, обычный — intent pipeline.',
+                'pending_calls': [],
+                'tool_trace': [],
+            },
+        ) as mocked_run:
+            response = self.client.post(
+                '/api/v1/ai/execute/',
+                {
+                    'text': 'В чем разница режимов?',
+                    'conversation': True,
+                    'mode': 'agent',
+                    'history': [{'role': 'assistant', 'content': 'Выбран умный режим.'}],
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'info')
+        self.assertIn('использует tools', response.data['reply_text'])
+        self.assertEqual(
+            mocked_run.call_args.kwargs['history'],
+            [{'role': 'assistant', 'content': 'Выбран умный режим.'}],
+        )
+
+    @override_settings(AI_OPENROUTER_API_KEY='openrouter-test-key')
+    def test_ai_execute_classic_mode_does_not_call_tool_agent(self):
+        with patch('money.views.OpenRouterToolAgent.run') as mocked_agent:
             response = self.client.post(
                 '/api/v1/ai/execute/',
                 {
@@ -3817,7 +3938,7 @@ class AiAssistantApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'balance')
-        mocked_plan.assert_not_called()
+        mocked_agent.assert_not_called()
 
     def test_ai_web_response_links_mentioned_wallets_and_cash_flow_items(self):
         from .views import AiAssistantViewSet

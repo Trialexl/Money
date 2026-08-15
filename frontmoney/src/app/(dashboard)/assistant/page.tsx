@@ -11,12 +11,18 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { AiService, type AiAssistantMode, type AiAssistantResponse } from "@/services/ai-service"
+import {
+  AiService,
+  type AiAssistantHistoryMessage,
+  type AiAssistantMode,
+  type AiAssistantResponse,
+} from "@/services/ai-service"
 
 type ChatRequest = {
   text: string
   image?: File | null
   imageName?: string
+  history: AiAssistantHistoryMessage[]
 }
 
 type ChatTurn = {
@@ -101,7 +107,10 @@ function responseChoices(response: AiAssistantResponse | null): OptionChoice[] {
   if (!response || response.status !== "needs_confirmation") return []
   if (response.missing_fields?.length === 1 && response.missing_fields[0] === "final_confirmation") {
     return [
-      { label: "Создать", value: "Создать" },
+      {
+        label: response.intent === "agent_tool_confirmation" ? "Подтвердить" : "Создать",
+        value: response.intent === "agent_tool_confirmation" ? "Подтвердить" : "Создать",
+      },
       { label: "Отмена", value: "/cancel" },
     ]
   }
@@ -135,6 +144,7 @@ export default function AssistantPage() {
         image: request.image ?? null,
         conversation: true,
         mode,
+        history: request.history,
       }),
     onSuccess: (response, request) => {
       setTurns((current) => [
@@ -149,10 +159,21 @@ export default function AssistantPage() {
   })
 
   const sendMessage = async (messageText = text) => {
+    const history: AiAssistantHistoryMessage[] = turns.flatMap((turn) => {
+      const requestContent = [
+        turn.request.text,
+        turn.request.imageName ? `[Изображение: ${turn.request.imageName}]` : "",
+      ].filter(Boolean).join("\n")
+      return [
+        { role: "user" as const, content: requestContent },
+        { role: "assistant" as const, content: turn.response.reply_text },
+      ]
+    })
     const request: ChatRequest = {
       text: messageText.trim(),
       image: imageFile,
       imageName: imageFile?.name,
+      history,
     }
     if ((!request.text && !request.image) || executeMutation.isPending) return
 

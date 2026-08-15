@@ -18,14 +18,15 @@ from rest_framework.response import Response
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 
-from .ai_service import AiOperationService, FINAL_CONFIRMATION_FIELD, OpenRouterToolPlanner
+from .agent_service import OpenRouterToolAgent, execute_agent_tool
+from .ai_service import AiOperationService, FINAL_CONFIRMATION_FIELD
 from .models import *
 from .serializers import *
 
 
 class AiAssistantViewSet(viewsets.ViewSet):
     operation_service_class = AiOperationService
-    tool_planner_class = OpenRouterToolPlanner
+    tool_agent_class = OpenRouterToolAgent
     serializer_class = AiAssistantExecuteSerializer
 
     def get_permissions(self):
@@ -36,11 +37,11 @@ class AiAssistantViewSet(viewsets.ViewSet):
     def get_operation_service(self):
         return self.operation_service_class()
 
-    def get_tool_planner(self):
+    def get_tool_agent(self):
         api_key = getattr(settings, 'AI_OPENROUTER_API_KEY', '')
         if not api_key:
             return None
-        return self.tool_planner_class(
+        return self.tool_agent_class(
             api_key=api_key,
             model_name=getattr(settings, 'AI_OPENROUTER_MODEL', 'google/gemini-2.5-flash'),
         )
@@ -998,71 +999,81 @@ class AiAssistantViewSet(viewsets.ViewSet):
         http_status = status.HTTP_201_CREATED if result['status'] == 'created' else status.HTTP_200_OK
         return Response(self._build_response_payload(result, user=request.user), status=http_status)
 
-    def _combine_agent_responses(self, action_results):
-        if len(action_results) == 1:
-            payload = dict(action_results[0]['payload'])
-            parsed = dict(payload.get('parsed') or {})
-            parsed['agent_actions'] = [{
-                'name': action_results[0]['name'],
-                'instruction': action_results[0]['instruction'],
-            }]
-            payload['parsed'] = parsed
-            return payload
-
-        payloads = [item['payload'] for item in action_results]
-        statuses = [payload.get('status') for payload in payloads]
-        if 'needs_confirmation' in statuses:
-            selected_status = 'needs_confirmation'
-        elif 'created' in statuses:
-            selected_status = 'created'
-        elif 'balance' in statuses and all(value == 'balance' for value in statuses):
-            selected_status = 'balance'
-        else:
-            selected_status = 'info'
-
-        created_objects = []
-        balances = []
-        missing_fields = []
-        for payload in payloads:
-            if payload.get('created_object'):
-                created_objects.append(payload['created_object'])
-            created_objects.extend(payload.get('created_objects') or [])
-            balances.extend(payload.get('balances') or [])
-            missing_fields.extend(payload.get('missing_fields') or [])
-
-        combined = {
-            'status': selected_status,
-            'intent': 'tool_agent',
+    def _agent_confirmation_result(self, *, reply_text, pending_calls):
+        return {
+            'status': 'needs_confirmation',
+            'intent': 'agent_tool_confirmation',
             'provider': 'openrouter-tools',
-            'confidence': min(
-                (float(payload.get('confidence') or 0.0) for payload in payloads),
-                default=0.0,
-            ),
-            'reply_text': '\n\n'.join(
-                str(payload.get('reply_text') or '').strip()
-                for payload in payloads
-                if str(payload.get('reply_text') or '').strip()
-            ),
+            'confidence': 1.0,
+            'reply_text': reply_text,
+            'missing_fields': [FINAL_CONFIRMATION_FIELD],
+            'options': {},
+            'preview': {'tool_calls': pending_calls},
+            'parsed': {'source': 'web', 'agent_tool_calls': pending_calls},
+        }
+
+    def _is_agent_confirmation(self, text):
+        return (text or '').strip().lower().replace('ё', 'е') in {
+            'да', 'ага', 'ок', 'okay', 'ok', 'yes', 'подтверждаю', 'подтвердить',
+            'подтверди', 'выполнить', 'выполняй', 'создать', 'создавай', '1',
+        }
+
+    def _execute_pending_agent_tools(self, *, request, pending, agent):
+        context = pending.context_payload or {}
+        calls = context.get('agent_tool_calls') or []
+        executed_results = list(context.get('executed_agent_tool_results') or [])
+        completed_count = min(int(context.get('completed_agent_tool_count') or 0), len(calls))
+        try:
+            for call_index, call in enumerate(calls[completed_count:], start=completed_count):
+                executed_results.append({
+                    'name': call['name'],
+                    'result': execute_agent_tool(request.user, call['name'], call.get('arguments') or {}),
+                })
+                context['completed_agent_tool_count'] = call_index + 1
+                context['executed_agent_tool_results'] = executed_results
+                pending.context_payload = context
+                pending.save(update_fields=['context_payload', 'updated_at'])
+        except Exception as exc:
+            result = self._agent_confirmation_result(
+                reply_text=f'Не удалось выполнить подготовленное действие: {exc}\nМожно повторить подтверждение или отменить команду.',
+                pending_calls=calls,
+            )
+            return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_200_OK)
+
+        self._close_pending_confirmation(pending)
+        try:
+            reply_text = agent.complete_after_confirmation(
+                original_text=context.get('original_text') or '',
+                executed_results=executed_results,
+            )
+        except ValueError:
+            reply_text = 'Подтвержденные изменения выполнены.'
+        result = {
+            'status': 'created',
+            'intent': 'agent_tools_executed',
+            'provider': 'openrouter-tools',
+            'confidence': 1.0,
+            'reply_text': reply_text,
             'parsed': {
                 'source': 'web',
-                'agent_actions': [
-                    {'name': item['name'], 'instruction': item['instruction']}
-                    for item in action_results
-                ],
+                'executed_tools': executed_results,
             },
         }
-        if created_objects:
-            combined['created_objects'] = created_objects
-        if balances:
-            combined['balances'] = balances
-        if missing_fields:
-            combined['missing_fields'] = list(dict.fromkeys(missing_fields))
-        return combined
+        self._create_audit_log(
+            source='web',
+            result=result,
+            input_text='Подтверждение agent tools',
+            user=request.user,
+            pending_confirmation=pending,
+            confirmed_fields=[FINAL_CONFIRMATION_FIELD],
+        )
+        return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_201_CREATED)
 
     def _execute_web_tool_agent(self, *, request, validated, image, image_bytes):
         text = validated.get('text') or ''
         pending = self._active_web_pending_confirmation(request.user)
-        if pending and not image_bytes and not self._looks_like_new_command(text):
+        agent = self.get_tool_agent()
+        if agent is None:
             return self._execute_web_conversation(
                 request=request,
                 validated=validated,
@@ -1070,8 +1081,29 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 image_bytes=image_bytes,
             )
 
-        planner = self.get_tool_planner()
-        if planner is None:
+        if pending and (pending.context_payload or {}).get('agent_tool_calls'):
+            if text.strip().lower() == '/cancel':
+                self._close_pending_confirmation(pending)
+                result = self._web_cancel_result(request=request, pending=pending)
+                return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_200_OK)
+            if self._is_agent_confirmation(text):
+                return self._execute_pending_agent_tools(request=request, pending=pending, agent=agent)
+            pending_calls = pending.context_payload.get('agent_tool_calls') or []
+            self._close_pending_confirmation(pending)
+            validated = dict(validated)
+            validated['history'] = [
+                *(validated.get('history') or []),
+                {
+                    'role': 'assistant',
+                    'content': (
+                        'Ранее были подготовлены, но не выполнены вызовы tools: '
+                        f'{json.dumps(pending_calls, ensure_ascii=False)}'
+                    ),
+                },
+            ]
+            pending = None
+
+        if pending:
             return self._execute_web_conversation(
                 request=request,
                 validated=validated,
@@ -1080,14 +1112,14 @@ class AiAssistantViewSet(viewsets.ViewSet):
             )
 
         try:
-            actions = planner.plan(
+            agent_result = agent.run(
+                user=request.user,
                 text=text,
                 image_bytes=image_bytes,
                 image_mime_type=getattr(image, 'content_type', None) if image else None,
+                history=validated.get('history') or [],
             )
         except ValueError:
-            actions = []
-        if not actions:
             return self._execute_web_conversation(
                 request=request,
                 validated=validated,
@@ -1095,32 +1127,55 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 image_bytes=image_bytes,
             )
 
-        action_results = []
-        for action_index, action in enumerate(actions[:5]):
-            action_validated = dict(validated)
-            action_validated['text'] = action['instruction']
-            action_image = image if action_index == 0 else None
-            action_image_bytes = image_bytes if action_index == 0 else None
-            response = self._execute_web_conversation(
-                request=request,
-                validated=action_validated,
-                image=action_image,
-                image_bytes=action_image_bytes,
+        pending_calls = agent_result.get('pending_calls') or []
+        if pending_calls:
+            result = self._agent_confirmation_result(
+                reply_text=agent_result.get('reply_text') or 'Подтвердите подготовленные изменения.',
+                pending_calls=pending_calls,
             )
-            action_results.append({
-                'name': action['name'],
-                'instruction': action['instruction'],
-                'payload': response.data,
-            })
-            if response.data.get('status') == 'needs_confirmation':
-                break
-            if image_bytes:
-                # One vision action can already return a batch of all screenshot operations.
-                break
+            AiPendingConfirmation.objects.filter(
+                source=AiPendingConfirmation.SOURCE_WEB,
+                user=request.user,
+                telegram_binding__isnull=True,
+                is_active=True,
+            ).update(is_active=False)
+            pending = AiPendingConfirmation.objects.create(
+                source=AiPendingConfirmation.SOURCE_WEB,
+                user=request.user,
+                intent='agent_tool_confirmation',
+                provider='openrouter-tools',
+                normalized_payload={},
+                missing_fields=[FINAL_CONFIRMATION_FIELD],
+                options_payload={},
+                context_payload={
+                    'agent_tool_calls': pending_calls,
+                    'original_text': text,
+                },
+                prompt_text=(result['reply_text'] or '')[:255],
+            )
+        else:
+            result = {
+                'status': 'info',
+                'intent': 'tool_agent',
+                'provider': 'openrouter-tools',
+                'confidence': 1.0,
+                'reply_text': agent_result.get('reply_text') or 'Готово.',
+                'parsed': {
+                    'source': 'web',
+                    'tool_trace': agent_result.get('tool_trace') or [],
+                },
+            }
+            pending = None
 
-        result = self._combine_agent_responses(action_results)
-        http_status = status.HTTP_201_CREATED if result.get('status') == 'created' else status.HTTP_200_OK
-        return Response(self._build_response_payload(result, user=request.user), status=http_status)
+        self._create_audit_log(
+            source='web',
+            result=result,
+            input_text=text,
+            image_sha256=hashlib.sha256(image_bytes).hexdigest() if image_bytes else '',
+            user=request.user,
+            pending_confirmation=pending,
+        )
+        return Response(self._build_response_payload(result, user=request.user), status=status.HTTP_200_OK)
 
     @extend_schema(
         request=AiAssistantExecuteSerializer,
