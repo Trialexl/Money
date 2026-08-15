@@ -3642,6 +3642,17 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('get_financial_report', tool_names)
         self.assertIn('create_transaction', tool_names)
         self.assertIn('delete_investment_operation', tool_names)
+        self.assertIn('calculate', tool_names)
+
+    def test_agent_calculator_handles_balance_difference_without_write(self):
+        result = agent_service.execute_agent_tool(
+            self.admin_user,
+            'calculate',
+            {'expression': '13965.64 - 13966.18'},
+        )
+
+        self.assertEqual(result['result'], '-0.54')
+        self.assertFalse(AiPendingConfirmation.objects.exists())
 
     def test_openrouter_tool_agent_returns_read_result_to_llm_and_keeps_history(self):
         agent = agent_service.OpenRouterToolAgent(

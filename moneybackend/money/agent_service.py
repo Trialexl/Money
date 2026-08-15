@@ -1,11 +1,14 @@
+import ast
 import base64
 import json
+from decimal import Decimal, DivisionByZero, InvalidOperation
 from urllib import error, request
 
 from asgiref.sync import async_to_sync, sync_to_async
 from django.conf import settings
 from django.utils import timezone
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from rest_framework.test import APIClient
 
 from mcp_gateway.domain_tools import (
@@ -21,6 +24,47 @@ AGENT_MAX_TOOL_RESULT_CHARS = 50_000
 
 _agent_mcp = FastMCP('FrontMoney web agent tools')
 register_domain_tools(_agent_mcp)
+
+
+def _calculate_decimal_expression(expression):
+    operators = {
+        ast.Add: lambda left, right: left + right,
+        ast.Sub: lambda left, right: left - right,
+        ast.Mult: lambda left, right: left * right,
+        ast.Div: lambda left, right: left / right,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return Decimal(str(node.value))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = evaluate(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and type(node.op) in operators:
+            return operators[type(node.op)](evaluate(node.left), evaluate(node.right))
+        raise ValueError('Разрешены только числа, скобки и операции +, -, *, /.')
+
+    normalized = str(expression or '').strip().replace(',', '.')
+    if not normalized or len(normalized) > 200:
+        raise ValueError('Передайте короткое арифметическое выражение.')
+    try:
+        return evaluate(ast.parse(normalized, mode='eval'))
+    except (SyntaxError, DivisionByZero, InvalidOperation, ZeroDivisionError) as exc:
+        raise ValueError('Некорректное арифметическое выражение.') from exc
+
+
+@_agent_mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+))
+def calculate(expression: str):
+    """Calculate an exact decimal arithmetic expression without changing financial data."""
+    result = _calculate_decimal_expression(expression)
+    return {'expression': expression, 'result': format(result, 'f')}
 
 
 def _json_safe(value):
@@ -114,6 +158,12 @@ class OpenRouterToolAgent:
                 'Ты напрямую видишь запрос и историю диалога. Используй доступные tools только '
                 'когда нужны данные приложения или действие. Для обычных вопросов, приветствий '
                 'и вопросов о своей работе отвечай самостоятельно без tool. Не выдумывай данные. '
+                'Для арифметики всегда используй calculate. Фразы «отними», «сложи», «посчитай», '
+                '«покажи результат» и «покажи разницу» считай просьбой о вычислении, если пользователь '
+                'явно не попросил «создай расход», «спиши», «запиши операцию» или другое изменение данных. '
+                'Гипотетический расчет разрешен даже при отрицательном результате: покажи формулу и число, '
+                'не отказывай из-за недостаточного остатка. Учитывай последнее уточнение пользователя и '
+                'не повторяй предыдущий ответ, если он просит результат, разницу или исправление. '
                 'Перед действиями находи UUID через read-only tools. Все tools, меняющие данные, '
                 'сервер не выполнит сразу: он вернет requires_confirmation=true. Объясни пользователю, '
                 'что именно подготовлено, и попроси подтвердить. Никогда не утверждай, что изменение '
