@@ -27,6 +27,9 @@ services:
   backend:
     image: trialexl/money-backend:latest
     restart: unless-stopped
+    # Reap orphaned child processes created by recurring `docker compose exec`
+    # jobs so the container does not gradually exhaust its PID limit.
+    init: true
     command:
       - uvicorn
       - mcp_gateway.combined:application
