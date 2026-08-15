@@ -1037,6 +1037,133 @@ def _extract_cash_flow_item_hint(text, wallets):
     return cleaned_text or None
 
 
+TOOL_AGENT_ACTIONS = {
+    'record_transactions': (
+        'Создать один или несколько доходов, расходов, переводов или инвестиционных операций.'
+    ),
+    'get_wallet_balances': 'Узнать остаток одного или всех кошельков.',
+    'analyze_expenses': 'Получить расходы по статьям за указанный месяц или период.',
+    'analyze_budget': 'Получить бюджет по статьям за указанный месяц или период.',
+    'analyze_investments': (
+        'Посмотреть портфель, позицию инструмента или рекомендации по ребалансировке.'
+    ),
+    'assistant_help': 'Объяснить возможности финансового ассистента.',
+}
+
+
+class OpenRouterToolPlanner:
+    """Selects web-assistant actions without changing the classic intent pipeline."""
+
+    def __init__(self, api_key, model_name):
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def plan(self, *, text=None, image_bytes=None, image_mime_type=None):
+        content = [{
+            'type': 'text',
+            'text': (
+                'Ты планировщик финансового ассистента. Выбери одно или несколько действий '
+                'из tools, необходимых для выполнения запроса. Для каждого вызова передай в '
+                'instruction самостоятельную русскую команду со всеми найденными деталями: '
+                'суммами, датами, кошельками, статьями и названиями инструментов. Не выдумывай '
+                'отсутствующие данные. Если приложен скриншот, внимательно извлеки из него все '
+                'видимые операции. Ответ пользователю не пиши — только вызови tools.\n\n'
+                f'Запрос пользователя: {text or "(только изображение)"}'
+            ),
+        }]
+        if image_bytes:
+            content.append({
+                'type': 'image_url',
+                'image_url': {
+                    'url': (
+                        f'data:{image_mime_type or "image/png"};base64,'
+                        f'{base64.b64encode(image_bytes).decode("ascii")}'
+                    ),
+                },
+            })
+
+        payload = {
+            'model': self.model_name,
+            'messages': [{'role': 'user', 'content': content}],
+            'tools': [
+                {
+                    'type': 'function',
+                    'function': {
+                        'name': name,
+                        'description': description,
+                        'parameters': {
+                            'type': 'object',
+                            'properties': {
+                                'instruction': {
+                                    'type': 'string',
+                                    'description': 'Полная команда для финансового сервиса на русском языке.',
+                                },
+                            },
+                            'required': ['instruction'],
+                            'additionalProperties': False,
+                        },
+                    },
+                }
+                for name, description in TOOL_AGENT_ACTIONS.items()
+            ],
+            'tool_choice': 'auto',
+            'temperature': 0.1,
+            'max_tokens': min(getattr(settings, 'AI_OPENROUTER_MAX_TOKENS', 4096), 2048),
+            'provider': {'allow_fallbacks': True},
+        }
+        raw = self._request(payload)
+        try:
+            message = raw['choices'][0]['message']
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError('OpenRouter response does not contain a chat message.') from exc
+
+        actions = []
+        for tool_call in message.get('tool_calls') or []:
+            function = tool_call.get('function') or {}
+            name = function.get('name')
+            if name not in TOOL_AGENT_ACTIONS:
+                continue
+            try:
+                arguments = json.loads(function.get('arguments') or '{}')
+            except (TypeError, json.JSONDecodeError):
+                continue
+            instruction = str(arguments.get('instruction') or '').strip()
+            if instruction:
+                actions.append({'name': name, 'instruction': instruction})
+
+        return actions
+
+    def _request(self, payload):
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json',
+        }
+        site_url = getattr(settings, 'AI_OPENROUTER_SITE_URL', '')
+        app_name = getattr(settings, 'AI_OPENROUTER_APP_NAME', '')
+        if site_url:
+            headers['HTTP-Referer'] = site_url
+        if app_name:
+            headers['X-Title'] = app_name
+        http_request = request.Request(
+            getattr(
+                settings,
+                'AI_OPENROUTER_BASE_URL',
+                'https://openrouter.ai/api/v1/chat/completions',
+            ),
+            data=json.dumps(payload).encode('utf-8'),
+            headers=headers,
+            method='POST',
+        )
+        try:
+            with request.urlopen(http_request, timeout=30) as response:
+                return json.loads(response.read().decode('utf-8'))
+        except error.HTTPError as exc:
+            error_body = exc.read().decode('utf-8', errors='ignore')
+            raise ValueError(f'OpenRouter tool planning failed: {error_body or exc.reason}') from exc
+        except error.URLError as exc:
+            raise ValueError(f'OpenRouter tool planning failed: {exc.reason}') from exc
+
+
 class OpenRouterIntentProvider:
     def __init__(self, api_key, model_name):
         self.api_key = api_key

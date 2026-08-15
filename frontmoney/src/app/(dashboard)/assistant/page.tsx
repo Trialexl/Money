@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { AiService, type AiAssistantResponse } from "@/services/ai-service"
+import { AiService, type AiAssistantMode, type AiAssistantResponse } from "@/services/ai-service"
 
 type ChatRequest = {
   text: string
@@ -112,6 +112,7 @@ function responseChoices(response: AiAssistantResponse | null): OptionChoice[] {
 }
 
 export default function AssistantPage() {
+  const [mode, setMode] = useState<AiAssistantMode>("classic")
   const [text, setText] = useState("")
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [turns, setTurns] = useState<ChatTurn[]>([])
@@ -133,6 +134,7 @@ export default function AssistantPage() {
         text: request.text || undefined,
         image: request.image ?? null,
         conversation: true,
+        mode,
       }),
     onSuccess: (response, request) => {
       setTurns((current) => [
@@ -173,6 +175,30 @@ export default function AssistantPage() {
     <div className="space-y-5">
       <PageHeader eyebrow="Ассистент" title="Диалог" description="Вопрос и ответ" compact />
 
+      <div className="flex flex-wrap items-center gap-2" aria-label="Режим ассистента">
+        <Button
+          type="button"
+          variant={mode === "classic" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setMode("classic")}
+          disabled={executeMutation.isPending}
+        >
+          Обычный
+        </Button>
+        <Button
+          type="button"
+          variant={mode === "agent" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setMode("agent")}
+          disabled={executeMutation.isPending}
+        >
+          Умный режим
+        </Button>
+        <span className="text-sm text-muted-foreground">
+          {mode === "agent" ? "Сам выбирает нужные действия" : "Текущий сценарий ассистента"}
+        </span>
+      </div>
+
       <Card className="overflow-hidden">
         <div className="flex min-h-[68vh] flex-col">
           <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
@@ -181,7 +207,9 @@ export default function AssistantPage() {
                 <Bot className="h-4 w-4" />
               </div>
               <div className="max-w-[min(88%,760px)] rounded-md border border-border/70 bg-muted/45 px-4 py-3 text-sm leading-6">
-                Напишите сообщение.
+                {mode === "agent"
+                  ? "Опишите результат или приложите скриншот — я выберу нужные действия."
+                  : "Напишите сообщение."}
               </div>
             </div>
 

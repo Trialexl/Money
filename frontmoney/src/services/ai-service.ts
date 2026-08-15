@@ -2,6 +2,7 @@ import api from "@/lib/api"
 import { fromApiAmount, fromApiDateTime } from "@/types"
 
 export type AiAssistantStatus = "created" | "preview" | "needs_confirmation" | "balance" | "duplicate" | "info"
+export type AiAssistantMode = "classic" | "agent"
 
 export interface AiAssistantCreatedObject {
   model: string
@@ -108,6 +109,7 @@ export const AiService = {
     dryRun?: boolean
     image?: File | null
     conversation?: boolean
+    mode?: AiAssistantMode
   }) => {
     const hasImage = Boolean(payload.image)
 
@@ -124,6 +126,9 @@ export const AiService = {
       }
       if (typeof payload.conversation === "boolean") {
         formData.append("conversation", String(payload.conversation))
+      }
+      if (payload.mode) {
+        formData.append("mode", payload.mode)
       }
       if (payload.image) {
         formData.append("image", payload.image)
@@ -142,6 +147,7 @@ export const AiService = {
       wallet: payload.wallet || undefined,
       dry_run: payload.dryRun ?? false,
       conversation: payload.conversation ?? false,
+      mode: payload.mode ?? "classic",
     })
 
     return normalizeAiResponse(data)

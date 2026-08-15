@@ -3631,6 +3631,47 @@ class AiAssistantApiTests(TestCase):
         self.assertIn('wallet_hint', prompt)
         self.assertIn('cash_flow_item_hint', prompt)
 
+    def test_openrouter_tool_planner_sends_available_tools_and_reads_calls(self):
+        planner = ai_service.OpenRouterToolPlanner(
+            api_key='openrouter-test-key',
+            model_name='google/gemini-2.5-flash',
+        )
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    'choices': [{
+                        'message': {
+                            'tool_calls': [{
+                                'type': 'function',
+                                'function': {
+                                    'name': 'get_wallet_balances',
+                                    'arguments': json.dumps({'instruction': 'остатки по кошелькам'}),
+                                },
+                            }],
+                        },
+                    }],
+                }).encode('utf-8')
+
+        with patch('money.ai_service.request.urlopen', return_value=_FakeResponse()) as mocked_urlopen:
+            actions = planner.plan(text='Сколько у меня денег?')
+
+        self.assertEqual(actions, [{
+            'name': 'get_wallet_balances',
+            'instruction': 'остатки по кошелькам',
+        }])
+        request_payload = json.loads(mocked_urlopen.call_args.args[0].data.decode('utf-8'))
+        tool_names = {tool['function']['name'] for tool in request_payload['tools']}
+        self.assertIn('record_transactions', tool_names)
+        self.assertIn('analyze_investments', tool_names)
+        self.assertEqual(request_payload['tool_choice'], 'auto')
+
     @override_settings(
         AI_OPENAI_API_KEY='openai-test-key',
         AI_OPENAI_TRANSCRIBE_BASE_URL='https://api.openai.com/v1/audio/transcriptions',
@@ -3734,6 +3775,49 @@ class AiAssistantApiTests(TestCase):
         )
         pending.refresh_from_db()
         self.assertFalse(pending.is_active)
+
+    @override_settings(AI_OPENROUTER_API_KEY='openrouter-test-key')
+    def test_ai_execute_agent_mode_plans_and_executes_web_action(self):
+        with patch(
+            'money.views.OpenRouterToolPlanner.plan',
+            return_value=[{
+                'name': 'record_transactions',
+                'instruction': 'расход сбер еда 2750',
+            }],
+        ) as mocked_plan:
+            response = self.client.post(
+                '/api/v1/ai/execute/',
+                {
+                    'text': 'Запиши мою покупку продуктов на 2750 со Сбера',
+                    'conversation': True,
+                    'mode': 'agent',
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        expenditure = Expenditure.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(expenditure.amount, Decimal('2750.00'))
+        self.assertEqual(response.data['parsed']['agent_actions'][0]['name'], 'record_transactions')
+        mocked_plan.assert_called_once()
+
+    @override_settings(AI_OPENROUTER_API_KEY='openrouter-test-key')
+    def test_ai_execute_classic_mode_does_not_call_tool_planner(self):
+        with patch('money.views.OpenRouterToolPlanner.plan') as mocked_plan:
+            response = self.client.post(
+                '/api/v1/ai/execute/',
+                {
+                    'text': 'остатки по кошелькам',
+                    'conversation': True,
+                    'mode': 'classic',
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'balance')
+        mocked_plan.assert_not_called()
 
     def test_ai_web_response_links_mentioned_wallets_and_cash_flow_items(self):
         from .views import AiAssistantViewSet

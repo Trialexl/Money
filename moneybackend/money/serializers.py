@@ -686,11 +686,19 @@ class OneCSyncOutboxAckResponseSerializer(serializers.Serializer):
 
 
 class AiAssistantExecuteSerializer(serializers.Serializer):
+    MODE_CLASSIC = 'classic'
+    MODE_AGENT = 'agent'
+
     text = serializers.CharField(required=False, allow_blank=True)
     image = serializers.FileField(required=False)
     wallet = serializers.UUIDField(required=False)
     dry_run = serializers.BooleanField(required=False, default=False)
     conversation = serializers.BooleanField(required=False, default=False)
+    mode = serializers.ChoiceField(
+        choices=[MODE_CLASSIC, MODE_AGENT],
+        required=False,
+        default=MODE_CLASSIC,
+    )
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
