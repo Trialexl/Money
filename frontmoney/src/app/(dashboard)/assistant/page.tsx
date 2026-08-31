@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { isAxiosError } from "axios"
 import { useMutation } from "@tanstack/react-query"
 import { Bot, FileImage, Loader2, SendHorizontal, X } from "lucide-react"
 
@@ -165,7 +166,7 @@ export default function AssistantPage() {
         turn.request.imageName ? `[Изображение: ${turn.request.imageName}]` : "",
       ].filter(Boolean).join("\n")
       return [
-        { role: "user" as const, content: requestContent },
+        { role: "user" as const, content: requestContent, image: turn.request.image },
         { role: "assistant" as const, content: turn.response.reply_text },
       ]
     })
@@ -342,7 +343,11 @@ export default function AssistantPage() {
             ) : null}
 
             {executeMutation.isError ? (
-              <div className="mb-3 text-sm text-destructive">Не удалось получить ответ. Повторите отправку.</div>
+              <div className="mb-3 text-sm text-destructive">
+                {isAxiosError(executeMutation.error) && typeof executeMutation.error.response?.data?.detail === "string"
+                  ? executeMutation.error.response.data.detail
+                  : "Не удалось получить ответ. Повторите отправку."}
+              </div>
             ) : null}
 
             <div className="flex items-end gap-2">

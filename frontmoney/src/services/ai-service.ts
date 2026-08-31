@@ -3,7 +3,7 @@ import { fromApiAmount, fromApiDateTime } from "@/types"
 
 export type AiAssistantStatus = "created" | "preview" | "needs_confirmation" | "balance" | "duplicate" | "info"
 export type AiAssistantMode = "classic" | "agent"
-export type AiAssistantHistoryMessage = { role: "user" | "assistant"; content: string }
+export type AiAssistantHistoryMessage = { role: "user" | "assistant"; content: string; image?: File | null }
 
 export interface AiAssistantCreatedObject {
   model: string
@@ -113,7 +113,19 @@ export const AiService = {
     mode?: AiAssistantMode
     history?: AiAssistantHistoryMessage[]
   }) => {
-    const hasImage = Boolean(payload.image)
+    const recentHistory = (payload.history ?? []).slice(-20)
+    const imageMessages = payload.mode === "agent"
+      ? recentHistory.filter((item) => item.role === "user" && item.image).slice(-3)
+      : []
+    const history = recentHistory.map((item) => {
+      const imageIndex = imageMessages.indexOf(item)
+      return {
+        role: item.role,
+        content: item.content,
+        ...(imageIndex >= 0 ? { image_index: imageIndex } : {}),
+      }
+    })
+    const hasImage = Boolean(payload.image) || imageMessages.length > 0
 
     if (hasImage) {
       const formData = new FormData()
@@ -132,8 +144,11 @@ export const AiService = {
       if (payload.mode) {
         formData.append("mode", payload.mode)
       }
-      if (payload.history?.length) {
-        formData.append("history", JSON.stringify(payload.history))
+      if (history.length) {
+        formData.append("history", JSON.stringify(history))
+      }
+      for (const item of imageMessages) {
+        formData.append("history_images", item.image!)
       }
       if (payload.image) {
         formData.append("image", payload.image)
@@ -153,7 +168,7 @@ export const AiService = {
       dry_run: payload.dryRun ?? false,
       conversation: payload.conversation ?? false,
       mode: payload.mode ?? "classic",
-      history: payload.history ?? [],
+      history,
     })
 
     return normalizeAiResponse(data)

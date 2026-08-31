@@ -731,6 +731,25 @@ def _contains_batch_exclusion_instruction(text):
     return any(re.search(pattern, normalized) for pattern in patterns)
 
 
+def _forced_batch_financial_intent(text):
+    """Honor an explicit user classification over visual bank direction markers."""
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    all_rows = r'(?:все|всё|кажд\w*)'
+    if re.search(
+        rf'\b{all_rows}\s+(?:(?:это|операци\w*|строк\w*)\s+)?(?:расход\w*|трат\w*|списан\w*)\b',
+        normalized,
+    ):
+        return INTENT_CREATE_EXPENDITURE
+    if re.search(
+        rf'\b{all_rows}\s+(?:(?:это|операци\w*|строк\w*)\s+)?(?:доход\w*|приход\w*|поступлен\w*)\b',
+        normalized,
+    ):
+        return INTENT_CREATE_RECEIPT
+    return None
+
+
 def _extract_batch_target_indexes(text):
     normalized = _normalize_text(text)
     if not normalized or not re.search(r'\b(?:строк|операц|пункт|запис)\w*', normalized):
@@ -1197,6 +1216,11 @@ class OpenRouterIntentProvider:
             'Каждый элемент operations должен описывать одну денежную операцию. '
             'Если текст пользователя содержит указания по строкам списка, например "3 пропусти", "2 продукты", '
             '"1 не заноси", примени их сразу при формировании итогового массива operations. '
+            'Явные слова пользователя имеют приоритет над иконками и подписями банка. Если пользователь '
+            'пишет «все/всё расходы», верни каждую денежную строку как create_expenditure с operation_sign=outgoing, '
+            'даже если в банке она подписана как перевод или отмечена входящей стрелкой. '
+            'Для таких строк нужен wallet_hint одного кошелька, а wallet_from_hint и wallet_to_hint не нужны. '
+            'Аналогично «все/всё доходы» означает create_receipt с operation_sign=incoming. '
             'Для каждой операции из списка укажи source_index: номер строки на исходном скриншоте сверху вниз, начиная с 1. '
             'Если строка была исключена по указанию пользователя, просто не включай ее в operations. '
             'Игнорируй бонусные баллы, кешбэк в баллах, награды, счетчики и нефинансовые элементы. '
@@ -2477,6 +2501,7 @@ class AiOperationService:
         context = context or self.build_context()
         batch_raw = dict(parsed)
         operations = batch_raw.pop('operations', []) or []
+        forced_intent = _forced_batch_financial_intent(source_text)
         normalized_items = []
 
         for fallback_index, item_raw in enumerate(operations, start=1):
@@ -2484,7 +2509,17 @@ class AiOperationService:
                 continue
             merged_raw = dict(batch_raw)
             merged_raw.update(item_raw)
+            if forced_intent:
+                merged_raw['intent'] = forced_intent
+                merged_raw['operation_sign'] = (
+                    'outgoing' if forced_intent == INTENT_CREATE_EXPENDITURE else 'incoming'
+                )
+                merged_raw.pop('wallet_from_id', None)
+                merged_raw.pop('wallet_from_hint', None)
+                merged_raw.pop('wallet_to_id', None)
+                merged_raw.pop('wallet_to_hint', None)
             item_source_text = _collect_fallback_text(
+                source_text if forced_intent else None,
                 item_raw.get('comment'),
                 item_raw.get('merchant'),
                 item_raw.get('description'),
@@ -2504,6 +2539,9 @@ class AiOperationService:
                 )
             )
             normalized_items[-1]['source_index'] = int(item_raw.get('source_index') or fallback_index)
+            if forced_intent:
+                normalized_items[-1]['wallet_from'] = None
+                normalized_items[-1]['wallet_to'] = None
 
         return {
             'batch': True,

@@ -3445,6 +3445,44 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(expenditure.amount, Decimal('465.75'))
         self.assertIn('Альфа история операций', expenditure.comment)
 
+    def test_ai_service_explicit_all_expenses_overrides_transfer_rows(self):
+        wallet = Wallet.objects.create(name='Сбербанк2')
+        WalletAlias.objects.create(wallet=wallet, alias='сбербанк2')
+        travel = CashFlowItem.objects.create(name='Путешествие')
+        provider_result = {
+            'intent': 'create_transfer', 'confidence': 0.98,
+            'operations': [{
+                'source_index': index, 'intent': 'create_transfer',
+                'operation_sign': 'transfer', 'amount': amount,
+                'wallet_from_hint': 'неизвестный', 'wallet_to_hint': person,
+                'description': 'Перевод по СБП',
+            } for index, (amount, person) in enumerate([
+                ('330', 'Марго'), ('300', 'Мария'), ('210', 'Мариям'),
+                ('200', 'Борис'), ('460', 'NETMONET'), ('10500', 'Наталья'),
+                ('2000', 'Рая'), ('5000', 'Эльдар'),
+            ], start=1)],
+        }
+        provider = type('MockProvider', (), {'parse': Mock(return_value=provider_result)})()
+        with patch('money.ai_service._get_intent_provider', return_value=(provider, 'openrouter')):
+            result = ai_service.AiOperationService().process(
+                text='Сбербанк2. Всё расходы, статья Путешествие',
+                image_bytes=b'bank-history', image_mime_type='image/jpeg',
+                dry_run=True, source='telegram', user=self.telegram_bound_user,
+            )
+
+        self.assertEqual(result['status'], 'needs_confirmation')
+        self.assertEqual(result['missing_fields'], ['final_confirmation'])
+        self.assertEqual(len(result['parsed']['items']), 8)
+        for item in result['parsed']['items']:
+            self.assertEqual(item['intent'], 'create_expenditure')
+            self.assertEqual(item['wallet'], wallet)
+            self.assertEqual(item['cash_flow_item'], travel)
+            self.assertIsNone(item['wallet_from'])
+            self.assertIsNone(item['wallet_to'])
+        self.assertNotIn('кошелек списания', result['reply_text'])
+        self.assertNotIn('кошелек зачисления', result['reply_text'])
+        self.assertFalse(Expenditure.objects.filter(wallet=wallet).exists())
+
     def test_ai_execute_creates_multiple_expenditures_from_bank_history_screenshot(self):
         first_provider_result = {
             'intent': 'create_expenditure',
@@ -3653,6 +3691,134 @@ class AiAssistantApiTests(TestCase):
 
         self.assertEqual(result['result'], '-0.54')
         self.assertFalse(AiPendingConfirmation.objects.exists())
+
+    @override_settings(ALLOWED_HOSTS=['finance.example.com'], APP_DOMAIN='finance.example.com', SECURE_SSL_REDIRECT=True)
+    def test_agent_tools_work_with_production_host_and_https(self):
+        result = agent_service.execute_agent_tool(self.admin_user, 'list_wallets', {})
+        self.assertIn('Сбербанк', json.dumps(result, ensure_ascii=False))
+
+    def test_agent_write_executor_requires_explicit_confirmation(self):
+        with self.assertRaisesRegex(ValueError, 'подтверждения'):
+            agent_service.execute_agent_tool(self.admin_user, 'create_transaction', {})
+
+    @override_settings(AI_OPENROUTER_API_KEY='')
+    def test_agent_missing_key_does_not_fall_back_to_unconfirmed_classic_write(self):
+        response = self.client.post('/api/v1/ai/execute/', {
+            'text': 'расход сбер еда 990', 'conversation': True, 'mode': 'agent',
+        }, format='json')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['code'], 'agent_unavailable')
+        self.assertFalse(Expenditure.objects.exists())
+
+    @override_settings(AI_OPENROUTER_API_KEY='test-key')
+    def test_agent_provider_error_does_not_fall_back_to_classic_write(self):
+        with patch.object(agent_service.OpenRouterToolAgent, 'run', side_effect=ValueError('provider error')):
+            response = self.client.post('/api/v1/ai/execute/', {
+                'text': 'расход сбер еда 990', 'conversation': True, 'mode': 'agent',
+            }, format='json')
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(Expenditure.objects.exists())
+
+    @override_settings(AI_OPENROUTER_API_KEY='test-key')
+    def test_agent_followup_preserves_screenshot_in_llm_history(self):
+        seen = []
+
+        def reply(payload):
+            seen.append(payload)
+            return {'choices': [{'message': {'content': 'Уточните дату верхних строк.'}}]}
+
+        with patch.object(agent_service.OpenRouterToolAgent, '_request', side_effect=reply):
+            response = self.client.post('/api/v1/ai/execute/', {
+                'text': 'Создай эти операции, расход Путешествия, кошелек сбер',
+                'mode': 'agent', 'conversation': 'true',
+                'history': json.dumps([
+                    {'role': 'user', 'content': 'Сбер это всё расходы путешествия', 'image_index': 0},
+                    {'role': 'assistant', 'content': 'Уточните задачу'},
+                ]),
+                'history_images': [SimpleUploadedFile('bank.png', b'bank-image', content_type='image/png')],
+            }, format='multipart')
+        self.assertEqual(response.status_code, 200)
+        user_history = seen[0]['messages'][1]
+        self.assertEqual(user_history['role'], 'user')
+        self.assertEqual(user_history['content'][0]['text'], 'Сбер это всё расходы путешествия')
+        self.assertEqual(user_history['content'][1]['image_url']['url'], 'data:image/png;base64,YmFuay1pbWFnZQ==')
+        self.assertIn('Создай эти операции', seen[0]['messages'][-1]['content'][0]['text'])
+        self.assertFalse(Expenditure.objects.exists())
+
+    def test_agent_history_rejects_missing_image_reference(self):
+        response = self.client.post('/api/v1/ai/execute/', {
+            'text': 'Создай эти операции', 'mode': 'agent', 'conversation': True,
+            'history': [{'role': 'user', 'content': 'Скриншот', 'image_index': 0}],
+        }, format='json')
+        self.assertEqual(response.status_code, 400)
+
+    @override_settings(AI_OPENROUTER_API_KEY='test-key')
+    def test_agent_does_not_continue_classic_pending_write(self):
+        self.client.post('/api/v1/ai/execute/', {
+            'text': 'приход сбер 10000', 'conversation': True,
+        }, format='json')
+        with patch.object(agent_service.OpenRouterToolAgent, 'run', return_value={
+            'reply_text': 'Уточните задачу', 'pending_calls': [], 'tool_trace': [],
+        }) as run:
+            response = self.client.post('/api/v1/ai/execute/', {
+                'text': 'Зарплата', 'mode': 'agent', 'conversation': True,
+            }, format='json')
+        self.assertEqual(response.status_code, 200)
+        run.assert_called_once()
+
+    @override_settings(
+        AI_OPENROUTER_API_KEY='test-key', ALLOWED_HOSTS=['finance.example.com'],
+        APP_DOMAIN='finance.example.com', SECURE_SSL_REDIRECT=True,
+    )
+    def test_agent_batch_uses_real_catalog_tools_and_waits_for_confirmation(self):
+        travel = CashFlowItem.objects.create(name='Путешествия')
+        amounts = ['330.00', '300.00', '210.00', '200.00', '460.00', '10500.00', '2000.00', '5000.00']
+
+        def call(name, arguments, index):
+            return {'id': f'call-{index}', 'type': 'function', 'function': {
+                'name': name, 'arguments': json.dumps(arguments),
+            }}
+
+        stages = []
+
+        def llm(payload):
+            stages.append(True)
+            if len(stages) == 1:
+                return {'choices': [{'message': {'tool_calls': [
+                    call('list_wallets', {}, 'wallets'), call('list_cash_flow_items', {}, 'items'),
+                ]}}]}
+            if len(stages) == 2:
+                results = [json.loads(m['content']) for m in payload['messages'] if m['role'] == 'tool']
+                self.assertTrue(all(r['executed'] for r in results))
+                self.assertIn(str(self.wallet_sber.id), json.dumps(results))
+                self.assertIn(str(travel.id), json.dumps(results))
+                return {'choices': [{'message': {'tool_calls': [
+                    call('create_transaction', {
+                        'kind': 'expense', 'amount': amount, 'wallet_id': str(self.wallet_sber.id),
+                        'cash_flow_item_id': str(travel.id),
+                        'date': '2026-08-29T12:00:00+03:00',
+                    }, index) for index, amount in enumerate(amounts)
+                ]}}]}
+            self.assertFalse(Expenditure.objects.exists())
+            return {'choices': [{'message': {'content': 'Подготовлено 8 расходов. Подтвердите.'}}]}
+
+        transport = {'secure': True, 'HTTP_HOST': 'finance.example.com'}
+        with patch.object(agent_service.OpenRouterToolAgent, '_request', side_effect=llm):
+            response = self.client.post('/api/v1/ai/execute/', {
+                'text': 'Создай 8 расходов, кошелек Сбер, статья Путешествия, дата всех 29 августа 2026',
+                'mode': 'agent', 'conversation': True,
+            }, format='json', **transport)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'needs_confirmation')
+        self.assertEqual(len(response.data['preview']['tool_calls']), 8)
+        self.assertFalse(Expenditure.objects.exists())
+        with patch.object(agent_service.OpenRouterToolAgent, 'complete_after_confirmation', return_value='Записано 8 расходов.'):
+            confirmation = self.client.post('/api/v1/ai/execute/', {
+                'text': 'Подтвердить', 'mode': 'agent', 'conversation': True,
+            }, format='json', **transport)
+        self.assertEqual(confirmation.status_code, 201)
+        self.assertEqual(Expenditure.objects.filter(cash_flow_item=travel).count(), 8)
+        self.assertEqual(sum(Expenditure.objects.values_list('amount', flat=True)), Decimal('19000.00'))
 
     def test_openrouter_tool_agent_returns_read_result_to_llm_and_keeps_history(self):
         agent = agent_service.OpenRouterToolAgent(

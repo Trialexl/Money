@@ -725,7 +725,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             user=user,
             telegram_binding__isnull=True,
             is_active=True,
-        ).order_by('-updated_at').first()
+        ).exclude(intent='agent_tool_confirmation').order_by('-updated_at').first()
 
     def _upsert_web_pending_confirmation(self, *, user, result, input_context=None):
         if result.get('status') != 'needs_confirmation':
@@ -740,7 +740,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
             user=user,
             telegram_binding__isnull=True,
             is_active=True,
-        ).update(is_active=False)
+        ).exclude(intent='agent_tool_confirmation').update(is_active=False)
 
         return AiPendingConfirmation.objects.create(
             source=AiPendingConfirmation.SOURCE_WEB,
@@ -1027,7 +1027,9 @@ class AiAssistantViewSet(viewsets.ViewSet):
             for call_index, call in enumerate(calls[completed_count:], start=completed_count):
                 executed_results.append({
                     'name': call['name'],
-                    'result': execute_agent_tool(request.user, call['name'], call.get('arguments') or {}),
+                    'result': execute_agent_tool(
+                        request.user, call['name'], call.get('arguments') or {}, allow_write=True,
+                    ),
                 })
                 context['completed_agent_tool_count'] = call_index + 1
                 context['executed_agent_tool_results'] = executed_results
@@ -1071,15 +1073,19 @@ class AiAssistantViewSet(viewsets.ViewSet):
 
     def _execute_web_tool_agent(self, *, request, validated, image, image_bytes):
         text = validated.get('text') or ''
-        pending = self._active_web_pending_confirmation(request.user)
+        pending = AiPendingConfirmation.objects.filter(
+            source=AiPendingConfirmation.SOURCE_WEB,
+            user=request.user,
+            telegram_binding__isnull=True,
+            intent='agent_tool_confirmation',
+            is_active=True,
+        ).order_by('-updated_at').first()
         agent = self.get_tool_agent()
         if agent is None:
-            return self._execute_web_conversation(
-                request=request,
-                validated=validated,
-                image=image,
-                image_bytes=image_bytes,
-            )
+            return Response({
+                'detail': 'Умный режим не настроен: отсутствует ключ LLM. Данные не изменены.',
+                'code': 'agent_unavailable',
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         if pending and (pending.context_payload or {}).get('agent_tool_calls'):
             if text.strip().lower() == '/cancel':
@@ -1103,29 +1109,28 @@ class AiAssistantViewSet(viewsets.ViewSet):
             ]
             pending = None
 
-        if pending:
-            return self._execute_web_conversation(
-                request=request,
-                validated=validated,
-                image=image,
-                image_bytes=image_bytes,
-            )
-
+        history = []
+        for item in validated.get('history') or []:
+            history_item = {'role': item['role'], 'content': item['content']}
+            if 'image_index' in item:
+                attachment = validated['history_images'][item['image_index']]
+                attachment.seek(0)
+                history_item['image_bytes'] = attachment.read()
+                history_item['image_mime_type'] = attachment.content_type
+            history.append(history_item)
         try:
             agent_result = agent.run(
                 user=request.user,
                 text=text,
                 image_bytes=image_bytes,
                 image_mime_type=getattr(image, 'content_type', None) if image else None,
-                history=validated.get('history') or [],
+                history=history,
             )
-        except ValueError:
-            return self._execute_web_conversation(
-                request=request,
-                validated=validated,
-                image=image,
-                image_bytes=image_bytes,
-            )
+        except (ValueError, TimeoutError):
+            return Response({
+                'detail': 'Не удалось получить ответ LLM. Попробуйте ещё раз. Данные не изменены.',
+                'code': 'agent_unavailable',
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         pending_calls = agent_result.get('pending_calls') or []
         if pending_calls:
@@ -1137,6 +1142,7 @@ class AiAssistantViewSet(viewsets.ViewSet):
                 source=AiPendingConfirmation.SOURCE_WEB,
                 user=request.user,
                 telegram_binding__isnull=True,
+                intent='agent_tool_confirmation',
                 is_active=True,
             ).update(is_active=False)
             pending = AiPendingConfirmation.objects.create(

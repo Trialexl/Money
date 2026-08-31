@@ -707,6 +707,9 @@ class AiAssistantExecuteSerializer(serializers.Serializer):
     dry_run = serializers.BooleanField(required=False, default=False)
     conversation = serializers.BooleanField(required=False, default=False)
     history = AiAssistantHistoryField(required=False, default=list)
+    history_images = serializers.ListField(
+        child=serializers.FileField(), required=False, default=list, max_length=3,
+    )
     mode = serializers.ChoiceField(
         choices=[MODE_CLASSIC, MODE_AGENT],
         required=False,
@@ -727,6 +730,18 @@ class AiAssistantExecuteSerializer(serializers.Serializer):
                 or not isinstance(item.get('content'), str)
             ):
                 raise serializers.ValidationError({'history': 'Некорректный формат сообщения истории.'})
+            if 'image_index' in item:
+                index = item['image_index']
+                if (
+                    item['role'] != 'user' or type(index) is not int
+                    or not 0 <= index < len(attrs.get('history_images') or [])
+                ):
+                    raise serializers.ValidationError({'history': 'Некорректная ссылка на изображение.'})
+        for attachment in attrs.get('history_images') or []:
+            if attachment.size > 10 * 1024 * 1024:
+                raise serializers.ValidationError({'history_images': 'Изображение превышает 10 МБ.'})
+            if attachment.content_type not in {'image/png', 'image/jpeg', 'image/webp', 'image/gif'}:
+                raise serializers.ValidationError({'history_images': 'Неподдерживаемый формат изображения.'})
         return attrs
 
 
