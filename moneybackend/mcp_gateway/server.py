@@ -96,17 +96,40 @@ async def oauth_metadata(request: Request) -> Response:
     )
 
 
+async def protected_resource_metadata(request: Request) -> Response:
+    """Keep the advertised authorization server byte-for-byte equal to its issuer."""
+    headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-store',
+    }
+    if request.method == 'OPTIONS':
+        return Response(status_code=204, headers=headers)
+    return JSONResponse(
+        {
+            'resource': settings.MCP_PUBLIC_URL,
+            'authorization_servers': [settings.MCP_ISSUER_URL],
+            'scopes_supported': [READ_SCOPE],
+            'bearer_methods_supported': ['header'],
+        },
+        headers=headers,
+    )
+
+
 def create_app():
     application = mcp.streamable_http_app()
-    metadata_path = '/.well-known/oauth-authorization-server'
+    metadata_routes = {
+        '/.well-known/oauth-authorization-server': oauth_metadata,
+        '/.well-known/oauth-protected-resource/mcp': protected_resource_metadata,
+    }
     for index, route in enumerate(application.routes):
-        if getattr(route, 'path', None) == metadata_path:
+        path = getattr(route, 'path', None)
+        endpoint = metadata_routes.get(path)
+        if endpoint is not None:
             application.routes[index] = Route(
-                metadata_path,
-                endpoint=oauth_metadata,
+                path,
+                endpoint=endpoint,
                 methods=['GET', 'OPTIONS'],
             )
-            break
     return application
 
 

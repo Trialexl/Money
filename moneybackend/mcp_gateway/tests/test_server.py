@@ -28,6 +28,20 @@ class McpServerMetadataTests(TransactionTestCase):
         self.assertEqual(metadata['code_challenge_methods_supported'], ['S256'])
         self.assertIn('frontmoney.read', metadata['scopes_supported'])
 
+    def test_protected_resource_authorization_server_exactly_matches_issuer(self):
+        protected_response = self.mcp_client.get('/.well-known/oauth-protected-resource/mcp')
+        authorization_response = self.mcp_client.get('/.well-known/oauth-authorization-server')
+
+        self.assertEqual(protected_response.status_code, 200)
+        self.assertEqual(authorization_response.status_code, 200)
+        protected_metadata = protected_response.json()
+        authorization_metadata = authorization_response.json()
+        self.assertEqual(
+            protected_metadata['authorization_servers'],
+            [authorization_metadata['issuer']],
+        )
+        self.assertEqual(protected_metadata['resource'], settings.MCP_PUBLIC_URL)
+
     def test_mcp_endpoint_requires_bearer_token(self):
         response = self.mcp_client.post('/mcp', json={})
         self.assertEqual(response.status_code, 401)
