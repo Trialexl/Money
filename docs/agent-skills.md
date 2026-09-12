@@ -45,6 +45,10 @@ Add server**: выбрать **Streamable HTTP**, указать
 `https://<app-domain>/mcp`, сохранить, перезапустить Codex и выбрать
 **Authenticate**.
 
+В самом FrontMoney адрес сервера, готовая CLI-команда и пример `config.toml`
+доступны на странице **Настройки → Подключение через MCP**. Адрес строится из
+публичного API-домена, поэтому пользователю не нужно узнавать `APP_DOMAIN`.
+
 В браузере нужно войти в FrontMoney и подтвердить scopes `frontmoney.read` и
 `frontmoney.write`. Агент получает предметные MCP-инструменты вроде
 `list_wallets`, `get_financial_report`, `get_portfolio_analysis` и

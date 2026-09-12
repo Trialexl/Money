@@ -5,6 +5,7 @@ import { useMutation } from "@tanstack/react-query"
 import { Building2, Save, Settings, ShieldCheck, UserRound, WalletCards } from "lucide-react"
 
 import { EmptyState } from "@/components/shared/empty-state"
+import { McpConnectionCard } from "@/components/shared/mcp-connection-card"
 import { PageHeader } from "@/components/shared/page-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -86,9 +87,9 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Профиль"
-        title="Настройки профиля"
-        description="Основные данные аккаунта и тип профиля."
+        eyebrow="Аккаунт"
+        title="Настройки"
+        description="Профиль, параметры аккаунта и внешние подключения."
       />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -233,12 +234,14 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="rounded-[18px] border border-border/70 bg-background/70 p-3">
-                Этот экран намеренно короткий: только те поля, которые действительно нужны для ежедневной работы и не перегружают настройки лишними деталями.
+                Здесь хранятся только параметры профиля. Подключение MCP ниже использует OAuth и не сохраняет пароль или API-токен на этой странице.
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <McpConnectionCard />
     </div>
   )
 }
