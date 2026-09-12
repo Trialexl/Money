@@ -41,6 +41,10 @@ class McpServerMetadataTests(TransactionTestCase):
             [authorization_metadata['issuer']],
         )
         self.assertEqual(protected_metadata['resource'], settings.MCP_PUBLIC_URL)
+        self.assertEqual(
+            protected_metadata['scopes_supported'],
+            ['frontmoney.read', 'frontmoney.write'],
+        )
 
     def test_mcp_endpoint_requires_bearer_token(self):
         response = self.mcp_client.post('/mcp', json={})

@@ -108,7 +108,7 @@ async def protected_resource_metadata(request: Request) -> Response:
         {
             'resource': settings.MCP_PUBLIC_URL,
             'authorization_servers': [settings.MCP_ISSUER_URL],
-            'scopes_supported': [READ_SCOPE],
+            'scopes_supported': VALID_SCOPES,
             'bearer_methods_supported': ['header'],
         },
         headers=headers,
