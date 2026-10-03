@@ -54,6 +54,12 @@ run_git_pull
 echo "==> Pulling Docker images"
 run_docker compose pull
 
+echo "==> Ensuring PostgreSQL is ready"
+run_docker compose up -d db
+
+echo "==> Running migrations and collectstatic"
+run_docker compose --profile maintenance run --rm migrate
+
 echo "==> Starting services"
 run_docker compose up -d --remove-orphans
 

@@ -17,7 +17,8 @@ RUN set -eux; \
         apt-get update && \
         apt-get install -y --no-install-recommends --fix-missing \
             libpq5 \
-            netcat-openbsd && \
+            netcat-openbsd \
+            wget && \
         rm -rf /var/lib/apt/lists/* && \
         break; \
         echo "apt install failed on attempt ${attempt}, retrying..."; \

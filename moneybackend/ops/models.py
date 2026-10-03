@@ -1,4 +1,45 @@
 from django.db import models
+from django.utils import timezone
+
+
+class SchedulerState(models.Model):
+    STATUS_RUNNING = 'running'
+    STATUS_STOPPED = 'stopped'
+    STATUS_ERROR = 'error'
+    STATUS_CHOICES = [
+        (STATUS_RUNNING, 'Работает'),
+        (STATUS_STOPPED, 'Остановлен'),
+        (STATUS_ERROR, 'Ошибка'),
+    ]
+
+    singleton_key = models.CharField(max_length=32, unique=True, default='default')
+    owner_id = models.CharField(max_length=200, blank=True)
+    hostname = models.CharField(max_length=255, blank=True)
+    pid = models.PositiveIntegerField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_STOPPED)
+    interval_seconds = models.PositiveIntegerField(default=60)
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    lock_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Состояние планировщика'
+        verbose_name_plural = 'Состояние планировщика'
+
+    @property
+    def is_alive(self):
+        return (
+            self.status == self.STATUS_RUNNING
+            and self.lock_until is not None
+            and self.lock_until > timezone.now()
+        )
+
+    def __str__(self):
+        return f'Scheduler: {self.status}'
 
 
 class ScheduledJobState(models.Model):

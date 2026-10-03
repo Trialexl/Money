@@ -1,6 +1,9 @@
 import json
+import signal
+import time
 from decimal import Decimal
 from datetime import timedelta
+from unittest import skipUnless
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -16,8 +19,13 @@ from investments.models import (
 from money.models import TelegramUserBinding
 from users.models import CustomUser
 
-from .models import ScheduledJobRun, ScheduledJobState
-from .scheduler import ScheduledJobDefinition, ensure_scheduled_jobs, run_due_jobs
+from .models import ScheduledJobRun, ScheduledJobState, SchedulerState
+from .scheduler import ScheduledJobDefinition, ensure_scheduled_jobs, get_job_definitions, run_due_jobs
+from .scheduler_lease import (
+    acquire_scheduler_lease,
+    release_scheduler_lease,
+    renew_scheduler_lease,
+)
 from .telegram_reports import send_portfolio_report_to_telegram
 
 
@@ -125,6 +133,56 @@ class ScheduledJobsTests(TestCase):
         self.assertEqual([run.status for run in runs], [ScheduledJobState.STATUS_ERROR, ScheduledJobState.STATUS_SUCCESS])
         self.assertEqual(ScheduledJobRun.objects.count(), 2)
 
+    def test_force_run_still_respects_active_job_lock(self):
+        calls = []
+        definition = ScheduledJobDefinition(
+            key='test.locked',
+            title='Locked job',
+            description='Test job',
+            task=lambda: calls.append('ran'),
+            interval_minutes=60,
+        )
+        ensure_scheduled_jobs([definition])
+        ScheduledJobState.objects.filter(job_key=definition.key).update(
+            lock_until=timezone.now() + timedelta(minutes=5),
+        )
+
+        from . import scheduler
+        original_get_job_definitions = scheduler.get_job_definitions
+        scheduler.get_job_definitions = lambda: [definition]
+        try:
+            runs = run_due_jobs(force=True, triggered_by=ScheduledJobRun.TRIGGER_MANUAL)
+        finally:
+            scheduler.get_job_definitions = original_get_job_definitions
+
+        self.assertEqual(calls, [])
+        self.assertEqual(runs[0].status, ScheduledJobState.STATUS_SKIPPED)
+
+    @skipUnless(hasattr(signal, 'SIGALRM'), 'Job timeout requires SIGALRM')
+    def test_job_timeout_is_recorded_as_error(self):
+        definition = ScheduledJobDefinition(
+            key='test.timeout',
+            title='Timeout job',
+            description='Test job',
+            task=lambda: time.sleep(2),
+            interval_minutes=60,
+            timeout_seconds=1,
+            max_retries=0,
+            retry_delay_seconds=0,
+        )
+        ensure_scheduled_jobs([definition])
+
+        from . import scheduler
+        original_get_job_definitions = scheduler.get_job_definitions
+        scheduler.get_job_definitions = lambda: [definition]
+        try:
+            runs = run_due_jobs(force=True, triggered_by=ScheduledJobRun.TRIGGER_MANUAL)
+        finally:
+            scheduler.get_job_definitions = original_get_job_definitions
+
+        self.assertEqual(runs[0].status, ScheduledJobState.STATUS_ERROR)
+        self.assertIn('Job exceeded timeout', runs[0].error)
+
     def test_management_command_lists_jobs(self):
         output = []
 
@@ -136,6 +194,59 @@ class ScheduledJobsTests(TestCase):
         call_command('run_scheduled_jobs', '--list', stdout=command_output)
 
         self.assertTrue(any('investment.fx_refresh' in line for line in output))
+
+    def test_heavy_jobs_are_spread_out_and_restore_check_is_weekly(self):
+        definitions = {definition.key: definition for definition in get_job_definitions()}
+
+        self.assertEqual(definitions['backup.restore_check'].interval_minutes, 10080)
+        self.assertEqual(str(definitions['backup.restore_check'].run_at_time), '04:20:00')
+        self.assertEqual(str(definitions['investment.fx_refresh'].run_at_time), '05:30:00')
+        self.assertEqual(str(definitions['investment.price_refresh'].run_at_time), '05:45:00')
+        self.assertEqual(str(definitions['investment.market_health'].run_at_time), '06:10:00')
+        self.assertEqual(str(definitions['investment.snapshots_today'].run_at_time), '06:40:00')
+        self.assertEqual(str(definitions['investment.telegram_portfolio_report'].run_at_time), '06:50:00')
+
+    def test_scheduler_db_lease_allows_only_one_owner(self):
+        acquired, _state = acquire_scheduler_lease(
+            owner_id='owner-one',
+            hostname='host-one',
+            pid=101,
+            interval_seconds=60,
+            lease_seconds=180,
+        )
+        second_acquired, state = acquire_scheduler_lease(
+            owner_id='owner-two',
+            hostname='host-two',
+            pid=202,
+            interval_seconds=60,
+            lease_seconds=180,
+        )
+
+        self.assertTrue(acquired)
+        self.assertFalse(second_acquired)
+        self.assertEqual(state.owner_id, 'owner-one')
+        self.assertTrue(state.is_alive)
+
+    def test_scheduler_lease_heartbeat_and_release(self):
+        acquired, state = acquire_scheduler_lease(
+            owner_id='owner-one',
+            hostname='host-one',
+            pid=101,
+            interval_seconds=10,
+            lease_seconds=30,
+        )
+        first_heartbeat = state.heartbeat_at
+
+        self.assertTrue(acquired)
+        self.assertTrue(renew_scheduler_lease(owner_id='owner-one', lease_seconds=30))
+        self.assertFalse(renew_scheduler_lease(owner_id='wrong-owner', lease_seconds=30))
+        self.assertTrue(release_scheduler_lease(owner_id='owner-one'))
+
+        state = SchedulerState.objects.get(singleton_key='default')
+        self.assertGreaterEqual(state.heartbeat_at, first_heartbeat)
+        self.assertEqual(state.status, SchedulerState.STATUS_STOPPED)
+        self.assertEqual(state.owner_id, '')
+        self.assertIsNone(state.lock_until)
 
     def test_market_refresh_job_marks_all_failed_result_as_error(self):
         from . import scheduler

@@ -1,4 +1,5 @@
 import json
+import math
 import signal
 import threading
 import time as time_module
@@ -148,7 +149,14 @@ def due_scheduled_jobs(definitions=None, now=None):
     return [(state, definitions_by_key[state.job_key]) for state in states]
 
 
-def run_due_jobs(*, force=False, job_key=None, dry_run=False, triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER):
+def run_due_jobs(
+    *,
+    force=False,
+    job_key=None,
+    dry_run=False,
+    triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER,
+    should_stop=None,
+):
     definitions = get_job_definitions()
     definitions_by_key = {definition.key: definition for definition in definitions}
     ensure_scheduled_jobs(definitions)
@@ -176,13 +184,26 @@ def run_due_jobs(*, force=False, job_key=None, dry_run=False, triggered_by=Sched
             'due': force or job_key or state.next_run_at is None or state.next_run_at <= timezone.now(),
         } for state, _definition in selected]
 
-    return [
-        execute_job(state.job_key, triggered_by=triggered_by, force=force or bool(job_key))
-        for state, _definition in selected
-    ]
+    runs = []
+    for state, _definition in selected:
+        if should_stop and should_stop():
+            break
+        runs.append(execute_job(
+            state.job_key,
+            triggered_by=triggered_by,
+            force=force or bool(job_key),
+            should_stop=should_stop,
+        ))
+    return runs
 
 
-def execute_job(job_key: str, *, triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER, force=False):
+def execute_job(
+    job_key: str,
+    *,
+    triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER,
+    force=False,
+    should_stop=None,
+):
     definitions_by_key = {definition.key: definition for definition in get_job_definitions()}
     definition = definitions_by_key.get(job_key)
     if definition is None:
@@ -191,7 +212,9 @@ def execute_job(job_key: str, *, triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER,
     now = timezone.now()
     with transaction.atomic():
         state = ScheduledJobState.objects.select_for_update().get(job_key=job_key)
-        if not force and state.lock_until and state.lock_until > now:
+        # `force` bypasses the schedule, never the execution lock. This keeps a
+        # manual admin run from overlapping an already running scheduler job.
+        if state.lock_until and state.lock_until > now:
             run = ScheduledJobRun.objects.create(
                 job=state,
                 job_key=state.job_key,
@@ -219,6 +242,11 @@ def execute_job(job_key: str, *, triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER,
 
     attempts = 0
     started_monotonic = monotonic()
+    deadline = (
+        started_monotonic + state.timeout_seconds
+        if state.timeout_seconds > 0
+        else None
+    )
     result_payload = {}
     result_status = ScheduledJobState.STATUS_SUCCESS
     error_message = ''
@@ -227,7 +255,13 @@ def execute_job(job_key: str, *, triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER,
     for attempt in range(1, max_attempts + 1):
         attempts = attempt
         try:
-            with _time_limit(state.timeout_seconds):
+            timeout_seconds = state.timeout_seconds
+            if deadline is not None:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise JobTimeoutError(f'Job exceeded timeout: {state.timeout_seconds}s')
+                timeout_seconds = max(1, math.ceil(remaining))
+            with _time_limit(timeout_seconds):
                 raw_result = definition.task()
             if isinstance(raw_result, JobResult):
                 result_payload = raw_result.payload
@@ -240,8 +274,13 @@ def execute_job(job_key: str, *, triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER,
             error_message = str(exc)
             result_status = ScheduledJobState.STATUS_ERROR
             result_payload = {'error': error_message}
+            if should_stop and should_stop():
+                break
             if attempt < max_attempts and state.retry_delay_seconds:
-                time_module.sleep(state.retry_delay_seconds)
+                retry_delay = state.retry_delay_seconds
+                if deadline is not None:
+                    retry_delay = min(retry_delay, max(0, deadline - monotonic()))
+                _retry_sleep(retry_delay, should_stop)
 
     finished_at = timezone.now()
     duration_ms = int((monotonic() - started_monotonic) * 1000)
@@ -274,6 +313,19 @@ def execute_job(job_key: str, *, triggered_by=ScheduledJobRun.TRIGGER_SCHEDULER,
         _notify_job_failure(job_key, error_message)
 
     return run
+
+
+def _retry_sleep(seconds, should_stop=None):
+    if not should_stop:
+        time_module.sleep(seconds)
+        return
+
+    deadline = monotonic() + seconds
+    while not should_stop():
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return
+        time_module.sleep(min(remaining, 1))
 
 
 def _notify_job_failure(job_key: str, error_message: str) -> None:
@@ -395,7 +447,8 @@ def get_job_definitions():
             title='Проверка восстановления backup',
             description='Восстановить последний backup во временную БД и удалить ее после проверки.',
             task=job_restore_check_latest_backup,
-            run_at_time=time(3, 40),
+            interval_minutes=10080,
+            run_at_time=time(4, 20),
             timeout_seconds=900,
             max_retries=1,
             retry_delay_seconds=60,
@@ -416,7 +469,7 @@ def get_job_definitions():
             title='Обновление FX-курсов',
             description='Обновить USD/EUR/RUB cross-rates через configured FX provider.',
             task=job_refresh_fx_rates,
-            run_at_time=time(8, 0),
+            run_at_time=time(5, 30),
             timeout_seconds=300,
             max_retries=2,
             retry_delay_seconds=30,
@@ -426,7 +479,7 @@ def get_job_definitions():
             title='Обновление цен инструментов',
             description='Обновить цены активных финансовых инструментов через configured price provider.',
             task=job_refresh_prices,
-            run_at_time=time(8, 5),
+            run_at_time=time(5, 45),
             timeout_seconds=600,
             max_retries=2,
             retry_delay_seconds=30,
@@ -436,7 +489,7 @@ def get_job_definitions():
             title='Контроль свежести рыночных данных',
             description='Проверить свежесть price/fx snapshots после обновления курсов.',
             task=job_market_health,
-            run_at_time=time(8, 10),
+            run_at_time=time(6, 10),
             timeout_seconds=120,
             max_retries=0,
             retry_delay_seconds=60,
@@ -446,7 +499,7 @@ def get_job_definitions():
             title='Снимок портфеля за сегодня',
             description='Пересчитать дневные snapshots портфелей за текущую дату.',
             task=job_rebuild_today_snapshots,
-            run_at_time=time(8, 15),
+            run_at_time=time(6, 40),
             timeout_seconds=600,
             max_retries=1,
             retry_delay_seconds=60,
@@ -456,7 +509,7 @@ def get_job_definitions():
             title='Telegram-отчет по финпортфелю',
             description='Отправить короткий отчет по default-портфелю всем привязанным Telegram-пользователям.',
             task=job_send_telegram_portfolio_report,
-            run_at_time=time(8, 30),
+            run_at_time=time(6, 50),
             timeout_seconds=180,
             max_retries=1,
             retry_delay_seconds=60,

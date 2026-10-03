@@ -56,7 +56,7 @@ Acceptance criteria:
 
 ### P0-OPS-001. Healthchecks, log rotation и базовые алерты
 
-Статус: готово - добавлен `/api/v1/health/`, Docker healthchecks для backend/frontend/caddy, ограничение размера docker logs и `health-check.sh` для cron/webhook уведомлений.
+Статус: готово - добавлен `/api/v1/health/`, разреженные Docker healthchecks для backend/frontend, ограничение размера docker logs и `health-check.sh` для cron/webhook уведомлений; healthcheck Caddy убран для слабого VPS.
 
 Проблема: в docker compose healthcheck есть только у PostgreSQL, а падение backend/frontend/caddy, OOM и переполнение диска не контролируются.
 
@@ -96,7 +96,7 @@ Acceptance criteria:
 
 ### P0-OPS-003. Заменить разрозненные cron+cURL задачи на управляемые background jobs
 
-Статус: готово - добавлен backend app `ops` с registry регламентных заданий, состоянием `last_run/status/duration/error`, историей запусков в admin и management-командой `run_scheduled_jobs`; cron теперь нужен один, без набора curl-команд.
+Статус: готово - добавлен backend app `ops` с registry регламентных заданий, состоянием `last_run/status/duration/error`, историей запусков в admin и long-running management-командой `run_scheduler_loop` с DB-lock и heartbeat; cron и recurring `docker compose exec` не нужны.
 
 Проблема: регламентные задачи сейчас запускаются через cron и HTTP endpoints. Это плохо контролируется, сложно ретраить и сложно диагностировать.
 

@@ -1,5 +1,7 @@
 # Server Runbook
 
+[English](server-runbook.en.md) · [Русский](server-runbook.md) · [Описание проекта](../../README.ru.md)
+
 Инструкция для установки, обновления, регламентных заданий и backup production-сервера Money.
 
 ## 1. Установка на сервер
@@ -51,13 +53,32 @@ nano .env
 - `INVESTMENT_PRICE_PROVIDER=coingecko`.
 - `INVESTMENT_FX_PROVIDER=cbr`.
 
+Для VPS с 1 ГБ не оставлять в старом `.env` повышенные limits. Базовые значения:
+
+```text
+DB_MEMORY_LIMIT=192m
+BACKEND_MEMORY_LIMIT=224m
+FRONTEND_MEMORY_LIMIT=160m
+CADDY_MEMORY_LIMIT=48m
+SCHEDULER_MEMORY_LIMIT=128m
+SCHEDULER_MEMORY_RESERVATION=48m
+ASGI_WORKERS=1
+ASGI_LIMIT_CONCURRENCY=8
+```
+
 Первый запуск:
 
 ```bash
 sudo docker compose pull
+sudo docker compose up -d db
+sudo docker compose --profile maintenance run --rm migrate
 sudo docker compose up -d
 sudo docker compose ps
 ```
+
+`migrate` — явный deploy-шаг: он выполняет migrations, collectstatic и,
+если настроено, создание superuser. Обычные restart контейнеров
+`backend` и `scheduler` эти операции не запускают.
 
 Проверка HTTPS:
 
@@ -114,6 +135,8 @@ sudo ./update-server.sh
 - останавливается, если в tracked-файлах есть незакоммиченные изменения;
 - выполняет `git pull --ff-only`;
 - выполняет `docker compose pull`;
+- поднимает PostgreSQL и запускает maintenance-контейнер с migrations/collectstatic;
+- при ошибке maintenance останавливается до перезапуска web-сервисов;
 - выполняет `docker compose up -d --remove-orphans`;
 - выполняет `docker image prune -f`;
 - показывает `docker compose ps`.
@@ -236,33 +259,21 @@ tail -100 backups/logs/backup-events.log
 
 ## 5. Регламентные задания
 
-Регламентные задания Money запускаются из `root crontab`. Это дает cron прямой доступ к Docker без интерактивного ввода пароля.
+Регламентные задания Money запускает long-running Compose-сервис `scheduler`.
+Он сам проверяет due jobs, держит singleton-lock и heartbeat в БД. Cron и
+регулярный `docker compose exec` для запуска jobs не нужны.
 
-Открыть root cron:
-
-```bash
-sudo crontab -e
-```
-
-Посмотреть root cron:
+После обновления проверить сервис:
 
 ```bash
-sudo crontab -l
+cd /opt/money
+sudo docker compose ps scheduler
+sudo docker compose logs --tail=100 scheduler
 ```
 
-Рекомендуемый набор:
-
-```cron
-SHELL=/bin/bash
-APP_DIR=/opt/money
-API_BASE=https://<app-domain>
-
-# Единая точка регламентных заданий backend.
-*/5 * * * * /usr/bin/flock -n /run/money-scheduled-jobs.lock /bin/bash -lc 'cd "$APP_DIR" && /usr/bin/docker compose exec -T backend python manage.py run_scheduled_jobs' >/tmp/money-scheduled-jobs.log 2>&1
-
-# Базовый healthcheck приложения с опциональным webhook-уведомлением.
-*/5 * * * * /usr/bin/flock -n /run/money-health-check.lock /bin/bash -lc 'cd "$APP_DIR" && HEALTH_URL="$API_BASE/api/v1/health/" ./health-check.sh' >/tmp/money-health-cron.log 2>&1
-```
+Удалить из `root crontab` старую строку, запускающую
+`manage.py run_scheduled_jobs`. Внешний cron для `health-check.sh`, если он
+используется как независимый монитор, можно оставить.
 
 Для VPS с 1 ГБ RAM нужен swap, иначе кратковременный запуск `apt`, backup или
 Docker healthcheck может вызвать глобальный OOM. Однократная настройка:
@@ -280,15 +291,10 @@ sudo sysctl --system
 Ежедневный reboot не заменяет swap и лимиты памяти: он скрывает накопление
 нагрузки, но не предотвращает следующий OOM.
 
-Пользовательский cron должен содержать только личные задачи пользователя. Регламентные задания Money хранятся в `root crontab`.
-
-Проверить пользовательский cron:
-
-```bash
-crontab -l
-```
-
-Внутри `run_scheduled_jobs` backend сам хранит расписание, `last_run`, `status`, `duration`, `error` и историю запусков в admin-разделе `Регламентные задания`.
+Состояние scheduler, owner, последний heartbeat и срок lock видны в
+admin-разделе `Состояние планировщика`. Расписание, `last_run`,
+`status`, `duration`, `error` и история запусков остаются в разделе
+`Регламентные задания`.
 
 Проверить список jobs:
 
@@ -304,14 +310,16 @@ cd /opt/money
 sudo docker compose exec -T backend python manage.py run_scheduled_jobs --job investment.fx_refresh
 ```
 
-Основные инвестиционные jobs:
+Расписание тяжелых jobs (время Django, сейчас UTC):
 
 ```bash
-investment.fx_refresh                  # FX-курсы USD/EUR/RUB
-investment.price_refresh               # цены финансовых инструментов
-investment.market_health               # контроль свежести рыночных данных
-investment.snapshots_today             # снимки портфелей за сегодня
-investment.telegram_portfolio_report   # короткий Telegram-отчет по default-портфелям
+backup.create                           # ежедневно 03:30
+backup.restore_check                    # раз в неделю 04:20
+investment.fx_refresh                  # ежедневно 05:30
+investment.price_refresh               # ежедневно 05:45
+investment.market_health               # ежедневно 06:10
+investment.snapshots_today             # ежедневно 06:40
+investment.telegram_portfolio_report   # ежедневно 06:50
 ```
 
 Telegram-отчет использует `AI_TELEGRAM_BOT_TOKEN` и отправляется только пользователям с привязанным Telegram и созданным инвестиционным портфелем. Ручной запуск:
@@ -323,7 +331,7 @@ sudo docker compose exec -T backend python manage.py run_scheduled_jobs --job in
 
 ## 6. Диагностика health и логов
 
-Проверить health всех контейнеров:
+Проверить состояние контейнеров и health backend/frontend/db:
 
 ```bash
 cd /opt/money
@@ -423,7 +431,7 @@ tail -100 backups/logs/backup-events.log
 Последние регламентные задания:
 
 ```bash
-tail -100 /tmp/money-scheduled-jobs.log
+sudo docker compose logs --tail=100 scheduler
 sudo docker compose exec backend python manage.py run_scheduled_jobs --list
 ```
 
@@ -492,7 +500,7 @@ docker system prune --volumes
 `market-health` показывает `stale`:
 
 - данные есть, но старше `max_age_days`;
-- проверить `run_scheduled_jobs --list`, admin-раздел `Регламентные задания` и лог `/tmp/money-scheduled-jobs.log`.
+- проверить `run_scheduled_jobs --list`, admin-разделы `Состояние планировщика` и `Регламентные задания`, а также `docker compose logs scheduler`.
 
 После deploy frontend падает на chunk loading:
 
@@ -509,6 +517,6 @@ curl -fsS https://<app-domain>/api/v1/health/
 curl -I https://<app-domain>/
 curl -I https://<app-domain>/api/schema/
 tail -50 /tmp/money-health-cron.log
-tail -50 /tmp/money-scheduled-jobs.log
+sudo docker compose logs --tail=50 scheduler
 sudo docker compose exec backend python manage.py run_scheduled_jobs --list
 ```

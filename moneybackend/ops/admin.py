@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 
-from .models import ScheduledJobRun, ScheduledJobState
+from .models import ScheduledJobRun, ScheduledJobState, SchedulerState
 from .scheduler import execute_job
 
 
@@ -26,6 +26,48 @@ def _result_summary(result):
     if 'error' in result:
         return f'error={result["error"]}'
     return 'result=ok'
+
+
+@admin.register(SchedulerState)
+class SchedulerStateAdmin(admin.ModelAdmin):
+    list_display = [
+        'singleton_key',
+        'alive',
+        'status',
+        'heartbeat_at',
+        'lock_until',
+        'hostname',
+        'pid',
+        'interval_seconds',
+    ]
+    readonly_fields = [
+        'singleton_key',
+        'owner_id',
+        'hostname',
+        'pid',
+        'status',
+        'interval_seconds',
+        'started_at',
+        'heartbeat_at',
+        'lock_until',
+        'stopped_at',
+        'last_error',
+        'created_at',
+        'updated_at',
+    ]
+
+    @admin.display(boolean=True, description='Alive')
+    def alive(self, obj):
+        return obj.is_alive
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ScheduledJobState)

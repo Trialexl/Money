@@ -10,18 +10,19 @@ while ! nc -z "$DB_HOST" "$DB_PORT"; do
 done
 echo "PostgreSQL started"
 
-echo "Running migrations..."
-python manage.py migrate --noinput
+if [ "${RUN_STARTUP_MAINTENANCE:-false}" = "true" ] || [ "${RUN_STARTUP_MAINTENANCE:-False}" = "True" ]; then
+  echo "Running migrations..."
+  python manage.py migrate --noinput
 
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
+  echo "Collecting static files..."
+  python manage.py collectstatic --noinput
 
-if [ "${CREATE_SUPERUSER:-false}" = "true" ] || [ "${CREATE_SUPERUSER:-False}" = "True" ]; then
-  if [ -z "${DJANGO_SUPERUSER_USERNAME:-}" ] || [ -z "${DJANGO_SUPERUSER_EMAIL:-}" ] || [ -z "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
-    echo "Skipping superuser creation because DJANGO_SUPERUSER_* variables are incomplete"
-  else
-    echo "Ensuring configured superuser exists..."
-    python manage.py shell <<'END'
+  if [ "${CREATE_SUPERUSER:-false}" = "true" ] || [ "${CREATE_SUPERUSER:-False}" = "True" ]; then
+    if [ -z "${DJANGO_SUPERUSER_USERNAME:-}" ] || [ -z "${DJANGO_SUPERUSER_EMAIL:-}" ] || [ -z "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
+      echo "Skipping superuser creation because DJANGO_SUPERUSER_* variables are incomplete"
+    else
+      echo "Ensuring configured superuser exists..."
+      python manage.py shell <<'END'
 import os
 from django.contrib.auth import get_user_model
 
@@ -36,10 +37,12 @@ if not User.objects.filter(username=username).exists():
 else:
     print(f"Superuser already exists: {username}")
 END
+    fi
+  else
+    echo "Skipping superuser creation"
   fi
 else
-  echo "Skipping superuser creation"
+  echo "Skipping migrations, collectstatic, and superuser creation"
 fi
 
-echo "Starting server..."
 exec "$@"
