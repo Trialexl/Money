@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
@@ -27,8 +28,8 @@ from mcp_gateway.oauth_provider import (
     MCP_ISSUER_URL='https://money.example.test',
     MCP_PUBLIC_URL='https://money.example.test/mcp',
     MCP_OAUTH_ALLOWED_REDIRECT_ORIGINS=[],
-    MCP_OAUTH_ACCESS_TOKEN_SECONDS=900,
-    MCP_OAUTH_REFRESH_TOKEN_SECONDS=3600,
+    MCP_OAUTH_ACCESS_TOKEN_SECONDS=2592000,
+    MCP_OAUTH_REFRESH_TOKEN_SECONDS=2592000,
     MCP_OAUTH_AUTH_CODE_SECONDS=300,
     MCP_OAUTH_REQUEST_SECONDS=600,
 )
@@ -78,8 +79,19 @@ class OAuthProviderTests(TestCase):
         issued = async_to_sync(self.provider.exchange_authorization_code)(self.client, code)
         self.assertEqual(issued.scope, f'{READ_SCOPE} {WRITE_SCOPE}')
         self.assertIsNotNone(issued.refresh_token)
+        self.assertEqual(issued.expires_in, 30 * 24 * 60 * 60)
         self.assertFalse(McpOAuthToken.objects.filter(access_token_hash=issued.access_token).exists())
-        self.assertTrue(McpOAuthToken.objects.filter(access_token_hash=hash_token(issued.access_token)).exists())
+        token_row = McpOAuthToken.objects.get(access_token_hash=hash_token(issued.access_token))
+        self.assertAlmostEqual(
+            token_row.access_expires_at - token_row.created_at,
+            timedelta(days=30),
+            delta=timedelta(seconds=1),
+        )
+        self.assertAlmostEqual(
+            token_row.refresh_expires_at - token_row.created_at,
+            timedelta(days=30),
+            delta=timedelta(seconds=1),
+        )
 
         access = async_to_sync(self.provider.load_access_token)(issued.access_token)
         self.assertEqual(access.user_id, str(self.user.pk))

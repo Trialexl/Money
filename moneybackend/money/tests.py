@@ -2807,6 +2807,7 @@ class ReportEndpointsTests(TestCase):
                     'period': self.make_month_start(2024, 3),
                     'income': '1000.00',
                     'expense': '300.00',
+                    'is_forecast': False,
                 }
             ],
         )
@@ -2865,6 +2866,93 @@ class ReportEndpointsTests(TestCase):
             [(3, '300.00'), (4, '125.00')],
         )
         self.assertTrue(all(row['period'].day <= 10 for row in response.data['details']))
+
+    @patch('money.report_views.timezone.now')
+    def test_cash_flow_report_limit_by_today_excludes_future_expenses(self, mocked_now):
+        mocked_now.return_value = self.make_dt(2024, 3, 15)
+        Expenditure.objects.create(
+            amount=Decimal('75.00'),
+            date=self.make_dt(2024, 3, 20),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('125.00'),
+            date=self.make_dt(2024, 4, 10),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+        )
+
+        response = self.client.get(
+            '/api/v1/reports/cash-flow/',
+            {
+                'date_from': self.make_dt(2024, 3, 1).isoformat(),
+                'date_to': self.make_dt(2024, 4, 30).isoformat(),
+                'limit_by_today': 'true',
+                'month_day_limit': 15,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['totals'], {'income': '1000.00', 'expense': '300.00'})
+        self.assertTrue(all(row['period'] <= mocked_now.return_value for row in response.data['details']))
+
+    @patch('money.report_views.timezone.now')
+    def test_cash_flow_report_uses_budget_plan_for_future_months(self, mocked_now):
+        mocked_now.return_value = self.make_dt(2024, 3, 15)
+        Receipt.objects.create(
+            amount=Decimal('9000.00'),
+            date=self.make_dt(2024, 4, 5),
+            wallet=self.wallet_main,
+            cash_flow_item=self.salary_item,
+        )
+        Expenditure.objects.create(
+            amount=Decimal('7000.00'),
+            date=self.make_dt(2024, 4, 6),
+            wallet=self.wallet_main,
+            cash_flow_item=self.food_item,
+        )
+        Budget.objects.create(
+            amount=Decimal('2000.00'),
+            amount_month=1,
+            date=self.make_dt(2024, 3, 10),
+            date_start=self.make_dt(2024, 4, 1),
+            cash_flow_item=self.salary_item,
+            project=self.project,
+            type_of_budget=True,
+        )
+        Budget.objects.create(
+            amount=Decimal('800.00'),
+            amount_month=1,
+            date=self.make_dt(2024, 3, 10),
+            date_start=self.make_dt(2024, 4, 1),
+            cash_flow_item=self.food_item,
+            project=self.project,
+            type_of_budget=False,
+        )
+
+        response = self.client.get(
+            '/api/v1/reports/cash-flow/',
+            {
+                'date_from': self.make_dt(2024, 3, 1).isoformat(),
+                'date_to': self.make_dt(2024, 4, 30).isoformat(),
+                'forecast_future': 'true',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['totals'], {'income': '3000.00', 'expense': '1100.00'})
+        self.assertEqual(
+            [(row['period'].month, row['income'], row['expense'], row['is_forecast']) for row in response.data['months']],
+            [
+                (3, '1000.00', '300.00', False),
+                (4, '2000.00', '800.00', True),
+            ],
+        )
+        april_details = [row for row in response.data['details'] if row['period'].month == 4]
+        self.assertEqual(len(april_details), 2)
+        self.assertTrue(all(row['document_type'] == 'Budget' for row in april_details))
+        self.assertTrue(all(row['is_forecast'] for row in april_details))
 
     def test_cash_flow_report_opening_balance_uses_same_analytics_rules(self):
         hidden_wallet = Wallet.objects.create(name='Скрытый переводный')
@@ -3158,6 +3246,26 @@ class AiAssistantApiTests(TestCase):
         self.assertEqual(transfer.wallet_out, self.wallet_alpha)
         self.assertEqual(transfer.wallet_in, self.wallet_crypto)
         self.assertEqual(transfer.amount, Decimal('2000.00'))
+
+    def test_trf057_transfer_from_sber2_to_sber(self):
+        wallet_sber2 = Wallet.objects.create(name='СБЕР 2')
+        WalletAlias.objects.create(wallet=wallet_sber2, alias='сбер2')
+
+        response = self.client.post(
+            '/api/v1/ai/execute/',
+            {
+                'text': 'перевод сбер2 на сбер 30000',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'created')
+        self.assertEqual(response.data['intent'], 'create_transfer')
+        transfer = Transfer.objects.get(id=response.data['created_object']['id'])
+        self.assertEqual(transfer.wallet_out, wallet_sber2)
+        self.assertEqual(transfer.wallet_in, self.wallet_sber)
+        self.assertEqual(transfer.amount, Decimal('30000.00'))
 
     def test_ai_execute_is_available_for_authenticated_non_admin_user(self):
         client = APIClient()

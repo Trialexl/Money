@@ -1,14 +1,19 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { McpConnectionCard } from "./mcp-connection-card"
 
 describe("McpConnectionCard", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it("shows the connection endpoint and setup paths", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "/api/v1")
     render(<McpConnectionCard />)
 
     expect(screen.getByText("Подключение через MCP")).toBeInTheDocument()
-    expect(screen.getByText("http://localhost:8000/mcp")).toBeInTheDocument()
+    expect(screen.getByText(`${window.location.origin}/mcp`)).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Интерфейс" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "CLI" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "config.toml" })).toBeInTheDocument()

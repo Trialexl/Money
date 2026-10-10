@@ -426,6 +426,7 @@ class CashFlowReportQuerySerializer(serializers.Serializer):
     cash_flow_item = serializers.UUIDField(required=False)
     limit_by_today = serializers.BooleanField(required=False, default=False)
     month_day_limit = serializers.IntegerField(required=False, min_value=1, max_value=31)
+    forecast_future = serializers.BooleanField(required=False, default=False)
 
 
 class BudgetReportQuerySerializer(serializers.Serializer):
@@ -445,6 +446,7 @@ class CashFlowReportMonthSerializer(serializers.Serializer):
     period = serializers.DateTimeField()
     income = serializers.DecimalField(max_digits=12, decimal_places=2)
     expense = serializers.DecimalField(max_digits=12, decimal_places=2)
+    is_forecast = serializers.BooleanField(required=False, default=False)
 
 
 class CashFlowReportDetailSerializer(serializers.Serializer):
@@ -457,6 +459,7 @@ class CashFlowReportDetailSerializer(serializers.Serializer):
     cash_flow_item_name = serializers.CharField(allow_blank=True, allow_null=True)
     income = serializers.DecimalField(max_digits=12, decimal_places=2)
     expense = serializers.DecimalField(max_digits=12, decimal_places=2)
+    is_forecast = serializers.BooleanField(required=False, default=False)
 
 
 class CashFlowWalletOpeningBalanceSerializer(serializers.Serializer):

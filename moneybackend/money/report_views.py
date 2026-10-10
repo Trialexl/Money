@@ -59,6 +59,12 @@ def _serialize_uuid(value):
     return str(value) if value is not None else None
 
 
+def _next_month_start(value):
+    if value.month == 12:
+        return value.replace(year=value.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return value.replace(month=value.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
 class ReportViewSet(viewsets.ViewSet):
     """Отчетные endpoints по мотивам 1С-отчетов."""
 
@@ -76,11 +82,13 @@ class ReportViewSet(viewsets.ViewSet):
         validated = query.validated_data
 
         date_from = validated.get('date_from')
-        date_to = validated.get('date_to')
-        if validated.get('limit_by_today'):
-            today = timezone.now()
-            if date_to is None or date_to > today:
-                date_to = today
+        requested_date_to = validated.get('date_to')
+        forecast_future = validated.get('forecast_future')
+        now = timezone.now()
+        actual_date_to = requested_date_to
+        if validated.get('limit_by_today') or forecast_future:
+            if actual_date_to is None or actual_date_to > now:
+                actual_date_to = now
 
         base_queryset = FlowOfFunds.objects.select_related('wallet', 'cash_flow_item').filter(
             cash_flow_item__isnull=False
@@ -102,8 +110,12 @@ class ReportViewSet(viewsets.ViewSet):
         wallet_opening_balances = []
         if date_from is not None:
             opening_queryset = base_queryset.filter(period__lt=date_from)
+            if forecast_future:
+                opening_queryset = opening_queryset.filter(period__lte=now)
             opening_balance = _money(opening_queryset.aggregate(total=Sum('amount'))['total'])
             wallet_opening_queryset = wallet_balance_queryset.filter(period__lt=date_from)
+            if forecast_future:
+                wallet_opening_queryset = wallet_opening_queryset.filter(period__lte=now)
             wallet_opening_balances = [
                 {
                     'wallet_id': _serialize_uuid(row['wallet_id']),
@@ -115,22 +127,23 @@ class ReportViewSet(viewsets.ViewSet):
                 ).order_by('wallet__name')
             ]
 
-        queryset = _apply_period_filters(base_queryset, date_from=date_from, date_to=date_to)
+        queryset = _apply_period_filters(base_queryset, date_from=date_from, date_to=actual_date_to)
         month_day_limit = validated.get('month_day_limit')
         if month_day_limit is not None:
             queryset = queryset.filter(period__day__lte=month_day_limit)
 
-        month_rows = []
+        month_rows_by_period = {}
         monthly_queryset = queryset.annotate(period_month=TruncMonth('period')).values('period_month').annotate(
             income_total=Sum('amount', filter=Q(amount__gt=0)),
             expense_total=Sum('amount', filter=Q(amount__lt=0)),
         ).order_by('period_month')
         for row in monthly_queryset:
-            month_rows.append({
+            month_rows_by_period[row['period_month']] = {
                 'period': row['period_month'],
-                'income': _money_str(row['income_total']),
-                'expense': _money_str(-(row['expense_total'] or ZERO_AMOUNT)),
-            })
+                'income': _money(row['income_total']),
+                'expense': _money(-(row['expense_total'] or ZERO_AMOUNT)),
+                'is_forecast': False,
+            }
 
         detail_rows = [
             {
@@ -143,14 +156,115 @@ class ReportViewSet(viewsets.ViewSet):
                 'cash_flow_item_name': getattr(row.cash_flow_item, 'name', None),
                 'income': _money_str(row.amount if row.amount > ZERO_AMOUNT else ZERO_AMOUNT),
                 'expense': _money_str(-row.amount if row.amount < ZERO_AMOUNT else ZERO_AMOUNT),
+                'is_forecast': False,
             }
             for row in queryset.order_by('period', 'id')
+        ]
+
+        forecast_income_total = ZERO_AMOUNT
+        forecast_expense_total = ZERO_AMOUNT
+        forecast_date_from = None
+        if forecast_future and not wallet_id:
+            forecast_date_from = _next_month_start(now)
+            if date_from is not None and date_from > forecast_date_from:
+                forecast_date_from = date_from
+
+            plan_income_queryset = BudgetIncome.objects.select_related('cash_flow_item').filter(
+                type_of_document=5,
+                cash_flow_item__isnull=False,
+            )
+            plan_expense_queryset = BudgetExpense.objects.select_related('cash_flow_item').filter(
+                type_of_document=5,
+                cash_flow_item__isnull=False,
+            )
+            plan_income_queryset = _apply_period_filters(
+                plan_income_queryset,
+                date_from=forecast_date_from,
+                date_to=requested_date_to,
+            )
+            plan_expense_queryset = _apply_period_filters(
+                plan_expense_queryset,
+                date_from=forecast_date_from,
+                date_to=requested_date_to,
+            )
+            if cash_flow_item_id:
+                plan_income_queryset = plan_income_queryset.filter(cash_flow_item_id=cash_flow_item_id)
+                plan_expense_queryset = plan_expense_queryset.filter(cash_flow_item_id=cash_flow_item_id)
+            if month_day_limit is not None:
+                plan_income_queryset = plan_income_queryset.filter(period__day__lte=month_day_limit)
+                plan_expense_queryset = plan_expense_queryset.filter(period__day__lte=month_day_limit)
+
+            for row in plan_income_queryset.annotate(period_month=TruncMonth('period')).values(
+                'period_month'
+            ).annotate(total=Sum('amount')):
+                month_row = month_rows_by_period.setdefault(row['period_month'], {
+                    'period': row['period_month'],
+                    'income': ZERO_AMOUNT,
+                    'expense': ZERO_AMOUNT,
+                    'is_forecast': True,
+                })
+                month_row['income'] = _money(month_row['income'] + _money(row['total']))
+                month_row['is_forecast'] = True
+
+            for row in plan_expense_queryset.annotate(period_month=TruncMonth('period')).values(
+                'period_month'
+            ).annotate(total=Sum('amount')):
+                month_row = month_rows_by_period.setdefault(row['period_month'], {
+                    'period': row['period_month'],
+                    'income': ZERO_AMOUNT,
+                    'expense': ZERO_AMOUNT,
+                    'is_forecast': True,
+                })
+                month_row['expense'] = _money(month_row['expense'] + _money(row['total']))
+                month_row['is_forecast'] = True
+
+            detail_rows.extend([
+                {
+                    'period': row.period,
+                    'document_id': _serialize_uuid(row.document_id),
+                    'document_type': row.get_type_of_document_display(),
+                    'wallet_id': None,
+                    'wallet_name': None,
+                    'cash_flow_item_id': _serialize_uuid(row.cash_flow_item_id),
+                    'cash_flow_item_name': getattr(row.cash_flow_item, 'name', None),
+                    'income': _money_str(row.amount),
+                    'expense': _money_str(ZERO_AMOUNT),
+                    'is_forecast': True,
+                }
+                for row in plan_income_queryset.order_by('period', 'id')
+            ])
+            detail_rows.extend([
+                {
+                    'period': row.period,
+                    'document_id': _serialize_uuid(row.document_id),
+                    'document_type': row.get_type_of_document_display(),
+                    'wallet_id': None,
+                    'wallet_name': None,
+                    'cash_flow_item_id': _serialize_uuid(row.cash_flow_item_id),
+                    'cash_flow_item_name': getattr(row.cash_flow_item, 'name', None),
+                    'income': _money_str(ZERO_AMOUNT),
+                    'expense': _money_str(row.amount),
+                    'is_forecast': True,
+                }
+                for row in plan_expense_queryset.order_by('period', 'id')
+            ])
+            forecast_income_total = _money(plan_income_queryset.aggregate(total=Sum('amount'))['total'])
+            forecast_expense_total = _money(plan_expense_queryset.aggregate(total=Sum('amount'))['total'])
+
+        detail_rows.sort(key=lambda row: (row['period'], str(row['document_id'] or '')))
+        month_rows = [
+            {
+                **row,
+                'income': _money_str(row['income']),
+                'expense': _money_str(row['expense']),
+            }
+            for _, row in sorted(month_rows_by_period.items(), key=lambda item: item[0])
         ]
 
         wallet_balance_period_queryset = _apply_period_filters(
             wallet_balance_queryset,
             date_from=date_from,
-            date_to=date_to,
+            date_to=actual_date_to,
         )
         if month_day_limit is not None:
             wallet_balance_period_queryset = wallet_balance_period_queryset.filter(period__day__lte=month_day_limit)
@@ -169,14 +283,20 @@ class ReportViewSet(viewsets.ViewSet):
         ]
 
         income_total = _money(
-            queryset.aggregate(total=Sum('amount', filter=Q(amount__gt=0)))['total']
+            _money(queryset.aggregate(total=Sum('amount', filter=Q(amount__gt=0)))['total'])
+            + forecast_income_total
         )
         expense_total = _money(
-            -(queryset.aggregate(total=Sum('amount', filter=Q(amount__lt=0)))['total'] or ZERO_AMOUNT)
+            _money(-(queryset.aggregate(total=Sum('amount', filter=Q(amount__lt=0)))['total'] or ZERO_AMOUNT))
+            + forecast_expense_total
         )
 
         return Response({
-            'filters': _serialize_report_filters(validated, effective_date_to=date_to) if validated.get('limit_by_today') else _serialize_report_filters(validated),
+            'filters': _serialize_report_filters(
+                validated,
+                effective_actual_date_to=actual_date_to,
+                forecast_date_from=forecast_date_from,
+            ),
             'totals': {
                 'income': _money_str(income_total),
                 'expense': _money_str(expense_total),

@@ -359,7 +359,7 @@ export default function ReportsPage() {
   const [monthPickerYear, setMonthPickerYear] = useState(Number((searchParams.get("date_from") || defaultDateFrom).slice(0, 4)) || currentYear)
   const [monthSelectionAnchor, setMonthSelectionAnchor] = useState<string | null>(null)
   const [budgetForecast, setBudgetForecast] = useState(searchParams.get("budget_forecast") !== "false")
-  const [expenseMonthToDate, setExpenseMonthToDate] = useState(searchParams.get("expense_mtd") === "true")
+  const [expenseMonthToDate, setExpenseMonthToDate] = useState(searchParams.get("expense_mtd") !== "false")
   const [budgetProjectId, setBudgetProjectId] = useState(searchParams.get("budget_project") || "")
   const [collapsedMonthlyGroups, setCollapsedMonthlyGroups] = useState<Record<string, boolean>>({})
   const [collapsedBudgetPlanGroups, setCollapsedBudgetPlanGroups] = useState<Record<string, boolean>>({})
@@ -399,10 +399,13 @@ export default function ReportsPage() {
     staleTime: 60_000,
     queryFn: async () => {
       const [cashFlow, limitedExpenseCashFlow, budgetExpense, overview] = await Promise.all([
-        ReportService.getCashFlowReport({ dateFrom, dateTo }),
-        expenseMonthToDate
-          ? ReportService.getCashFlowReport({ dateFrom, dateTo, monthDayLimit: currentMonthDay })
-          : Promise.resolve(null),
+        ReportService.getCashFlowReport({ dateFrom, dateTo, forecastFuture: true }),
+        ReportService.getCashFlowReport({
+          dateFrom,
+          dateTo,
+          limitByToday: true,
+          monthDayLimit: expenseMonthToDate ? currentMonthDay : undefined,
+        }),
         ReportService.getBudgetExpenseReport({
           dateFrom,
           dateTo,
@@ -414,7 +417,7 @@ export default function ReportsPage() {
 
       return {
         cashFlow,
-        expenseCashFlow: limitedExpenseCashFlow ?? cashFlow,
+        expenseCashFlow: limitedExpenseCashFlow,
         budgetExpense,
         overview,
       }
@@ -454,9 +457,9 @@ export default function ReportsPage() {
     setHiddenMonthlyExpenseItemKeys({})
     const params = new URLSearchParams(searchParams.toString())
     if (enabled) {
-      params.set("expense_mtd", "true")
-    } else {
       params.delete("expense_mtd")
+    } else {
+      params.set("expense_mtd", "false")
     }
     router.replace(`/reports?${params.toString()}`, { scroll: false })
   }
@@ -1222,8 +1225,8 @@ export default function ReportsPage() {
       </Card>
 
       <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Доходы за период" value={formatCurrency(incomeTotal)} hint="Все зафиксированные поступления" icon={TrendingUp} tone="positive" />
-        <StatCard label="Расходы за период" value={formatCurrency(expenseTotal)} hint="Все списания по выбранному периоду" icon={TrendingDown} tone="danger" />
+        <StatCard label="Доходы за период" value={formatCurrency(incomeTotal)} hint={isFutureReportDate ? "Факт по текущий месяц, затем план" : "Все зафиксированные поступления"} icon={TrendingUp} tone="positive" />
+        <StatCard label="Расходы за период" value={formatCurrency(expenseTotal)} hint={isFutureReportDate ? "Факт по текущий месяц, затем план" : "Все списания по выбранному периоду"} icon={TrendingDown} tone="danger" />
         <StatCard
           label="Чистый поток"
           value={formatCurrency(netTotal)}
@@ -1451,6 +1454,7 @@ export default function ReportsPage() {
               <div className="space-y-1">
                 <CardTitle>Доходы, расходы и динамика чистого потока</CardTitle>
                 <CardDescription>Главный ответ по периоду: когда деньги приходят, когда уходят и как меняется итог.</CardDescription>
+                {isFutureReportDate ? <Badge variant="secondary">Будущие месяцы — по плану</Badge> : null}
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex gap-2 rounded-[24px] border border-border/70 bg-background/70 p-2">

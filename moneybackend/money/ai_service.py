@@ -1010,15 +1010,21 @@ def _wallet_mentions(text, wallets):
             wallet.get('code'),
             wallet.get('aliases', []),
         )
+        exact_matches = []
         for pattern in patterns:
             normalized_pattern = _normalize_text(pattern)
             if not normalized_pattern:
                 continue
-            position = normalized_text.find(normalized_pattern)
-            if position >= 0:
-                matches.append((position, wallet['name']))
-                matched_wallet_names.add(wallet['name'])
-                break
+            exact_match = re.search(
+                rf'(?<![0-9a-zа-я]){re.escape(normalized_pattern)}(?![0-9a-zа-я])',
+                normalized_text,
+            )
+            if exact_match is not None:
+                exact_matches.append((exact_match.start(), -len(normalized_pattern)))
+        if exact_matches:
+            position, _ = min(exact_matches)
+            matches.append((position, wallet['name']))
+            matched_wallet_names.add(wallet['name'])
         if wallet['name'] in matched_wallet_names:
             continue
         best_match = None

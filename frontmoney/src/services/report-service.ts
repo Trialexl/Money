@@ -11,6 +11,7 @@ type CashFlowReportFilters = BaseReportFilters & {
   wallet?: string
   cashFlowItem?: string
   monthDayLimit?: number
+  forecastFuture?: boolean
 }
 
 type BudgetReportFilters = BaseReportFilters & {
@@ -22,6 +23,7 @@ export interface CashFlowReportMonth {
   period: string
   income: number
   expense: number
+  is_forecast: boolean
 }
 
 export interface CashFlowReportDetail {
@@ -34,6 +36,7 @@ export interface CashFlowReportDetail {
   cash_flow_item_name?: string | null
   income: number
   expense: number
+  is_forecast: boolean
 }
 
 export interface CashFlowWalletOpeningBalance {
@@ -144,6 +147,7 @@ function mapCashFlowReport(raw: any): CashFlowReportResponse {
           period: fromApiDateTime(month?.period) ?? "",
           income: fromApiAmount(month?.income),
           expense: fromApiAmount(month?.expense),
+          is_forecast: Boolean(month?.is_forecast),
         }))
       : [],
     details: Array.isArray(raw?.details)
@@ -157,6 +161,7 @@ function mapCashFlowReport(raw: any): CashFlowReportResponse {
           cash_flow_item_name: detail?.cash_flow_item_name ?? null,
           income: fromApiAmount(detail?.income),
           expense: fromApiAmount(detail?.expense),
+          is_forecast: Boolean(detail?.is_forecast),
         }))
       : [],
   }
@@ -205,6 +210,7 @@ export const ReportService = {
       ...(filters?.wallet ? { wallet: filters.wallet } : {}),
       ...(filters?.cashFlowItem ? { cash_flow_item: filters.cashFlowItem } : {}),
       ...(filters?.monthDayLimit ? { month_day_limit: filters.monthDayLimit } : {}),
+      ...(typeof filters?.forecastFuture === "boolean" ? { forecast_future: filters.forecastFuture } : {}),
     }
 
     const { data } = await api.get<any>("/reports/cash-flow/", { params })
